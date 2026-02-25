@@ -26,7 +26,7 @@ This repository contains a complete setup including global instructions, multi-l
 │   └── golang/                  # Go specific
 ├── mcp/                         # MCP server configurations
 │   ├── README.md                # MCP installation & usage guide
-│   └── mcp-servers.json         # Server definitions (Context7, GitHub, Playwright)
+│   └── mcp-servers.json         # Server definitions (Context7, GitHub, Playwright, Feishu-MCP, Lark-MCP)
 ├── plugins/                     # Plugin marketplace configurations
 │   └── README.md                # Plugin installation guide (9 plugins, 5 marketplaces)
 ├── skills/                      # Custom skills
@@ -142,13 +142,15 @@ This creates a feedback loop where recurring mistakes are permanently eliminated
 
 ## MCP Servers
 
-Three recommended MCP servers for maximum productivity:
+Five recommended MCP servers for maximum productivity:
 
 | Server | Transport | Purpose |
 |--------|-----------|---------|
 | **[Context7](https://github.com/upstash/context7)** | stdio | Injects up-to-date library docs into context — no more outdated API suggestions |
 | **[GitHub](https://github.com/github/github-mcp-server)** | http | PR/Issue management, code review, CI/CD — all from Claude Code |
 | **[Playwright](https://github.com/anthropics/anthropic-quickstarts)** | stdio | Browser automation, E2E testing, screenshots |
+| **[Feishu-MCP](https://github.com/cso1z/Feishu-MCP)** | stdio | Access, edit, and process Feishu documents (search, create, update blocks) |
+| **[Lark-MCP](https://github.com/larksuite/lark-openapi-mcp)** | stdio | Official Feishu/Lark OpenAPI — call Lark platform APIs from AI assistants |
 
 See [`mcp/README.md`](mcp/README.md) for detailed installation and configuration.
 
@@ -184,7 +186,7 @@ See [`plugins/README.md`](plugins/README.md) for the full list with installation
 | **Verification Before Done** | Never mark complete without proving it works |
 | **80% Test Coverage** | TDD workflow enforced: RED → GREEN → REFACTOR |
 | **Multi-Language Rules** | Python, TypeScript, Go — extensible to any language |
-| **MCP Integration** | Context7 + GitHub + Playwright recommended stack |
+| **MCP Integration** | Context7 + GitHub + Playwright + Feishu-MCP + Lark-MCP recommended stack |
 | **Plugin Ecosystem** | 9 plugins for dev workflows, docs, and ML research |
 | **Bypass Permissions** | All tools auto-allowed for maximum speed (opt-in) |
 
