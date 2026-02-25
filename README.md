@@ -111,11 +111,23 @@ Each language file explicitly extends its common counterpart. This avoids duplic
 
 The key differentiator: Claude Code **learns from corrections** across sessions.
 
-```mermaid
-flowchart TD
-    A[User corrects Claude] --> B[Claude writes to memory/lessons.md]
-    B --> C[Next session starts — Claude reviews lessons.md]
-    C --> D[Pattern confirmed — Rule promoted to CLAUDE.md]
+```
+┌─────────────────────────┐
+│   User corrects Claude  │
+└────────────┬────────────┘
+             ▼
+┌─────────────────────────────────────┐
+│ Claude writes to memory/lessons.md  │
+└────────────┬────────────────────────┘
+             ▼
+┌─────────────────────────────────────┐
+│ Next session — reviews lessons.md   │
+└────────────┬────────────────────────┘
+             ▼
+┌─────────────────────────────────────┐
+│ Pattern confirmed → Rule promoted   │
+│ to CLAUDE.md                        │
+└─────────────────────────────────────┘
 ```
 
 This creates a feedback loop where recurring mistakes are permanently eliminated.
@@ -182,15 +194,44 @@ This section describes how all the tools in this configuration work together acr
 
 ### Overview: The Full Pipeline
 
-```mermaid
-flowchart TD
-    START["Feature Request / Bug Report"] --> P
-    P["1. PLANNING<br/>brainstorming → writing-plans → Plan Mode<br/>MCP: Context7 (lookup API docs)"] --> T
-    T["2. TDD<br/>test-driven-development, tdd-workflow<br/>Rules: testing.md (80% coverage) | Agent: tdd-guide"] --> I
-    I["3. IMPLEMENT<br/>coding-standards, *-patterns<br/>Rules: coding-style.md, patterns.md | MCP: Context7"] --> R
-    R["4. REVIEW<br/>code-review, security-review<br/>python-review / go-review | Rules: security.md"] --> E
-    E["5. E2E TEST<br/>e2e, webapp-testing<br/>MCP: Playwright (browser)"] --> C
-    C["6. COMMIT & PR<br/>verification-before-completion<br/>Rules: git-workflow.md | MCP: GitHub"] --> D["Done"]
+```
+┌─────────────────────────────────┐
+│   Feature Request / Bug Report  │
+└───────────────┬─────────────────┘
+                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. PLANNING — brainstorming → writing-plans → Plan Mode        │
+│    MCP: Context7 (lookup API docs)                              │
+└───────────────┬─────────────────────────────────────────────────┘
+                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. TDD — test-driven-development, tdd-workflow                  │
+│    Rules: testing.md (80% coverage) | Agent: tdd-guide          │
+└───────────────┬─────────────────────────────────────────────────┘
+                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. IMPLEMENT — coding-standards, *-patterns                     │
+│    Rules: coding-style.md, patterns.md | MCP: Context7          │
+└───────────────┬─────────────────────────────────────────────────┘
+                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. REVIEW — code-review, security-review                        │
+│    python-review / go-review | Rules: security.md               │
+└───────────────┬─────────────────────────────────────────────────┘
+                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. E2E TEST — e2e, webapp-testing                               │
+│    MCP: Playwright (browser)                                    │
+└───────────────┬─────────────────────────────────────────────────┘
+                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 6. COMMIT & PR — verification-before-completion                 │
+│    Rules: git-workflow.md | MCP: GitHub                         │
+└───────────────┬─────────────────────────────────────────────────┘
+                ▼
+           ┌─────────┐
+           │  Done ✓  │
+           └─────────┘
 ```
 
 ---
@@ -278,10 +319,21 @@ flowchart TD
 **The TDD cycle Claude follows**:
 
 ```
-  RED       → Write a failing test that defines expected behavior
-  GREEN     → Write minimal code to make the test pass
-  REFACTOR  → Clean up while keeping tests green
-  VERIFY    → Check coverage ≥ 80%
+┌─────────┐     ┌──────────────────────────────────────────────────┐
+│   RED   │ ──▶ │ Write a failing test that defines expected behavior │
+└────┬────┘     └──────────────────────────────────────────────────┘
+     ▼
+┌─────────┐     ┌──────────────────────────────────────────────────┐
+│  GREEN  │ ──▶ │ Write minimal code to make the test pass         │
+└────┬────┘     └──────────────────────────────────────────────────┘
+     ▼
+┌──────────┐    ┌──────────────────────────────────────────────────┐
+│ REFACTOR │ ──▶│ Clean up while keeping tests green               │
+└────┬─────┘    └──────────────────────────────────────────────────┘
+     ▼
+┌──────────┐    ┌──────────────────────────────────────────────────┐
+│  VERIFY  │ ──▶│ Check coverage ≥ 80%                             │
+└──────────┘    └──────────────────────────────────────────────────┘
 ```
 
 **Tools activated**:
@@ -396,9 +448,15 @@ flowchart TD
 **What Claude checks**:
 
 ```
-  1. Code review    → Style, correctness, edge cases
-  2. Security scan  → OWASP Top 10, secrets, injection
-  3. Language review → Python/Go/TS-specific idioms
+┌───────────────────┐     ┌─────────────────────────────────────┐
+│ 1. Code review    │ ──▶ │ Style, correctness, edge cases      │
+└───────────────────┘     └─────────────────────────────────────┘
+┌───────────────────┐     ┌─────────────────────────────────────┐
+│ 2. Security scan  │ ──▶ │ OWASP Top 10, secrets, injection    │
+└───────────────────┘     └─────────────────────────────────────┘
+┌───────────────────┐     ┌─────────────────────────────────────┐
+│ 3. Language review│ ──▶ │ Python/Go/TS-specific idioms        │
+└───────────────────┘     └─────────────────────────────────────┘
 ```
 
 **Tools activated**:
@@ -509,11 +567,21 @@ flowchart TD
 **The commit flow**:
 
 ```
-1. Verify everything works        → run tests, check logs
-2. Stage specific files            → git add (never git add -A blindly)
-3. Commit with conventional format → feat: / fix: / refactor: / test:
-4. Push and create PR              → GitHub MCP handles it
-5. PR includes summary + test plan
+┌──────────────────────────────────┐     ┌──────────────────────────────────┐
+│ 1. Verify everything works       │ ──▶ │ run tests, check logs            │
+└──────────────────────────────────┘     └──────────────────────────────────┘
+┌──────────────────────────────────┐     ┌──────────────────────────────────┐
+│ 2. Stage specific files          │ ──▶ │ git add (never git add -A)       │
+└──────────────────────────────────┘     └──────────────────────────────────┘
+┌──────────────────────────────────┐     ┌──────────────────────────────────┐
+│ 3. Commit with conventional fmt  │ ──▶ │ feat: / fix: / refactor: / test: │
+└──────────────────────────────────┘     └──────────────────────────────────┘
+┌──────────────────────────────────┐     ┌──────────────────────────────────┐
+│ 4. Push and create PR            │ ──▶ │ GitHub MCP handles it            │
+└──────────────────────────────────┘     └──────────────────────────────────┘
+┌──────────────────────────────────┐     ┌──────────────────────────────────┐
+│ 5. PR includes                   │ ──▶ │ summary + test plan              │
+└──────────────────────────────────┘     └──────────────────────────────────┘
 ```
 
 **Tools activated**:
@@ -565,12 +633,29 @@ flowchart TD
 **The debugging cycle Claude follows**:
 
 ```
-  1. Reproduce the issue with a minimal test case
-  2. Form hypothesis about root cause
-  3. Add diagnostic logging/assertions
-  4. Fix the root cause (not symptoms)
-  5. Verify fix with the reproduction test
-  6. Check for similar issues elsewhere
+┌─────────────────────────────────────────────┐
+│ 1. Reproduce with a minimal test case       │
+└──────────────────────┬──────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────┐
+│ 2. Form hypothesis about root cause         │
+└──────────────────────┬──────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────┐
+│ 3. Add diagnostic logging / assertions      │
+└──────────────────────┬──────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────┐
+│ 4. Fix the root cause (not symptoms)        │
+└──────────────────────┬──────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────┐
+│ 5. Verify fix with the reproduction test    │
+└──────────────────────┬──────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────┐
+│ 6. Check for similar issues elsewhere       │
+└─────────────────────────────────────────────┘
 ```
 
 **Tools activated**:
@@ -657,9 +742,15 @@ flowchart TD
 **How it works**:
 
 ```
-Session 1: User corrects Claude → lesson saved to memory/lessons.md
-Session 2: Claude reads lessons.md at start → avoids same mistake
-Session N: Pattern confirmed across sessions → rule promoted to CLAUDE.md
+┌──────────────┐     ┌─────────────────────────┐     ┌────────────────────────────┐
+│  Session 1   │ ──▶ │ User corrects Claude    │ ──▶ │ Saved to lessons.md        │
+└──────────────┘     └─────────────────────────┘     └────────────────────────────┘
+┌──────────────┐     ┌─────────────────────────┐     ┌────────────────────────────┐
+│  Session 2   │ ──▶ │ Reads lessons.md        │ ──▶ │ Avoids same mistake        │
+└──────────────┘     └─────────────────────────┘     └────────────────────────────┘
+┌──────────────┐     ┌─────────────────────────┐     ┌────────────────────────────┐
+│  Session N   │ ──▶ │ Pattern confirmed       │ ──▶ │ Promoted to CLAUDE.md      │
+└──────────────┘     └─────────────────────────┘     └────────────────────────────┘
 ```
 
 **Tools activated**:
