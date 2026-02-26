@@ -59,7 +59,7 @@ parse_args() {
         return
     fi
 
-    INSTALL_ALL=false
+    local has_component=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -68,6 +68,7 @@ parse_args() {
                 shift
                 ;;
             --rules)
+                has_component=true
                 INSTALL_RULES=true
                 shift
                 while [[ $# -gt 0 && ! "$1" =~ ^-- ]]; do
@@ -76,26 +77,32 @@ parse_args() {
                 done
                 ;;
             --skills)
+                has_component=true
                 INSTALL_SKILLS=true
                 shift
                 ;;
             --lessons)
+                has_component=true
                 INSTALL_LESSONS=true
                 shift
                 ;;
             --mcp)
+                has_component=true
                 INSTALL_MCP=true
                 shift
                 ;;
             --plugins)
+                has_component=true
                 INSTALL_PLUGINS=true
                 shift
                 ;;
             --claude-md)
+                has_component=true
                 INSTALL_CLAUDE_MD=true
                 shift
                 ;;
             --settings)
+                has_component=true
                 INSTALL_SETTINGS=true
                 shift
                 ;;
@@ -109,12 +116,18 @@ parse_args() {
                 ;;
             *)
                 # Legacy mode: treat bare args as language names
+                has_component=true
                 INSTALL_RULES=true
                 RULE_LANGS+=("$1")
                 shift
                 ;;
         esac
     done
+
+    # Only disable INSTALL_ALL when specific components are requested
+    if $has_component; then
+        INSTALL_ALL=false
+    fi
 }
 
 backup_if_exists() {
@@ -170,7 +183,10 @@ install_rules() {
     fi
 
     # Install language-specific rules
-    local langs=("${RULE_LANGS[@]}")
+    local langs=()
+    if [[ ${#RULE_LANGS[@]} -gt 0 ]]; then
+        langs=("${RULE_LANGS[@]}")
+    fi
     if [[ ${#langs[@]} -eq 0 ]]; then
         for lang_dir in "$SCRIPT_DIR"/rules/*/; do
             local lang
@@ -260,13 +276,13 @@ install_plugins() {
         return 1
     fi
 
-    # Marketplaces
-    declare -A MARKETPLACES=(
-        ["anthropic-agent-skills"]="anthropics/skills"
-        ["everything-claude-code"]="affaan-m/everything-claude-code"
-        ["ai-research-skills"]="zechenzhangAGI/AI-research-SKILLs"
-        ["claude-plugins-official"]="anthropics/claude-plugins-official"
-        ["thedotmack"]="thedotmack/claude-mem"
+    # Marketplaces: "name|github_repo"
+    local marketplace_list=(
+        "anthropic-agent-skills|anthropics/skills"
+        "everything-claude-code|affaan-m/everything-claude-code"
+        "ai-research-skills|zechenzhangAGI/AI-research-SKILLs"
+        "claude-plugins-official|anthropics/claude-plugins-official"
+        "thedotmack|thedotmack/claude-mem"
     )
 
     # Plugins
@@ -294,8 +310,9 @@ install_plugins() {
 
     # Step 1: Add marketplaces
     info "Adding marketplaces..."
-    for marketplace in "${!MARKETPLACES[@]}"; do
-        local repo="${MARKETPLACES[$marketplace]}"
+    for entry in "${marketplace_list[@]}"; do
+        local marketplace="${entry%%|*}"
+        local repo="${entry##*|}"
         if $DRY_RUN; then
             info "Would add marketplace: $marketplace (github.com/$repo)"
         else
@@ -313,7 +330,7 @@ install_plugins() {
         if $DRY_RUN; then
             info "Would install plugin: $plugin_name from $marketplace"
         else
-            claude plugin install "$plugin_name" --marketplace "$marketplace" 2>/dev/null && \
+            claude plugin install "${plugin_name}@${marketplace}" 2>/dev/null && \
                 ok "Plugin installed: $plugin_name" || \
                 warn "Plugin $plugin_name may already be installed"
         fi
