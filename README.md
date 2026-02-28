@@ -1,4 +1,4 @@
-**English** | [中文](https://github.com/Mizoreww/claude-code-config/blob/zh-CN/README.md)
+**English** | [中文](./README.zh-CN.md) | [Codex Branch](https://github.com/Mizoreww/claude-code-config/tree/codex)
 
 # Claude Code Configuration
 
