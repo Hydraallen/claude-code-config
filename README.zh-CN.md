@@ -14,7 +14,7 @@
 ├── settings.json          # 设置（权限、插件、hooks、模型）
 ├── lessons.md             # 自我纠正日志模板（通过 hook 自动加载）
 ├── rules/                 # 多语言编码标准（common + python/typescript/golang）
-├── mcp/                   # MCP 服务器配置（仅 Lark-MCP）
+├── mcp/                   # MCP 服务器配置（Lark-MCP、Codex CLI）
 ├── plugins/               # 插件安装指南（19 个插件，5 个市场）
 ├── skills/                # 自定义技能（paper-reading）
 ├── VERSION                # 语义化版本号
@@ -55,7 +55,7 @@ cd claude-code-config
 | lessons.md | 是（已存在则跳过） | `--lessons` |
 | Plugins（core，14 个） | 是 | `--plugins` |
 | Plugins（ai-research，5 个） | 否 | `--plugins ai-research` |
-| MCP（Lark） | 否 | `--mcp` |
+| MCP（Lark、Codex CLI） | 否 | `--mcp` |
 
 ### 选择性安装
 
@@ -64,7 +64,7 @@ cd claude-code-config
 ./install.sh --plugins                  # 仅核心插件（14 个）
 ./install.sh --plugins all              # 全部插件（19 个）
 ./install.sh --plugins ai-research      # 仅 AI 研究类插件（5 个）
-./install.sh --mcp                      # 仅 MCP（Lark）
+./install.sh --mcp                      # MCP（Lark、Codex CLI）
 ```
 
 ### 卸载
@@ -107,6 +107,12 @@ cd claude-code-config
 - **hooks.SessionStart**：按 `matcher` 字段去重
 
 没有 `jq` 时，会显示手动合并提示。
+
+### 通过 Codex CLI 进行代码审查
+
+CLAUDE.md 中包含 **Code Review** 规则：无论是用户要求还是 skill（如 `code-reviewer`、`simplify`）触发的代码审查，Claude 都必须调用 `mcp__codex-cli__review` 工具（基于 [codex-mcp-server](https://github.com/tuannvm/codex-mcp-server)），而非仅用文字描述。这实现了跨模型审查：Claude 负责编排，Codex 执行实际的 diff 分析。
+
+使用 `--mcp` 安装 Codex CLI MCP 服务器以启用此功能。
 
 ### 分层规则
 

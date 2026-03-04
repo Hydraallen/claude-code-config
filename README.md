@@ -14,7 +14,7 @@ Production-ready configuration for [Claude Code](https://claude.com/claude-code)
 ├── settings.json          # Settings (permissions, plugins, hooks, model)
 ├── lessons.md             # Self-correction log template (auto-loaded via hook)
 ├── rules/                 # Multi-language coding standards (common + python/typescript/golang)
-├── mcp/                   # MCP server config (Lark-MCP only)
+├── mcp/                   # MCP server config (Lark-MCP, Codex CLI)
 ├── plugins/               # Plugin installation guide (19 plugins, 5 marketplaces)
 ├── skills/                # Custom skills (paper-reading)
 ├── VERSION                # Semantic version number
@@ -55,7 +55,7 @@ cd claude-code-config
 | lessons.md | Yes (skip if exists) | `--lessons` |
 | Plugins (core, 14) | Yes | `--plugins` |
 | Plugins (ai-research, 5) | No | `--plugins ai-research` |
-| MCP (Lark) | No | `--mcp` |
+| MCP (Lark, Codex CLI) | No | `--mcp` |
 
 ### Selective Install
 
@@ -64,7 +64,7 @@ cd claude-code-config
 ./install.sh --plugins                  # Core plugins only (14)
 ./install.sh --plugins all              # All plugins (19)
 ./install.sh --plugins ai-research      # AI research plugins only (5)
-./install.sh --mcp                      # MCP only (Lark)
+./install.sh --mcp                      # MCP (Lark, Codex CLI)
 ```
 
 ### Uninstall
@@ -107,6 +107,12 @@ When `settings.json` already exists, the installer performs a smart merge (requi
 - **hooks.SessionStart**: Deduplicated by `matcher` field
 
 Without `jq`, a manual merge warning is shown instead.
+
+### Code Review via Codex CLI
+
+CLAUDE.md includes a **Code Review** rule: whenever a code review is needed — whether requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — Claude must invoke the `mcp__codex-cli__review` tool (powered by [codex-mcp-server](https://github.com/tuannvm/codex-mcp-server)) instead of providing text-only feedback. This enables cross-model review: Claude orchestrates while Codex performs the actual diff analysis.
+
+Install the Codex CLI MCP server with `--mcp` to enable this feature.
 
 ### Layered Rules
 
