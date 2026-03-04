@@ -53,10 +53,24 @@ source $HOME/anaconda3/etc/profile.d/conda.sh && conda activate <env_name>
 - Verify before marking done (run tests, check logs)
 - Fix bugs directly — don't ask for repeated confirmation
 
+## Version Changelog
+
+When making version-level changes to a project (new features, major refactors, architectural changes, breaking changes), maintain a `CHANGELOG.md` in the project root:
+
+```markdown
+## [version] - YYYY-MM-DD
+### Features
+- What was changed
+### Design Rationale
+- Why it was done this way, what trade-offs were considered
+### Notes & Caveats
+- Edge cases, compatibility, migration concerns, etc.
+```
+
+- Not every commit needs an entry — only update on **version-level changes**
+- Does not conflict with CLAUDE.md: CLAUDE.md manages instructions, CHANGELOG.md tracks evolution
+- Create the file proactively if it doesn't exist
+
 ## Code Review
 
 Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — always invoke the `mcp__codex-cli__review` tool to perform it. Never substitute the actual review call with a text-only description.
-
-## Paper Reading
-
-Prefer `ar5iv.labs.arxiv.org` HTML version; fall back to PDF. Screenshot important figures with Playwright. Provide structured summary (problem, method, contributions, experiments). If content is unreachable, say so immediately.
