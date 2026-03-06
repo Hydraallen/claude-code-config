@@ -70,6 +70,12 @@ if [ -z "$usage_5h" ]; then
     fi
 fi
 
+# Fallback: use expired cache if API failed
+if [ -z "$usage_5h" ] && [ -f "$USAGE_CACHE" ]; then
+    usage_5h=$(jq -r '.five_hour.utilization // empty' "$USAGE_CACHE" 2>/dev/null)
+    usage_resets=$(jq -r '.five_hour.resets_at // empty' "$USAGE_CACHE" 2>/dev/null)
+fi
+
 # --- Colors ---
 C_MODEL="\033[38;5;183m"
 C_DIR="\033[38;5;117m"
