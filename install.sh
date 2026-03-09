@@ -170,6 +170,7 @@ Usage: $(basename "$0") [OPTIONS]
 Install Claude Code configuration files.
 
 Running without options launches an interactive component selector.
+Works with both local and piped installs (curl | bash).
 
 Options:
     --all               Install everything (non-interactive)
@@ -184,7 +185,8 @@ Examples:
     $(basename "$0") --all                           # Install everything
     $(basename "$0") --uninstall                     # Uninstall everything
     $(basename "$0") --dry-run --all                 # Preview full install
-    bash <(curl -fsSL $REPO_URL/raw/main/install.sh) --all  # Remote install
+    bash <(curl -fsSL $REPO_URL/raw/main/install.sh)        # Remote install (interactive)
+    bash <(curl -fsSL $REPO_URL/raw/main/install.sh) --all  # Remote install (everything)
 EOF
 }
 
@@ -241,12 +243,21 @@ PLUGINS_AI_RESEARCH=(
     "optimization@ai-research-skills"
 )
 
+# --- Terminal detection (single source of truth) -----------------------
+
+# Can we interact with a human? Returns 0 if stdout is a tty AND we can
+# read keyboard input (either stdin is a tty or /dev/tty is accessible).
+can_interact() {
+    [[ -t 1 ]] && { [[ -t 0 ]] || [[ -r /dev/tty ]]; }
+}
+
 # --- Argument parsing ---------------------------------------------------
 
 parse_args() {
     if [[ $# -eq 0 ]]; then
-        # No args: interactive mode if terminal, else install all
-        if [[ -t 0 && -t 1 ]]; then
+        # No args: interactive mode if terminal available (including piped installs
+        # like "curl | bash" where /dev/tty is still accessible), else install all
+        if can_interact; then
             INTERACTIVE=true
         else
             INSTALL_ALL=true
@@ -296,7 +307,7 @@ parse_args() {
 
     # Only modifier flags (--dry-run, --force) with no action
     if ! $has_action; then
-        if [[ -t 0 && -t 1 ]]; then
+        if can_interact; then
             INTERACTIVE=true
         else
             INSTALL_ALL=true
@@ -307,6 +318,17 @@ parse_args() {
 # --- Interactive menu ---------------------------------------------------
 
 interactive_menu() {
+    # Open a file descriptor for keyboard input.
+    # Prefer stdin when it's a real tty (normal execution); fall back to /dev/tty
+    # for piped installs (curl | bash) where stdin carries the script.
+    if [[ -t 0 ]]; then
+        exec 3<&0
+    elif ! exec 3</dev/tty 2>/dev/null; then
+        warn "Cannot open terminal for interactive input, falling back to default install"
+        INSTALL_ALL=true
+        return
+    fi
+
     # Item format: "label|description|default_on|id"
     local items=(
         "CLAUDE.md|Global instructions template|1|claude-md"
@@ -342,23 +364,24 @@ interactive_menu() {
         "12|12|MCP Servers"
     )
 
-    # Save terminal state
+    # Save terminal state (operate on fd 3 which points to the actual tty)
     local saved_stty
-    saved_stty=$(stty -g 2>/dev/null) || saved_stty=""
+    saved_stty=$(stty -g <&3 2>/dev/null) || saved_stty=""
 
     _menu_cleanup() {
-        [[ -n "$saved_stty" ]] && stty "$saved_stty" 2>/dev/null || stty echo 2>/dev/null || true
+        [[ -n "$saved_stty" ]] && stty "$saved_stty" <&3 2>/dev/null || stty echo <&3 2>/dev/null || true
         tput cnorm 2>/dev/null || printf '\033[?25h'
+        exec 3<&- 2>/dev/null || true
     }
     trap '_menu_cleanup; exit 0' INT TERM
 
     _read_key() {
         local key
-        IFS= read -r -s -n 1 key 2>/dev/null || true
+        IFS= read -r -s -n 1 key <&3 2>/dev/null || true
 
         if [[ "$key" == $'\033' ]]; then
             local rest=""
-            IFS= read -r -s -n 2 -t 1 rest 2>/dev/null || true
+            IFS= read -r -s -n 2 -t 1 rest <&3 2>/dev/null || true
             case "$rest" in
                 '[A') echo "UP" ;;
                 '[B') echo "DOWN" ;;
@@ -434,9 +457,9 @@ interactive_menu() {
         echo ""
     }
 
-    # Hide cursor, disable echo
+    # Hide cursor, disable echo (operate on fd 3 = actual tty)
     tput civis 2>/dev/null || printf '\033[?25l'
-    stty -echo 2>/dev/null || true
+    stty -echo <&3 2>/dev/null || true
 
     # Main loop
     while true; do
@@ -480,7 +503,7 @@ interactive_menu() {
         esac
     done
 
-    # Restore terminal
+    # Restore terminal (fd 3 closed by _menu_cleanup)
     _menu_cleanup
     trap - INT TERM
 
@@ -519,12 +542,18 @@ confirm() {
     if $FORCE; then
         return 0
     fi
-    if [[ ! -t 0 ]]; then
+    if ! can_interact; then
         error "Non-interactive shell detected. Use --force to skip confirmation."
         exit 1
     fi
-    echo -en "${YELLOW}${prompt} [y/N] ${NC}"
-    read -r answer
+    if [[ -t 0 ]]; then
+        echo -en "${YELLOW}${prompt} [y/N] ${NC}"
+        read -r answer
+    else
+        # Piped stdin: send prompt AND read answer via /dev/tty so they stay paired
+        echo -en "${YELLOW}${prompt} [y/N] ${NC}" > /dev/tty
+        read -r answer </dev/tty
+    fi
     [[ "$answer" =~ ^[Yy]$ ]]
 }
 

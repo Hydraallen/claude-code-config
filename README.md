@@ -32,8 +32,10 @@ Production-ready configuration for [Claude Code](https://claude.com/claude-code)
 **One-line remote install** (no clone needed):
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.sh) --all
+bash <(curl -fsSL https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.sh)
 ```
+
+This launches the interactive selector. Add `--all` to install everything non-interactively.
 
 **Local install** (from clone):
 
@@ -51,6 +53,8 @@ cd awesome-claude-code-config
 ```powershell
 irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.ps1 | iex
 ```
+
+This launches the interactive selector. Use `.\install.ps1 -All` from a local clone for non-interactive full install.
 
 **From CMD**:
 

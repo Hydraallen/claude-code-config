@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.1] - 2026-03-09
+
+### Features
+- **Remote install now interactive by default**: One-line installs (`curl | bash`, `bash <(curl ...)`) launch the interactive selector — reads keyboard from `/dev/tty` when stdin is piped, or from stdin directly when it's a tty
+- **`confirm()` prompt also supports piped stdin**: Uninstall confirmation prompts now pair output and input through the same device (`/dev/tty` when piped, stdout+stdin when normal)
+- **Centralized terminal detection**: Single `can_interact()` function replaces duplicated checks across `parse_args`, `interactive_menu`, and `confirm`
+
+### Design Rationale
+- `bash <(curl ...)` already preserves terminal stdin; the `/dev/tty` fallback specifically enables `curl URL | bash` where stdin carries the script
+- Interactive menu prefers stdin (fd 0) when it's a tty, only opening `/dev/tty` as fallback — no regression for containers missing `/dev/tty`
+- Only falls back to default install (essential plugins only) when neither stdin nor `/dev/tty` is available (e.g., headless CI)
+
 ## [1.5.0] - 2026-03-09
 
 ### Features
@@ -26,12 +38,12 @@
 - Interactive menu replaces the need to remember CLI flags — users see all options at a glance with sensible defaults
 - CLI flag removal: component-selection flags are redundant with the interactive menu; `--all` is the only non-interactive install path needed
 - claude-mem separated as standalone toggle — it's the only plugin injecting ~3k tokens at SessionStart (observation index + session summary); other Extended plugins only register tool/skill names
-- Non-interactive fallback preserved: piped installs (`curl | bash`) install essential plugins only (no MCP); explicit `--all` installs everything including MCP and all plugin groups
+- Non-interactive fallback preserved: headless/CI installs (no tty at all) install essential plugins only (no MCP); explicit `--all` installs everything including MCP and all plugin groups
 - Unknown/removed CLI flags now exit with error instead of silently degrading
 
 ### Notes & Caveats
 - `--all` now installs everything (all plugins, MCP, all language rules)
-- Remote install (`bash <(curl ...) --all`) requires `--all` flag now — bare remote install without args falls back to install-all since stdin is not a terminal
+- Remote install (`bash <(curl ...)`) now shows interactive menu by default (v1.5.1+); add `--all` for non-interactive full install
 
 ## [1.3.0] - 2026-03-09
 

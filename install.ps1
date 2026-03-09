@@ -874,6 +874,7 @@ Usage: .\install.ps1 [OPTIONS]
 Install Claude Code configuration files.
 
 Running without options launches an interactive component selector.
+Works with both local and remote installs (irm | iex).
 
 Options:
     -All                Install everything (non-interactive)
@@ -888,7 +889,7 @@ Examples:
     .\install.ps1 -All             # Install everything
     .\install.ps1 -Uninstall       # Uninstall everything
     .\install.ps1 -DryRun -All     # Preview full install
-    irm $REPO_URL/raw/main/install.ps1 | iex  # Remote install
+    irm $REPO_URL/raw/main/install.ps1 | iex  # Remote install (interactive selector)
 
 "@
 }

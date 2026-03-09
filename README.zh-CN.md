@@ -32,8 +32,10 @@
 **一行远程安装**（无需 clone）：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.sh) --all
+bash <(curl -fsSL https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.sh)
 ```
+
+自动弹出交互式选择器。添加 `--all` 可跳过选择直接安装全部。
 
 **本地安装**（从 clone）：
 
@@ -51,6 +53,8 @@ cd awesome-claude-code-config
 ```powershell
 irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.ps1 | iex
 ```
+
+自动弹出交互式选择器。如需非交互安装全部，请从本地 clone 运行 `.\install.ps1 -All`。
 
 **CMD 环境**：
 
