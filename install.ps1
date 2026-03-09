@@ -5,29 +5,17 @@
 .DESCRIPTION
     https://github.com/Mizoreww/awesome-claude-code-config
 .EXAMPLE
-    .\install.ps1                           # Install everything (core plugins)
-    .\install.ps1 -Rules python,golang      # Install common + Python + Go rules
-    .\install.ps1 -Plugins                  # Core plugins only
-    .\install.ps1 -Plugins -PluginGroup all # All plugins
-    .\install.ps1 -Uninstall               # Uninstall everything
-    .\install.ps1 -DryRun                  # Preview changes
+    .\install.ps1                  # Interactive selector
+    .\install.ps1 -All             # Install everything (non-interactive)
+    .\install.ps1 -Uninstall       # Uninstall everything
+    .\install.ps1 -DryRun          # Preview changes
     # Remote install:
     irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.ps1 | iex
 #>
 
 param(
     [switch]$All,
-    [string[]]$Rules,
-    [switch]$Skills,
-    [switch]$Lessons,
-    [switch]$Hooks,
-    [switch]$Mcp,
-    [switch]$Plugins,
-    [string]$PluginGroup = "core",
-    [switch]$ClaudeMd,
-    [switch]$Settings,
     [switch]$Uninstall,
-    [string[]]$UninstallComponents,
     [switch]$Version,
     [switch]$DryRun,
     [switch]$Force,
@@ -168,6 +156,244 @@ function Confirm-Action {
     return ($answer -match '^[Yy]$')
 }
 
+# --- Plugin groups ---------------------------------------------------------
+
+$PLUGINS_ESSENTIAL = @(
+    "everything-claude-code@everything-claude-code"
+    "superpowers@claude-plugins-official"
+    "code-review@claude-plugins-official"
+    "context7@claude-plugins-official"
+    "commit-commands@claude-plugins-official"
+    "document-skills@anthropic-agent-skills"
+    "playwright@claude-plugins-official"
+    "feature-dev@claude-plugins-official"
+    "code-simplifier@claude-plugins-official"
+    "ralph-loop@claude-plugins-official"
+    "frontend-design@claude-plugins-official"
+    "example-skills@anthropic-agent-skills"
+    "github@claude-plugins-official"
+)
+
+$PLUGINS_CLAUDE_MEM = @(
+    "claude-mem@thedotmack"
+)
+
+$PLUGINS_AI_RESEARCH = @(
+    "tokenization@ai-research-skills"
+    "fine-tuning@ai-research-skills"
+    "post-training@ai-research-skills"
+    "inference-serving@ai-research-skills"
+    "distributed-training@ai-research-skills"
+    "optimization@ai-research-skills"
+)
+
+$MARKETPLACE_LIST = @(
+    @{ Name = "anthropic-agent-skills"; Repo = "anthropics/skills" }
+    @{ Name = "everything-claude-code"; Repo = "affaan-m/everything-claude-code" }
+    @{ Name = "ai-research-skills"; Repo = "zechenzhangAGI/AI-research-SKILLs" }
+    @{ Name = "claude-plugins-official"; Repo = "anthropics/claude-plugins-official" }
+    @{ Name = "thedotmack"; Repo = "thedotmack/claude-mem" }
+)
+
+# --- Interactive menu ------------------------------------------------------
+
+function Show-InteractiveMenu {
+    # Item format: label, description, default_on, id
+    $items = @(
+        @{ Label = "CLAUDE.md";            Desc = "Global instructions template";                   Default = $true;  Id = "claude-md" }
+        @{ Label = "settings.json";        Desc = "Smart-merged Claude Code settings";              Default = $true;  Id = "settings" }
+        @{ Label = "Common rules";         Desc = "Coding style, git, security, testing";           Default = $true;  Id = "rules-common" }
+        @{ Label = "Hooks";                Desc = "StatusLine display hook";                        Default = $true;  Id = "hooks" }
+        @{ Label = "Lessons template";     Desc = "Cross-session learning framework";               Default = $true;  Id = "lessons" }
+        @{ Label = "Custom skills";        Desc = "adversarial-review, paper-reading";              Default = $true;  Id = "skills" }
+        @{ Label = "Python rules";         Desc = "PEP 8, pytest, type hints, bandit";              Default = $false; Id = "rules-python" }
+        @{ Label = "TypeScript rules";     Desc = "Zod, Playwright, immutability";                  Default = $false; Id = "rules-ts" }
+        @{ Label = "Go rules";             Desc = "gofmt, table-driven tests, gosec";               Default = $false; Id = "rules-go" }
+        @{ Label = "Plugins (13)";         Desc = "superpowers, code-review, playwright, ...";      Default = $true;  Id = "plugins-essential" }
+        @{ Label = "claude-mem";           Desc = "Cross-session memory (~3k tokens/session)";      Default = $false; Id = "plugins-claude-mem" }
+        @{ Label = "AI Research plugins";  Desc = "fine-tuning, inference, optimization, ...";      Default = $false; Id = "plugins-ai-research" }
+        @{ Label = "Lark MCP server";      Desc = "Feishu/Lark integration";                        Default = $false; Id = "mcp" }
+    )
+
+    $groups = @(
+        @{ Start = 0;  End = 5;  Label = "Core" }
+        @{ Start = 6;  End = 8;  Label = "Language Rules  (only install what your projects need)" }
+        @{ Start = 9;  End = 11; Label = "Plugins" }
+        @{ Start = 12; End = 12; Label = "MCP Servers" }
+    )
+
+    $n = $items.Count
+    $selected = @()
+    for ($i = 0; $i -lt $n; $i++) {
+        $selected += $items[$i].Default
+    }
+
+    $cursor = 0
+    $submitIndex = $n  # Submit button is at index $n
+
+    # Save cursor visibility
+    $savedCursorVisible = [Console]::CursorVisible
+    [Console]::CursorVisible = $false
+
+    try {
+        while ($true) {
+            # Draw menu
+            [Console]::Clear()
+            Write-Host ""
+            Write-Host "  =========================================" -ForegroundColor White
+            Write-Host "  Awesome Claude Code Config Installer" -ForegroundColor White
+            Write-Host "  $(Get-SourceVersion)" -ForegroundColor White
+            Write-Host "  =========================================" -ForegroundColor White
+            Write-Host ""
+            Write-Host "  " -NoNewline; Write-Host "Up/Down move  Enter select  a=all n=none d=defaults q=quit" -ForegroundColor DarkGray
+            Write-Host ""
+
+            foreach ($group in $groups) {
+                Write-Host "  $($group.Label)" -ForegroundColor Cyan
+
+                for ($j = $group.Start; $j -le $group.End; $j++) {
+                    $item = $items[$j]
+                    $isCursor = ($j -eq $cursor)
+
+                    # Indicator
+                    if ($isCursor) {
+                        Write-Host "  " -NoNewline
+                        Write-Host "> " -ForegroundColor Green -NoNewline
+                    } else {
+                        Write-Host "    " -NoNewline
+                    }
+
+                    # Checkbox
+                    Write-Host "[" -NoNewline
+                    if ($selected[$j]) {
+                        Write-Host "x" -ForegroundColor Green -NoNewline
+                    } else {
+                        Write-Host " " -NoNewline
+                    }
+                    Write-Host "] " -NoNewline
+
+                    # Label + description
+                    $label = $item.Label.PadRight(24)
+                    if ($isCursor) {
+                        Write-Host $label -ForegroundColor White -NoNewline
+                    } else {
+                        Write-Host $label -NoNewline
+                    }
+                    Write-Host " $($item.Desc)" -ForegroundColor DarkGray
+                }
+                Write-Host ""
+            }
+
+            # Submit button
+            if ($cursor -eq $submitIndex) {
+                Write-Host "  " -NoNewline
+                Write-Host "> " -ForegroundColor Green -NoNewline
+                Write-Host "[ Submit ]" -ForegroundColor Green
+            } else {
+                Write-Host "     " -NoNewline
+                Write-Host "[ Submit ]" -ForegroundColor DarkGray
+            }
+            Write-Host ""
+
+            # Read key
+            $key = [Console]::ReadKey($true)
+
+            switch ($key.Key) {
+                ([ConsoleKey]::UpArrow) {
+                    if ($cursor -gt 0) { $cursor-- }
+                }
+                ([ConsoleKey]::DownArrow) {
+                    if ($cursor -lt $submitIndex) { $cursor++ }
+                }
+                ([ConsoleKey]::Enter) {
+                    if ($cursor -eq $submitIndex) {
+                        break  # Submit
+                    } else {
+                        $selected[$cursor] = -not $selected[$cursor]
+                    }
+                }
+                ([ConsoleKey]::Spacebar) {
+                    if ($cursor -eq $submitIndex) {
+                        break  # Submit
+                    } else {
+                        $selected[$cursor] = -not $selected[$cursor]
+                    }
+                }
+                default {
+                    switch ($key.KeyChar) {
+                        'a' { for ($i = 0; $i -lt $n; $i++) { $selected[$i] = $true } }
+                        'A' { for ($i = 0; $i -lt $n; $i++) { $selected[$i] = $true } }
+                        'n' { for ($i = 0; $i -lt $n; $i++) { $selected[$i] = $false } }
+                        'N' { for ($i = 0; $i -lt $n; $i++) { $selected[$i] = $false } }
+                        'd' { for ($i = 0; $i -lt $n; $i++) { $selected[$i] = $items[$i].Default } }
+                        'D' { for ($i = 0; $i -lt $n; $i++) { $selected[$i] = $items[$i].Default } }
+                        'q' {
+                            [Console]::CursorVisible = $savedCursorVisible
+                            Write-Host ""
+                            Write-Info "Cancelled."
+                            exit 0
+                        }
+                        'Q' {
+                            [Console]::CursorVisible = $savedCursorVisible
+                            Write-Host ""
+                            Write-Info "Cancelled."
+                            exit 0
+                        }
+                        'j' { if ($cursor -lt $submitIndex) { $cursor++ } }
+                        'J' { if ($cursor -lt $submitIndex) { $cursor++ } }
+                        'k' { if ($cursor -gt 0) { $cursor-- } }
+                        'K' { if ($cursor -gt 0) { $cursor-- } }
+                    }
+                }
+            }
+
+            # Check if we should break (Enter/Space on Submit)
+            if ($cursor -eq $submitIndex -and ($key.Key -eq [ConsoleKey]::Enter -or $key.Key -eq [ConsoleKey]::Spacebar)) {
+                break
+            }
+        }
+    } finally {
+        [Console]::CursorVisible = $savedCursorVisible
+    }
+
+    # Map selections to return value
+    $result = @{
+        ClaudeMd       = $false
+        Settings       = $false
+        Rules          = $false
+        RuleLangs      = @()
+        RuleLangsExplicit = $true
+        Hooks          = $false
+        Lessons        = $false
+        Skills         = $false
+        Plugins        = $false
+        PluginGroups   = @()
+        Mcp            = $false
+    }
+
+    for ($i = 0; $i -lt $n; $i++) {
+        if (-not $selected[$i]) { continue }
+
+        switch ($items[$i].Id) {
+            "claude-md"        { $result.ClaudeMd = $true }
+            "settings"         { $result.Settings = $true }
+            "rules-common"     { $result.Rules = $true }
+            "hooks"            { $result.Hooks = $true }
+            "lessons"          { $result.Lessons = $true }
+            "skills"           { $result.Skills = $true }
+            "rules-python"     { $result.Rules = $true; $result.RuleLangs += "python" }
+            "rules-ts"         { $result.Rules = $true; $result.RuleLangs += "typescript" }
+            "rules-go"         { $result.Rules = $true; $result.RuleLangs += "golang" }
+            "plugins-essential"   { $result.Plugins = $true; $result.PluginGroups += "essential" }
+            "plugins-claude-mem"  { $result.Plugins = $true; $result.PluginGroups += "claude-mem" }
+            "plugins-ai-research" { $result.Plugins = $true; $result.PluginGroups += "ai-research" }
+            "mcp"              { $result.Mcp = $true }
+        }
+    }
+
+    return $result
+}
+
 # --- Install functions -----------------------------------------------------
 
 function Install-ClaudeMd {
@@ -282,6 +508,11 @@ function Install-Settings {
 }
 
 function Install-Rules {
+    param(
+        [string[]]$Langs = @(),
+        [bool]$LangsExplicit = $false
+    )
+
     Write-Info "Installing rules..."
     $rulesDir = Join-Path $CLAUDE_DIR "rules"
     New-Item -ItemType Directory -Path $rulesDir -Force | Out-Null
@@ -298,16 +529,18 @@ function Install-Rules {
     }
 
     # Determine languages
-    $langs = @()
-    if ($Rules -and $Rules.Count -gt 0) {
-        $langs = $Rules
-    } else {
+    $installLangs = @()
+    if ($Langs.Count -gt 0) {
+        $installLangs = $Langs
+    } elseif (-not $LangsExplicit) {
+        # Auto-detect: install all available languages (--all mode)
         Get-ChildItem (Join-Path $SCRIPT_DIR "rules") -Directory | ForEach-Object {
-            if ($_.Name -ne "common") { $langs += $_.Name }
+            if ($_.Name -ne "common") { $installLangs += $_.Name }
         }
     }
+    # If LangsExplicit=true and Langs is empty, skip language rules
 
-    foreach ($lang in $langs) {
+    foreach ($lang in $installLangs) {
         $langSrc = Join-Path $SCRIPT_DIR "rules\$lang"
         if (Test-Path $langSrc) {
             $langDst = Join-Path $rulesDir $lang
@@ -320,6 +553,25 @@ function Install-Rules {
             }
         } else {
             Write-Err "Language rules not found: $lang"
+        }
+    }
+
+    # Clean up known language rule dirs that were NOT selected (from previous installs)
+    # Only removes languages this installer knows about; preserves user-created dirs
+    if ($LangsExplicit) {
+        $knownLangs = @("python", "typescript", "golang")
+        foreach ($known in $knownLangs) {
+            if ($installLangs -notcontains $known) {
+                $langDir = Join-Path $rulesDir $known
+                if (Test-Path $langDir) {
+                    if ($DryRun) {
+                        Write-Info "Would remove unselected: $langDir"
+                    } else {
+                        Remove-Item $langDir -Recurse -Force
+                        Write-Ok "Removed unselected rules: $known"
+                    }
+                }
+            }
         }
     }
 
@@ -450,55 +702,33 @@ function Install-Mcp {
     }
 }
 
-# --- Plugin groups ---------------------------------------------------------
-
-$PLUGINS_CORE = @(
-    "document-skills@anthropic-agent-skills"
-    "example-skills@anthropic-agent-skills"
-    "everything-claude-code@everything-claude-code"
-    "claude-mem@thedotmack"
-    "frontend-design@claude-plugins-official"
-    "context7@claude-plugins-official"
-    "superpowers@claude-plugins-official"
-    "code-review@claude-plugins-official"
-    "github@claude-plugins-official"
-    "playwright@claude-plugins-official"
-    "feature-dev@claude-plugins-official"
-    "code-simplifier@claude-plugins-official"
-    "ralph-loop@claude-plugins-official"
-    "commit-commands@claude-plugins-official"
-)
-
-$PLUGINS_AI_RESEARCH = @(
-    "tokenization@ai-research-skills"
-    "fine-tuning@ai-research-skills"
-    "post-training@ai-research-skills"
-    "inference-serving@ai-research-skills"
-    "distributed-training@ai-research-skills"
-    "optimization@ai-research-skills"
-)
-
-$MARKETPLACE_LIST = @(
-    @{ Name = "anthropic-agent-skills"; Repo = "anthropics/skills" }
-    @{ Name = "everything-claude-code"; Repo = "affaan-m/everything-claude-code" }
-    @{ Name = "ai-research-skills"; Repo = "zechenzhangAGI/AI-research-SKILLs" }
-    @{ Name = "claude-plugins-official"; Repo = "anthropics/claude-plugins-official" }
-    @{ Name = "thedotmack"; Repo = "thedotmack/claude-mem" }
-)
-
 function Install-Plugins {
-    Write-Info "Installing plugins (group: $PluginGroup)..."
+    param(
+        [string[]]$Groups = @("essential")
+    )
+
     $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
     if (-not $claudeCmd) {
         Write-Err "Claude Code CLI not found. Install it first: https://claude.com/claude-code"
         return
     }
 
-    $plugins = switch ($PluginGroup) {
-        "core"        { $PLUGINS_CORE }
-        "ai-research" { $PLUGINS_AI_RESEARCH }
-        "all"         { $PLUGINS_CORE + $PLUGINS_AI_RESEARCH }
+    # Collect plugins from all selected groups
+    $plugins = @()
+    foreach ($group in $Groups) {
+        switch ($group) {
+            "essential" { $plugins += $PLUGINS_ESSENTIAL }
+            "claude-mem" { $plugins += $PLUGINS_CLAUDE_MEM }
+            "ai-research" { $plugins += $PLUGINS_AI_RESEARCH }
+            "all" { $plugins += $PLUGINS_ESSENTIAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_AI_RESEARCH }
+        }
     }
+
+    # Deduplicate
+    $plugins = $plugins | Select-Object -Unique
+
+    $groupNames = $Groups -join ","
+    Write-Info "Installing plugins (groups: $groupNames)..."
 
     # Collect needed marketplaces
     $neededMarketplaces = @{}
@@ -527,9 +757,8 @@ function Install-Plugins {
     foreach ($entry in $plugins) {
         $parts = $entry -split '@'
         $pluginName = $parts[0]
-        $marketplace = $parts[1]
         if ($DryRun) {
-            Write-Info "Would install plugin: $pluginName from $marketplace"
+            Write-Info "Would install plugin: $pluginName from $($parts[1])"
         } else {
             $ok = Invoke-Retry -MaxAttempts 5 -DelaySeconds 3 -Description "Install plugin $pluginName" -Action {
                 & claude plugin install "$entry" 2>$null
@@ -543,25 +772,16 @@ function Install-Plugins {
 # --- Uninstall -------------------------------------------------------------
 
 function Invoke-Uninstall {
-    $components = $UninstallComponents
-    if (-not $components -or $components.Count -eq 0) {
-        $components = @("claude-md", "settings", "rules", "skills", "lessons", "hooks", "plugins", "mcp")
-    }
-
     Write-Host ""
     Write-Warn "The following will be removed:"
-    foreach ($comp in $components) {
-        switch ($comp) {
-            "claude-md" { Write-Host "  - $CLAUDE_DIR\CLAUDE.md" }
-            "settings"  { Write-Host "  - $CLAUDE_DIR\settings.json" }
-            "rules"     { Write-Host "  - $CLAUDE_DIR\rules\" }
-            "skills"    { Write-Host "  - $CLAUDE_DIR\skills\ (installer-managed only)" }
-            "lessons"   { Write-Host "  - $CLAUDE_DIR\lessons.md" }
-            "hooks"     { Write-Host "  - $CLAUDE_DIR\hooks\ (installer-managed only)" }
-            "plugins"   { Write-Host "  - Installed plugins (requires claude CLI)" }
-            "mcp"       { Write-Host "  - MCP server: lark-mcp (requires claude CLI)" }
-        }
-    }
+    Write-Host "  - $CLAUDE_DIR\CLAUDE.md"
+    Write-Host "  - $CLAUDE_DIR\settings.json (backed up first)"
+    Write-Host "  - $CLAUDE_DIR\rules\"
+    Write-Host "  - $CLAUDE_DIR\skills\ (installer-managed only)"
+    Write-Host "  - $CLAUDE_DIR\lessons.md"
+    Write-Host "  - $CLAUDE_DIR\hooks\ (installer-managed only)"
+    Write-Host "  - Installed plugins (requires claude CLI)"
+    Write-Host "  - MCP server: lark-mcp (requires claude CLI)"
     if (Test-Path $VERSION_STAMP_FILE) {
         Write-Host "  - $VERSION_STAMP_FILE"
     }
@@ -577,84 +797,66 @@ function Invoke-Uninstall {
         exit 0
     }
 
-    foreach ($comp in $components) {
-        switch ($comp) {
-            "claude-md" {
-                $p = Join-Path $CLAUDE_DIR "CLAUDE.md"
-                if (Test-Path $p) { Remove-Item $p -Force; Write-Ok "Removed CLAUDE.md" }
-            }
-            "settings" {
-                $p = Join-Path $CLAUDE_DIR "settings.json"
-                if (Test-Path $p) {
-                    $bak = Join-Path $CLAUDE_DIR "settings.json.bak"
-                    Copy-Item $p $bak -Force
-                    Write-Ok "Backed up settings.json -> settings.json.bak"
-                    Remove-Item $p -Force; Write-Ok "Removed settings.json"
-                }
-            }
-            "rules" {
-                $p = Join-Path $CLAUDE_DIR "rules"
-                if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Ok "Removed rules/" }
-            }
-            "skills" {
-                $skillsSrc = Join-Path $SCRIPT_DIR "skills"
-                if (Test-Path $skillsSrc) {
-                    Get-ChildItem $skillsSrc -Directory | ForEach-Object {
-                        $p = Join-Path $CLAUDE_DIR "skills\$($_.Name)"
-                        if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Ok "Removed skill: $($_.Name)" }
-                    }
-                } else {
-                    $p = Join-Path $CLAUDE_DIR "skills"
-                    if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Ok "Removed skills/" }
-                }
-            }
-            "lessons" {
-                $p = Join-Path $CLAUDE_DIR "lessons.md"
-                if (Test-Path $p) { Remove-Item $p -Force; Write-Ok "Removed lessons.md" }
-            }
-            "hooks" {
-                $hooksSrc = Join-Path $SCRIPT_DIR "hooks"
-                if (Test-Path $hooksSrc) {
-                    Get-ChildItem $hooksSrc -File | ForEach-Object {
-                        $p = Join-Path $CLAUDE_DIR "hooks\$($_.Name)"
-                        if (Test-Path $p) { Remove-Item $p -Force; Write-Ok "Removed hook: $($_.Name)" }
-                    }
-                } else {
-                    $p = Join-Path $CLAUDE_DIR "hooks"
-                    if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Ok "Removed hooks/" }
-                }
-            }
-            "plugins" {
-                $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
-                if ($claudeCmd) {
-                    $allPlugins = $PLUGINS_CORE + $PLUGINS_AI_RESEARCH
-                    foreach ($entry in $allPlugins) {
-                        $pluginName = ($entry -split '@')[0]
-                        try {
-                            & claude plugin uninstall $entry 2>$null
-                            Write-Ok "Uninstalled plugin: $pluginName"
-                        } catch {
-                            Write-Warn "Could not uninstall: $pluginName"
-                        }
-                    }
-                } else {
-                    Write-Warn "Claude CLI not found - cannot uninstall plugins"
-                }
-            }
-            "mcp" {
-                $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
-                if ($claudeCmd) {
-                    try {
-                        & claude mcp remove lark-mcp 2>$null
-                        Write-Ok "Removed MCP server: lark-mcp"
-                    } catch {
-                        Write-Warn "Could not remove lark-mcp"
-                    }
-                } else {
-                    Write-Warn "Claude CLI not found - cannot remove MCP servers"
-                }
+    $p = Join-Path $CLAUDE_DIR "CLAUDE.md"
+    if (Test-Path $p) { Remove-Item $p -Force; Write-Ok "Removed CLAUDE.md" }
+
+    $p = Join-Path $CLAUDE_DIR "settings.json"
+    if (Test-Path $p) {
+        Copy-Item $p (Join-Path $CLAUDE_DIR "settings.json.bak") -Force
+        Write-Ok "Backed up settings.json -> settings.json.bak"
+        Remove-Item $p -Force; Write-Ok "Removed settings.json"
+    }
+
+    $p = Join-Path $CLAUDE_DIR "rules"
+    if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Ok "Removed rules/" }
+
+    # Only remove skills that ship with this repo
+    $skillsSrc = Join-Path $SCRIPT_DIR "skills"
+    if (Test-Path $skillsSrc) {
+        Get-ChildItem $skillsSrc -Directory | ForEach-Object {
+            $sp = Join-Path $CLAUDE_DIR "skills\$($_.Name)"
+            if (Test-Path $sp) { Remove-Item $sp -Recurse -Force; Write-Ok "Removed skill: $($_.Name)" }
+        }
+    } else {
+        $p = Join-Path $CLAUDE_DIR "skills"
+        if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Ok "Removed skills/" }
+    }
+
+    $p = Join-Path $CLAUDE_DIR "lessons.md"
+    if (Test-Path $p) { Remove-Item $p -Force; Write-Ok "Removed lessons.md" }
+
+    # Only remove hooks that ship with this repo
+    $hooksSrc = Join-Path $SCRIPT_DIR "hooks"
+    if (Test-Path $hooksSrc) {
+        Get-ChildItem $hooksSrc -File | ForEach-Object {
+            $hp = Join-Path $CLAUDE_DIR "hooks\$($_.Name)"
+            if (Test-Path $hp) { Remove-Item $hp -Force; Write-Ok "Removed hook: $($_.Name)" }
+        }
+    } else {
+        $p = Join-Path $CLAUDE_DIR "hooks"
+        if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Ok "Removed hooks/" }
+    }
+
+    $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
+    if ($claudeCmd) {
+        $allPlugins = $PLUGINS_ESSENTIAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_AI_RESEARCH
+        foreach ($entry in $allPlugins) {
+            $pluginName = ($entry -split '@')[0]
+            & claude plugin uninstall $entry 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Ok "Uninstalled plugin: $pluginName"
+            } else {
+                Write-Warn "Could not uninstall: $pluginName"
             }
         }
+        & claude mcp remove lark-mcp 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "Removed MCP server: lark-mcp"
+        } else {
+            Write-Warn "Could not remove lark-mcp"
+        }
+    } else {
+        Write-Warn "Claude CLI not found - cannot uninstall plugins or MCP servers"
     }
 
     if (Test-Path $VERSION_STAMP_FILE) { Remove-Item $VERSION_STAMP_FILE -Force }
@@ -671,33 +873,22 @@ Usage: .\install.ps1 [OPTIONS]
 
 Install Claude Code configuration files.
 
+Running without options launches an interactive component selector.
+
 Options:
-    -All                    Install everything (default; MCP excluded, see -Mcp)
-    -Rules LANG[,LANG...]   Install common + specific language rules
-                            Available: python, typescript, golang
-    -Skills                 Install custom skills only
-    -Lessons                Install lessons.md template only
-    -Hooks                  Install hooks (statusline) only
-    -Mcp                    Install MCP servers (Lark) - not included in -All
-    -Plugins [-PluginGroup] Install plugins (default: core)
-                            Groups: core, ai-research, all
-    -ClaudeMd               Install CLAUDE.md only
-    -Settings               Install settings.json only
-    -Uninstall [-UninstallComponents] Remove installed files
-    -Version                Show version info
-    -DryRun                 Show what would be installed without doing it
-    -Force                  Skip confirmation prompts
-    -Help                   Show this help
+    -All                Install everything (non-interactive)
+    -Uninstall          Remove all installed files
+    -Version            Show version info
+    -DryRun             Show what would be installed without doing it
+    -Force              Skip confirmation prompts
+    -Help               Show this help
 
 Examples:
-    .\install.ps1                                       # Install everything
-    .\install.ps1 -Rules python,golang                  # Common + Python + Go rules
-    .\install.ps1 -Plugins                              # Core plugins only
-    .\install.ps1 -Plugins -PluginGroup all             # All plugins
-    .\install.ps1 -Uninstall                            # Uninstall everything
-    .\install.ps1 -Uninstall -UninstallComponents rules # Uninstall rules only
-    .\install.ps1 -DryRun                               # Preview changes
-    irm $REPO_URL/raw/main/install.ps1 | iex            # Remote install
+    .\install.ps1                  # Interactive selector
+    .\install.ps1 -All             # Install everything
+    .\install.ps1 -Uninstall       # Uninstall everything
+    .\install.ps1 -DryRun -All     # Preview full install
+    irm $REPO_URL/raw/main/install.ps1 | iex  # Remote install
 
 "@
 }
@@ -718,9 +909,81 @@ function Main {
         return
     }
 
-    # Determine if any specific component was requested
-    $hasComponent = ($Rules -and $Rules.Count -gt 0) -or $Skills -or $Lessons -or $Hooks -or $Mcp -or $Plugins -or $ClaudeMd -or $Settings
-    $installAll = (-not $hasComponent) -or $All
+    # Determine mode
+    $doClaudeMd = $false
+    $doSettings = $false
+    $doRules = $false
+    $doSkills = $false
+    $doLessons = $false
+    $doHooks = $false
+    $doPlugins = $false
+    $doMcp = $false
+    $ruleLangs = @()
+    $ruleLangsExplicit = $false
+    $pluginGroups = @()
+
+    if ($All) {
+        # Explicit -All: install everything including MCP
+        $doClaudeMd = $true
+        $doSettings = $true
+        $doRules = $true
+        $doSkills = $true
+        $doLessons = $true
+        $doHooks = $true
+        $doPlugins = $true
+        $doMcp = $true
+        $pluginGroups = @("all")
+    } elseif ([Environment]::UserInteractive -and $Host.Name -eq "ConsoleHost") {
+        # Interactive mode: show menu (with fallback if console APIs fail)
+        $menuResult = $null
+        try {
+            $menuResult = Show-InteractiveMenu
+        } catch {
+            Write-Warn "Interactive menu unavailable: $_"
+            Write-Info "Falling back to default install (essential plugins, no MCP)"
+        }
+        if ($null -ne $menuResult) {
+            $doClaudeMd = $menuResult.ClaudeMd
+            $doSettings = $menuResult.Settings
+            $doRules = $menuResult.Rules
+            $doSkills = $menuResult.Skills
+            $doLessons = $menuResult.Lessons
+            $doHooks = $menuResult.Hooks
+            $doPlugins = $menuResult.Plugins
+            $doMcp = $menuResult.Mcp
+            $ruleLangs = $menuResult.RuleLangs
+            $ruleLangsExplicit = $menuResult.RuleLangsExplicit
+            $pluginGroups = $menuResult.PluginGroups
+        } else {
+            # Fallback when interactive menu failed
+            $doClaudeMd = $true
+            $doSettings = $true
+            $doRules = $true
+            $doSkills = $true
+            $doLessons = $true
+            $doHooks = $true
+            $doPlugins = $true
+            $pluginGroups = @("essential")
+        }
+    } else {
+        # Non-interactive fallback: essential plugins, no MCP
+        $doClaudeMd = $true
+        $doSettings = $true
+        $doRules = $true
+        $doSkills = $true
+        $doLessons = $true
+        $doHooks = $true
+        $doPlugins = $true
+        $pluginGroups = @("essential")
+    }
+
+    # Check if anything was selected
+    if (-not $doClaudeMd -and -not $doSettings -and -not $doRules -and
+        -not $doSkills -and -not $doLessons -and -not $doHooks -and
+        -not $doPlugins -and -not $doMcp) {
+        Write-Warn "Nothing selected to install."
+        return
+    }
 
     $sourceVer = Get-SourceVersion
     Write-Host ""
@@ -744,25 +1007,14 @@ function Main {
         New-Item -ItemType Directory -Path $CLAUDE_DIR -Force | Out-Null
     }
 
-    if ($installAll) {
-        Install-ClaudeMd
-        Install-Settings
-        Install-Rules
-        Install-Skills
-        Install-Lessons
-        Install-Hooks
-        # MCP is NOT included in -All; use -Mcp explicitly
-        Install-Plugins
-    } else {
-        if ($ClaudeMd) { Install-ClaudeMd }
-        if ($Settings) { Install-Settings }
-        if ($Rules -and $Rules.Count -gt 0) { Install-Rules }
-        if ($Skills) { Install-Skills }
-        if ($Lessons) { Install-Lessons }
-        if ($Hooks) { Install-Hooks }
-        if ($Mcp) { Install-Mcp }
-        if ($Plugins) { Install-Plugins }
-    }
+    if ($doClaudeMd) { Install-ClaudeMd }
+    if ($doSettings) { Install-Settings }
+    if ($doRules) { Install-Rules -Langs $ruleLangs -LangsExplicit $ruleLangsExplicit }
+    if ($doSkills) { Install-Skills }
+    if ($doLessons) { Install-Lessons }
+    if ($doHooks) { Install-Hooks }
+    if ($doMcp) { Install-Mcp }
+    if ($doPlugins) { Install-Plugins -Groups $pluginGroups }
 
     if (-not $DryRun) {
         if ($InstallWarnings -eq 0) {
@@ -781,11 +1033,10 @@ function Main {
     Write-Host ""
     Write-Info "Next steps:"
     Write-Host "  1. Restart Claude Code for changes to take effect"
-    if ($Mcp) {
-        Write-Host "  2. Replace YOUR_APP_ID/YOUR_APP_SECRET in Lark MCP config"
+    Write-Host "  2. Customize CLAUDE.md for your specific projects"
+    if ($doMcp) {
+        Write-Host "  3. Replace YOUR_APP_ID/YOUR_APP_SECRET in Lark MCP config"
     }
-    Write-Host "  3. Customize CLAUDE.md for your specific projects"
-    Write-Host "  4. Review settings.json and merge with your existing config"
     Write-Host ""
 }
 

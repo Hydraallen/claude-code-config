@@ -63,7 +63,7 @@ powershell -c "irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-cod
 ```powershell
 git clone https://github.com/Mizoreww/awesome-claude-code-config.git
 cd awesome-claude-code-config
-.\install.ps1             # 安装全部
+.\install.ps1             # 交互式选择器
 ```
 
 ### 交互式安装
@@ -119,10 +119,11 @@ cd awesome-claude-code-config
 ```
 
 ```powershell
-# PowerShell（Windows）— 仍支持 -Rules, -Plugins, -Mcp 参数
-.\install.ps1                    # 安装全部
-.\install.ps1 -Uninstall        # 删除全部
-.\install.ps1 -Version          # 显示版本信息
+# PowerShell（Windows）
+.\install.ps1              # 交互式选择器
+.\install.ps1 -All         # 安装全部（非交互）
+.\install.ps1 -Uninstall   # 删除全部
+.\install.ps1 -Version     # 显示版本信息
 ```
 
 ### 卸载

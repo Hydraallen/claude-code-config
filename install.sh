@@ -663,28 +663,25 @@ install_rules() {
         fi
     done
 
-    # Clean up language rule dirs that were NOT selected (from previous installs)
+    # Clean up known language rule dirs that were NOT selected (from previous installs)
+    # Only removes languages this installer knows about; preserves user-created dirs
     if $RULE_LANGS_EXPLICIT; then
-        for existing_dir in "$CLAUDE_DIR"/rules/*/; do
-            [[ -d "$existing_dir" ]] || continue
-            local dir_name
-            dir_name=$(basename "$existing_dir")
-            [[ "$dir_name" == "common" ]] && continue
-
+        local known_langs=("python" "typescript" "golang")
+        for known in "${known_langs[@]}"; do
             local keep=false
             for lang in "${langs[@]}"; do
-                if [[ "$lang" == "$dir_name" ]]; then
+                if [[ "$lang" == "$known" ]]; then
                     keep=true
                     break
                 fi
             done
 
-            if ! $keep; then
+            if ! $keep && [[ -d "$CLAUDE_DIR/rules/$known" ]]; then
                 if $DRY_RUN; then
-                    info "Would remove unselected: $CLAUDE_DIR/rules/$dir_name/"
+                    info "Would remove unselected: $CLAUDE_DIR/rules/$known/"
                 else
-                    rm -rf "$existing_dir"
-                    ok "Removed unselected rules: $dir_name"
+                    rm -rf "$CLAUDE_DIR/rules/$known"
+                    ok "Removed unselected rules: $known"
                 fi
             fi
         done

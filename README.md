@@ -63,7 +63,7 @@ powershell -c "irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-cod
 ```powershell
 git clone https://github.com/Mizoreww/awesome-claude-code-config.git
 cd awesome-claude-code-config
-.\install.ps1             # Install everything
+.\install.ps1             # Interactive selector
 ```
 
 ### Interactive Installer
@@ -119,10 +119,11 @@ Use ↑↓ to navigate, Enter to toggle, navigate to Submit and press Enter to i
 ```
 
 ```powershell
-# PowerShell (Windows) — still supports -Rules, -Plugins, -Mcp flags
-.\install.ps1                    # Install everything
-.\install.ps1 -Uninstall        # Remove everything
-.\install.ps1 -Version          # Show version info
+# PowerShell (Windows)
+.\install.ps1              # Interactive selector
+.\install.ps1 -All         # Install everything (non-interactive)
+.\install.ps1 -Uninstall   # Remove everything
+.\install.ps1 -Version     # Show version info
 ```
 
 ### Uninstall

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0] - 2026-03-09
+
+### Features
+- **Windows interactive installer**: `install.ps1` now has the same arrow-key interactive menu as bash, using `[Console]::ReadKey()` for navigation
+- **Windows CLI simplified**: PowerShell params reduced to `-All`, `-Uninstall`, `-Version`, `-DryRun`, `-Force` (matching bash)
+- **Windows plugin groups aligned**: Essential (13) + claude-mem (1) + AI Research (6) structure now matches bash installer
+- **Windows language rule cleanup**: Unselected language dirs are auto-removed, matching bash behavior
+
 ## [1.4.0] - 2026-03-09
 
 ### Features
@@ -24,7 +32,6 @@
 ### Notes & Caveats
 - `--all` now installs everything (all plugins, MCP, all language rules)
 - Remote install (`bash <(curl ...) --all`) requires `--all` flag now — bare remote install without args falls back to install-all since stdin is not a terminal
-- Windows `install.ps1` not yet updated with interactive menu or plugin group split
 
 ## [1.3.0] - 2026-03-09
 
