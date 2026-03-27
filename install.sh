@@ -1113,6 +1113,22 @@ install_plugins() {
             fi
         fi
     done
+
+    # Fix execute permissions on plugin shell scripts
+    # Git clone / GitHub tarballs do not preserve the execute bit, causing
+    # "Permission denied" errors when Claude Code runs hook scripts.
+    if ! $DRY_RUN; then
+        local fixed=0
+        while IFS= read -r -d '' sh_file; do
+            chmod +x "$sh_file"
+            (( fixed++ ))
+        done < <(find "$HOME/.claude/plugins/marketplaces" -name "*.sh" -type f ! -perm -u+x -print0 2>/dev/null)
+        if (( fixed > 0 )); then
+            ok "Fixed execute permissions on $fixed plugin shell script(s)"
+        fi
+    else
+        info "Would fix execute permissions on plugin shell scripts"
+    fi
 }
 
 # --- Uninstall ----------------------------------------------------------
