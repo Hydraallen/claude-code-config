@@ -216,6 +216,7 @@ function Show-InteractiveMenu {
         @{ Label = "Hooks";                Desc = "StatusLine display hook";                        Default = $true;  Id = "hooks" }
         @{ Label = "Lessons template";     Desc = "Cross-session learning framework";               Default = $true;  Id = "lessons" }
         @{ Label = "Custom skills";        Desc = "adversarial-review, paper-reading, humanizer";   Default = $true;  Id = "skills" }
+        @{ Label = "Search agent";         Desc = "Jeff read-only web search agent";                Default = $true;  Id = "agents" }
         @{ Label = "Python rules";         Desc = "PEP 8, pytest, type hints, bandit";              Default = $false; Id = "rules-python" }
         @{ Label = "TypeScript rules";     Desc = "Zod, Playwright, immutability";                  Default = $false; Id = "rules-ts" }
         @{ Label = "Go rules";             Desc = "gofmt, table-driven tests, gosec";               Default = $false; Id = "rules-go" }
@@ -224,14 +225,14 @@ function Show-InteractiveMenu {
         @{ Label = "AI Research plugins";  Desc = "fine-tuning, inference, optimization, ...";      Default = $false; Id = "plugins-ai-research" }
         @{ Label = "claude-health";        Desc = "Health check & wellness dashboard";               Default = $false; Id = "plugins-health" }
         @{ Label = "PUA";                 Desc = "AI agent productivity booster (pua, pua-en, pua-ja)"; Default = $false; Id = "plugins-pua" }
-        @{ Label = "Lark MCP server";      Desc = "Feishu/Lark integration";                        Default = $false; Id = "mcp" }
+        @{ Label = "MCP Servers";            Desc = "Lark + Playwright integration";                  Default = $false; Id = "mcp" }
     )
 
     $groups = @(
-        @{ Start = 0;  End = 5;  Label = "Core" }
-        @{ Start = 6;  End = 8;  Label = "Language Rules  (only install what your projects need)" }
-        @{ Start = 9;  End = 13; Label = "Plugins" }
-        @{ Start = 14; End = 14; Label = "MCP Servers" }
+        @{ Start = 0;  End = 6;  Label = "Core" }
+        @{ Start = 7;  End = 9;  Label = "Language Rules  (only install what your projects need)" }
+        @{ Start = 10; End = 14; Label = "Plugins" }
+        @{ Start = 15; End = 15; Label = "MCP Servers" }
     )
 
     $n = $items.Count
@@ -378,6 +379,7 @@ function Show-InteractiveMenu {
         Hooks          = $false
         Lessons        = $false
         Skills         = $false
+        Agents         = $false
         Plugins        = $false
         PluginGroups   = @()
         Mcp            = $false
@@ -393,6 +395,7 @@ function Show-InteractiveMenu {
             "hooks"            { $result.Hooks = $true }
             "lessons"          { $result.Lessons = $true }
             "skills"           { $result.Skills = $true }
+            "agents"           { $result.Agents = $true }
             "rules-python"     { $result.Rules = $true; $result.RuleLangs += "python" }
             "rules-ts"         { $result.Rules = $true; $result.RuleLangs += "typescript" }
             "rules-go"         { $result.Rules = $true; $result.RuleLangs += "golang" }
@@ -617,6 +620,20 @@ function Install-Skills {
     }
 }
 
+function Install-Agents {
+    Write-Info "Installing custom agents..."
+    $agentDir = Join-Path $CLAUDE_DIR "agents"
+    if (-not (Test-Path $agentDir)) { New-Item -ItemType Directory -Path $agentDir -Force | Out-Null }
+    Get-ChildItem (Join-Path $SCRIPT_DIR "agents") -Filter "*.md" | ForEach-Object {
+        if ($DryRun) {
+            Write-Info "Would copy: agents/$($_.Name) -> $agentDir\$($_.Name)"
+        } else {
+            Copy-Item $_.FullName (Join-Path $agentDir $_.Name) -Force
+            Write-Ok "Agent installed: $($_.Name)"
+        }
+    }
+}
+
 function Install-Lessons {
     Write-Info "Installing lessons.md template..."
     $target = Join-Path $CLAUDE_DIR "lessons.md"
@@ -761,6 +778,17 @@ function Install-Mcp {
         else { Write-Warn "MCP server lark-mcp may already exist or could not be added, skipping" }
         Write-Warn "Replace YOUR_APP_ID and YOUR_APP_SECRET with your Feishu credentials"
     }
+
+    # Playwright MCP
+    if ($DryRun) {
+        Write-Info "Would add MCP server: playwright (stdio)"
+    } else {
+        $ok = Invoke-Retry -MaxAttempts 5 -DelaySeconds 3 -Description "Add MCP server playwright" -Action {
+            & claude mcp add --scope user --transport stdio playwright -- npx @playwright/mcp@latest 2>$null
+        }
+        if ($ok) { Write-Ok "MCP server added: playwright" }
+        else { Write-Warn "MCP server playwright may already exist or could not be added, skipping" }
+    }
 }
 
 function Install-Plugins {
@@ -849,10 +877,11 @@ function Invoke-Uninstall {
     Write-Host "  - $CLAUDE_DIR\settings.json (backed up first)"
     Write-Host "  - $CLAUDE_DIR\rules\"
     Write-Host "  - $CLAUDE_DIR\skills\ (installer-managed only)"
+    Write-Host "  - $CLAUDE_DIR\agents\ (installer-managed only)"
     Write-Host "  - $CLAUDE_DIR\lessons.md"
     Write-Host "  - $CLAUDE_DIR\hooks\ (installer-managed only)"
     Write-Host "  - Installed plugins (requires claude CLI)"
-    Write-Host "  - MCP server: lark-mcp (requires claude CLI)"
+    Write-Host "  - MCP servers: lark-mcp, playwright (requires claude CLI)"
     if (Test-Path $VERSION_STAMP_FILE) {
         Write-Host "  - $VERSION_STAMP_FILE"
     }
@@ -893,6 +922,18 @@ function Invoke-Uninstall {
         if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Ok "Removed skills/" }
     }
 
+    # Only remove agents that ship with this repo
+    $agentsSrc = Join-Path $SCRIPT_DIR "agents"
+    if (Test-Path $agentsSrc) {
+        Get-ChildItem $agentsSrc -Filter "*.md" | ForEach-Object {
+            $ap = Join-Path $CLAUDE_DIR "agents\$($_.Name)"
+            if (Test-Path $ap) { Remove-Item $ap -Force; Write-Ok "Removed agent: $($_.Name)" }
+        }
+    } else {
+        $p = Join-Path $CLAUDE_DIR "agents"
+        if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Ok "Removed agents/" }
+    }
+
     $p = Join-Path $CLAUDE_DIR "lessons.md"
     if (Test-Path $p) { Remove-Item $p -Force; Write-Ok "Removed lessons.md" }
 
@@ -925,6 +966,12 @@ function Invoke-Uninstall {
             Write-Ok "Removed MCP server: lark-mcp"
         } else {
             Write-Warn "Could not remove lark-mcp"
+        }
+        & claude mcp remove playwright 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "Removed MCP server: playwright"
+        } else {
+            Write-Warn "Could not remove playwright"
         }
     } else {
         Write-Warn "Claude CLI not found - cannot uninstall plugins or MCP servers"
@@ -986,6 +1033,7 @@ function Main {
     $doSettings = $false
     $doRules = $false
     $doSkills = $false
+    $doAgents = $false
     $doLessons = $false
     $doHooks = $false
     $doPlugins = $false
@@ -1000,6 +1048,7 @@ function Main {
         $doSettings = $true
         $doRules = $true
         $doSkills = $true
+        $doAgents = $true
         $doLessons = $true
         $doHooks = $true
         $doPlugins = $true
@@ -1019,6 +1068,7 @@ function Main {
             $doSettings = $menuResult.Settings
             $doRules = $menuResult.Rules
             $doSkills = $menuResult.Skills
+            $doAgents = $menuResult.Agents
             $doLessons = $menuResult.Lessons
             $doHooks = $menuResult.Hooks
             $doPlugins = $menuResult.Plugins
@@ -1051,7 +1101,7 @@ function Main {
 
     # Check if anything was selected
     if (-not $doClaudeMd -and -not $doSettings -and -not $doRules -and
-        -not $doSkills -and -not $doLessons -and -not $doHooks -and
+        -not $doSkills -and -not $doAgents -and -not $doLessons -and -not $doHooks -and
         -not $doPlugins -and -not $doMcp) {
         Write-Warn "Nothing selected to install."
         return
@@ -1083,6 +1133,7 @@ function Main {
     if ($doSettings) { Install-Settings }
     if ($doRules) { Install-Rules -Langs $ruleLangs -LangsExplicit $ruleLangsExplicit }
     if ($doSkills) { Install-Skills }
+    if ($doAgents) { Install-Agents }
     if ($doLessons) { Install-Lessons }
     if ($doHooks) { Install-Hooks }
     if ($doMcp) { Install-Mcp }

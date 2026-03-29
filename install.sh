@@ -296,12 +296,14 @@ EXPLICIT_ALL=false
 INSTALL_WARNINGS=0
 INSTALL_RULES=false
 INSTALL_SKILLS=false
+INSTALL_AGENTS=false
 INSTALL_LESSONS=false
 INSTALL_STATUSLINE=false
 INSTALL_MCP=false
 INSTALL_PLUGINS=false
 INSTALL_CLAUDE_MD=false
 INSTALL_SETTINGS=false
+INSTALL_SHELL_WRAPPER=false
 UNINSTALL=false
 FORCE=false
 SHOW_VERSION=false
@@ -443,6 +445,8 @@ interactive_menu() {
         "StatusLine|Gradient progress bar & usage display|1|statusline"
         "Lessons|lessons.md template + SessionStart hook|1|lessons"
         "Custom skills|adversarial-review, paper-reading, humanizer|1|skills"
+        "Search agent|Jeff read-only web search agent|1|agents"
+        "Shell wrapper|cl/cl_auto zsh functions + system prompt|1|shell-wrapper"
         "Python rules|PEP 8, pytest, type hints, bandit|0|rules-python"
         "TypeScript rules|Zod, Playwright, immutability|0|rules-ts"
         "Go rules|gofmt, table-driven tests, gosec|0|rules-go"
@@ -451,7 +455,7 @@ interactive_menu() {
         "AI Research plugins|fine-tuning, inference, optimization...|0|plugins-ai-research"
         "claude-health|Health check & wellness dashboard|0|plugins-health"
         "PUA|AI agent productivity booster (pua, pua-en, pua-ja)|0|plugins-pua"
-        "Lark MCP server|Feishu/Lark integration|0|mcp"
+        "MCP Servers|Lark + Playwright integration|0|mcp"
     )
 
     local n=${#items[@]}
@@ -468,10 +472,10 @@ interactive_menu() {
 
     # Group definitions: start|end|label|hint
     local groups=(
-        "0|5|Core|"
-        "6|8|Language Rules|only install what your projects need"
-        "9|13|Plugins|"
-        "14|14|MCP Servers|"
+        "0|7|Core|"
+        "8|10|Language Rules|only install what your projects need"
+        "11|15|Plugins|"
+        "16|16|MCP Servers|"
     )
 
     # Save terminal state (operate on fd 3 which points to the actual tty)
@@ -649,6 +653,8 @@ interactive_menu() {
             statusline)          INSTALL_STATUSLINE=true ;;
             lessons)             INSTALL_LESSONS=true ;;
             skills)              INSTALL_SKILLS=true ;;
+            agents)              INSTALL_AGENTS=true ;;
+            shell-wrapper)       INSTALL_SHELL_WRAPPER=true ;;
             rules-python)        INSTALL_RULES=true; RULE_LANGS+=("python") ;;
             rules-ts)            INSTALL_RULES=true; RULE_LANGS+=("typescript") ;;
             rules-go)            INSTALL_RULES=true; RULE_LANGS+=("golang") ;;
@@ -949,6 +955,39 @@ install_skills() {
     done
 }
 
+install_agents() {
+    info "Installing custom agents..."
+    mkdir -p "$CLAUDE_DIR/agents"
+    for agent_file in "$SCRIPT_DIR"/agents/*.md; do
+        [[ -f "$agent_file" ]] || continue
+        local agent
+        agent=$(basename "$agent_file")
+        if $DRY_RUN; then
+            info "Would copy: agents/$agent -> $CLAUDE_DIR/agents/$agent"
+        else
+            cp "$agent_file" "$CLAUDE_DIR/agents/$agent"
+            ok "Agent installed: $agent"
+        fi
+    done
+}
+
+install_shell_wrapper() {
+    info "Installing shell wrapper (claude.zsh)..."
+    local target="$CLAUDE_DIR/claude.zsh"
+    if $DRY_RUN; then
+        info "Would copy: claude.zsh -> $target"
+        info "Would copy: system-prompt.txt -> $CLAUDE_DIR/system-prompt.txt"
+    else
+        cp "$SCRIPT_DIR/claude.zsh" "$target"
+        ok "Shell wrapper installed to $target"
+        if [[ -f "$SCRIPT_DIR/system-prompt.txt" ]]; then
+            cp "$SCRIPT_DIR/system-prompt.txt" "$CLAUDE_DIR/system-prompt.txt"
+            ok "system-prompt.txt installed"
+        fi
+        info "Add to your .zshrc: source ~/.claude/claude.zsh"
+    fi
+}
+
 install_lessons() {
     info "Installing lessons.md template..."
     local target="$CLAUDE_DIR/lessons.md"
@@ -995,17 +1034,38 @@ install_mcp() {
         return 1
     fi
 
+    # Helper: check if an MCP server already exists
+    _mcp_exists() {
+        claude mcp list 2>/dev/null | grep -q "^${1}:" 2>/dev/null
+    }
+
     # Lark MCP
     if $DRY_RUN; then
         info "Would add MCP server: lark-mcp (stdio)"
     else
-        if retry 5 3 "Add MCP server lark-mcp" claude mcp add --scope user --transport stdio lark-mcp \
+        if _mcp_exists lark-mcp; then
+            ok "MCP server lark-mcp already exists, skipping"
+        elif retry 3 3 "Add MCP server lark-mcp" claude mcp add --scope user --transport stdio lark-mcp \
             -- npx -y @larksuiteoapi/lark-mcp mcp -a YOUR_APP_ID -s YOUR_APP_SECRET 2>/dev/null; then
             ok "MCP server added: lark-mcp"
         else
-            warn "MCP server lark-mcp may already exist or could not be added, skipping"
+            warn "MCP server lark-mcp could not be added, skipping"
         fi
         warn "Replace YOUR_APP_ID and YOUR_APP_SECRET with your Feishu credentials"
+    fi
+
+    # Playwright MCP
+    if $DRY_RUN; then
+        info "Would add MCP server: playwright (stdio)"
+    else
+        if _mcp_exists playwright; then
+            ok "MCP server playwright already exists, skipping"
+        elif retry 3 3 "Add MCP server playwright" claude mcp add --scope user --transport stdio playwright \
+            -- npx @playwright/mcp@latest 2>/dev/null; then
+            ok "MCP server added: playwright"
+        else
+            warn "MCP server playwright could not be added, skipping"
+        fi
     fi
 }
 
@@ -1140,10 +1200,11 @@ uninstall() {
     echo "  - $CLAUDE_DIR/settings.json (backed up first)"
     echo "  - $CLAUDE_DIR/rules/"
     echo "  - $CLAUDE_DIR/skills/ (installer-managed only)"
+    echo "  - $CLAUDE_DIR/agents/ (installer-managed only)"
     echo "  - $CLAUDE_DIR/lessons.md"
     echo "  - $CLAUDE_DIR/hooks/ (installer-managed only)"
     echo "  - Installed plugins (requires claude CLI)"
-    echo "  - MCP server: lark-mcp (requires claude CLI)"
+    echo "  - MCP servers: lark-mcp, playwright (requires claude CLI)"
     [[ -f "$VERSION_STAMP_FILE" ]] && echo "  - $VERSION_STAMP_FILE"
     echo ""
 
@@ -1179,6 +1240,21 @@ uninstall() {
         rm -rf "$CLAUDE_DIR/skills" && ok "Removed skills/"
     fi
 
+    # Only remove agents that ship with this repo
+    if [[ -d "$SCRIPT_DIR/agents" ]]; then
+        for agent_file in "$SCRIPT_DIR"/agents/*.md; do
+            [[ -f "$agent_file" ]] || continue
+            local agent
+            agent=$(basename "$agent_file")
+            rm -f "$CLAUDE_DIR/agents/$agent" && ok "Removed agent: $agent"
+        done
+    else
+        rm -rf "$CLAUDE_DIR/agents" && ok "Removed agents/"
+    fi
+
+    rm -f "$CLAUDE_DIR/claude.zsh" && ok "Removed claude.zsh"
+    rm -f "$CLAUDE_DIR/system-prompt.txt" && ok "Removed system-prompt.txt"
+
     rm -f "$CLAUDE_DIR/lessons.md" && ok "Removed lessons.md"
 
     # Only remove hooks that ship with this repo
@@ -1204,6 +1280,9 @@ uninstall() {
         claude mcp remove lark-mcp 2>/dev/null && \
             ok "Removed MCP server: lark-mcp" || \
             warn "Could not remove lark-mcp"
+        claude mcp remove playwright 2>/dev/null && \
+            ok "Removed MCP server: playwright" || \
+            warn "Could not remove playwright"
     else
         warn "Claude CLI not found — cannot uninstall plugins or MCP servers"
     fi
@@ -1246,8 +1325,10 @@ main() {
         INSTALL_SETTINGS=true
         INSTALL_RULES=true
         INSTALL_SKILLS=true
+        INSTALL_AGENTS=true
         INSTALL_LESSONS=true
         INSTALL_STATUSLINE=true
+        INSTALL_SHELL_WRAPPER=true
         INSTALL_PLUGINS=true
         if $EXPLICIT_ALL; then
             # Explicit --all: install everything including MCP and all plugin groups
@@ -1261,8 +1342,8 @@ main() {
 
     # Check if anything was selected
     if ! $INSTALL_CLAUDE_MD && ! $INSTALL_SETTINGS && ! $INSTALL_RULES && \
-       ! $INSTALL_SKILLS && ! $INSTALL_LESSONS && ! $INSTALL_STATUSLINE && \
-       ! $INSTALL_PLUGINS && ! $INSTALL_MCP; then
+       ! $INSTALL_SKILLS && ! $INSTALL_AGENTS && ! $INSTALL_LESSONS && ! $INSTALL_STATUSLINE && \
+       ! $INSTALL_SHELL_WRAPPER && ! $INSTALL_PLUGINS && ! $INSTALL_MCP; then
         warn "Nothing selected to install."
         exit 0
     fi
@@ -1291,10 +1372,12 @@ main() {
     $INSTALL_SETTINGS && install_settings
     $INSTALL_RULES && install_rules
     $INSTALL_SKILLS && install_skills
+    $INSTALL_AGENTS && install_agents
     $INSTALL_LESSONS && install_lessons
     $INSTALL_STATUSLINE && install_statusline
     $INSTALL_MCP && install_mcp
     $INSTALL_PLUGINS && install_plugins
+    $INSTALL_SHELL_WRAPPER && install_shell_wrapper
 
     # Stamp version (skip if there were critical warnings)
     if ! $DRY_RUN; then
