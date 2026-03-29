@@ -6,7 +6,7 @@
 
 ![Statusline](assets/statusline.png)
 
-Production-ready configuration for [Claude Code](https://claude.com/claude-code) — one-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 22 curated plugins, custom skills (paper-reading, [adversarial-review](https://github.com/poteto/noodle/tree/main/.agents/skills/adversarial-review), [humanizer](https://github.com/blader/humanizer), update_config), custom status bar, MCP integration, and a self-improvement loop that remembers corrections across sessions.
+Production-ready configuration for [Claude Code](https://claude.com/claude-code) — one-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 22 curated plugins, custom skills (paper-reading, [adversarial-review](https://github.com/poteto/noodle/tree/main/.agents/skills/adversarial-review), [humanizer](https://github.com/blader/humanizer), update_config), custom agents (search), shell wrapper (`cl`/`cl_auto`), custom status bar, MCP integration (Lark + Playwright), and a self-improvement loop that remembers corrections across sessions.
 
 ## Showcase
 
@@ -25,9 +25,12 @@ Production-ready configuration for [Claude Code](https://claude.com/claude-code)
 ├── lessons.md             # Self-correction log template (auto-loaded via hook)
 ├── rules/                 # Multi-language coding standards (common + python/typescript/golang)
 ├── hooks/                 # Statusline with gradient progress bars (context + 5h usage)
-├── mcp/                   # MCP server config (Lark-MCP)
+├── agents/                # Custom agents (search)
+├── mcp/                   # MCP server config (Lark + Playwright)
 ├── plugins/               # Plugin installation guide (22 plugins, 7 marketplaces)
 ├── skills/                # Custom skills (paper-reading, adversarial-review, humanizer, update_config)
+├── claude.zsh             # Shell wrapper (cl/cl_auto functions)
+├── system-prompt.txt      # System prompt for shell wrapper
 ├── docs/                  # Research paper summaries
 ├── images/                # Showcase screenshots
 ├── VERSION                # Semantic version number
@@ -99,6 +102,8 @@ Running `./install.sh` with no arguments launches an interactive menu where you 
     [*] StatusLine               Gradient progress bar & usage display
     [*] Lessons                  lessons.md template + SessionStart hook
     [*] Custom skills            adversarial-review, paper-reading, humanizer
+    [*] Search agent             Jeff read-only web search agent
+    [*] Shell wrapper            cl/cl_auto zsh functions + system prompt
 
   Language Rules  (only install what your projects need)
     [ ] Python rules             PEP 8, pytest, type hints, bandit
@@ -113,7 +118,7 @@ Running `./install.sh` with no arguments launches an interactive menu where you 
     [ ] PUA                      AI agent productivity booster (pua, pua-en, pua-ja)
 
   MCP Servers
-    [ ] Lark MCP server          Feishu/Lark integration
+    [ ] MCP Servers              Lark + Playwright integration
 
   >  [ Submit ]
 ```
@@ -292,6 +297,35 @@ CLAUDE.md includes a **Version Changelog** rule: when making version-level chang
 
 Place custom skills in `skills/<name>/SKILL.md`.
 
+### Custom Agents
+
+| Agent | Description |
+|-------|-------------|
+| **search** | Read-only web search agent ("Jeff"). Uses only read/online tools to gather information, summarize briefly with sources. No edits or speculation. Runs on Opus model. |
+
+Place custom agents in `agents/<name>.md`.
+
+### Shell Wrapper
+
+`claude.zsh` provides two Zsh functions for launching Claude Code with auto-loaded configuration:
+
+- **`cl`** — Normal mode with permission prompts. Auto-loads `system-prompt.txt`, project `CLAUDE.md`, and MCP config from `~/.claude/`.
+- **`cl_auto`** — Auto mode with `--dangerously-skip-permissions`. Same config loading as `cl`.
+
+The wrapper automatically:
+- Loads `system-prompt.txt` as an appended system prompt
+- Appends the current project's `CLAUDE.md` if present
+- Detects and loads MCP server config from `~/.claude/mcp_settings.json` or `~/.claude/mcp/mcp-servers.json`
+- Removes `skipDangerousModePermissionPrompt` from `settings.json` if present (safety guard)
+
+**Setup**: Add to your `~/.zshrc`:
+
+```bash
+source ~/.claude/claude.zsh
+```
+
+Then use `cl` or `cl_auto` instead of `claude`.
+
 ### Adversarial Code Review via Codex CLI
 
 CLAUDE.md includes a **Code Review** rule: whenever a code review is needed — whether requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — Claude invokes the `adversarial-review` skill (from [poteto/noodle](https://github.com/poteto/noodle/tree/main/.agents/skills/adversarial-review)). This skill spawns reviewers on the **opposite AI model's CLI** (`codex exec` for Claude users, `claude -p` for Codex users), producing cross-model adversarial analysis with structured verdicts (PASS / CONTESTED / REJECT).
@@ -306,6 +340,7 @@ Requires Codex CLI installed and `OPENAI_API_KEY` set in your environment.
 
 - **Add a language**: Create `rules/<lang>/` extending common rules
 - **Add a skill**: Place in `skills/<name>/SKILL.md`
+- **Add an agent**: Place in `agents/<name>.md` with YAML frontmatter (`description`, `model`)
 - **Adapt CLAUDE.md**: Customize for your shell, package manager, and project context
 
 ## Acknowledgements
