@@ -977,6 +977,8 @@ install_shell_wrapper() {
     if $DRY_RUN; then
         info "Would copy: claude.zsh -> $target"
         info "Would copy: system-prompt.txt -> $CLAUDE_DIR/system-prompt.txt"
+        info "Would copy: glm-env.json -> $CLAUDE_DIR/glm-env.json (template, if not exists)"
+        info "Would prompt for default API backend (claude or glm)"
     else
         cp "$SCRIPT_DIR/claude.zsh" "$target"
         ok "Shell wrapper installed to $target"
@@ -984,7 +986,41 @@ install_shell_wrapper() {
             cp "$SCRIPT_DIR/system-prompt.txt" "$CLAUDE_DIR/system-prompt.txt"
             ok "system-prompt.txt installed"
         fi
+        # Install glm-env.json template only if not already present
+        if [[ ! -f "$CLAUDE_DIR/glm-env.json" ]] && [[ -f "$SCRIPT_DIR/glm-env.json" ]]; then
+            cp "$SCRIPT_DIR/glm-env.json" "$CLAUDE_DIR/glm-env.json"
+            ok "glm-env.json template installed (edit with your GLM credentials)"
+        fi
+
+        # Choose default profile
+        local default_profile="claude"
+        if [[ ! -f "$CLAUDE_DIR/default-profile" ]]; then
+            if can_interact; then
+                echo ""
+                info "Which API backend should 'cl' use by default?"
+                echo "  1) Claude API (requires Claude subscription)"
+                echo "  2) GLM API   (requires GLM API key)"
+                local choice=""
+                if [[ -t 0 ]]; then
+                    echo -n "  Choose [1]: "
+                    read -r choice
+                else
+                    echo -n "  Choose [1]: " > /dev/tty
+                    read -r choice </dev/tty
+                fi
+                case "$choice" in
+                    2) default_profile="glm" ;;
+                    *) default_profile="claude" ;;
+                esac
+            fi
+            echo "$default_profile" > "$CLAUDE_DIR/default-profile"
+            ok "Default profile set to: $default_profile"
+        else
+            ok "default-profile already exists ($(cat "$CLAUDE_DIR/default-profile")), keeping"
+        fi
+
         info "Add to your .zshrc: source ~/.claude/claude.zsh"
+        info "Available commands: cl, cl_auto, cl_claude, cl_claude_auto, cl_glm, cl_glm_auto, cl_switch"
     fi
 }
 
