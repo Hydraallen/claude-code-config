@@ -1,6 +1,6 @@
 <!-- This is the source of truth. README.zh-CN.md is the Chinese translation. Keep both in sync. -->
 
-**English** | [中文](./README.zh-CN.md) | [Codex Branch](https://github.com/Mizoreww/awesome-claude-code-config/tree/codex) | [Changelog](./CHANGELOG.md)
+**English** | [中文](./README.zh-CN.md) | [Codex Branch](https://github.com/Hydraallen/claude-code-config/tree/codex) | [Changelog](./CHANGELOG.md)
 
 # Awesome Claude Code Configuration
 
@@ -45,7 +45,7 @@ Production-ready configuration for [Claude Code](https://claude.com/claude-code)
 **One-line remote install** (no clone needed):
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.sh)
 ```
 
 This launches the interactive selector. Add `--all` to install everything non-interactively.
@@ -53,7 +53,7 @@ This launches the interactive selector. Add `--all` to install everything non-in
 **Local install** (from clone):
 
 ```bash
-git clone https://github.com/Mizoreww/awesome-claude-code-config.git
+git clone https://github.com/Hydraallen/claude-code-config.git
 cd awesome-claude-code-config
 ./install.sh              # Interactive selector
 ./install.sh --all        # Install everything (non-interactive)
@@ -64,7 +64,7 @@ cd awesome-claude-code-config
 **One-line remote install** (PowerShell, no clone needed):
 
 ```powershell
-irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex
 ```
 
 This launches the interactive selector. Use `.\install.ps1 -All` from a local clone for non-interactive full install.
@@ -72,13 +72,13 @@ This launches the interactive selector. Use `.\install.ps1 -All` from a local cl
 **From CMD**:
 
 ```cmd
-powershell -c "irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.ps1 | iex"
+powershell -c "irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex"
 ```
 
 **Local install** (from clone):
 
 ```powershell
-git clone https://github.com/Mizoreww/awesome-claude-code-config.git
+git clone https://github.com/Hydraallen/claude-code-config.git
 cd awesome-claude-code-config
 .\install.ps1             # Interactive selector
 ```

@@ -1,6 +1,6 @@
 <!-- 翻译同步自 README.md（source of truth）。更新英文版后请同步此文件。 -->
 
-[English](./README.md) | **中文** | [Codex 分支](https://github.com/Mizoreww/awesome-claude-code-config/tree/codex) | [更新日志](./CHANGELOG.zh-CN.md)
+[English](./README.md) | **中文** | [Codex 分支](https://github.com/Hydraallen/claude-code-config/tree/codex) | [更新日志](./CHANGELOG.zh-CN.md)
 
 # Awesome Claude Code 配置
 
@@ -45,7 +45,7 @@
 **一行远程安装**（无需 clone）：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.sh)
 ```
 
 自动弹出交互式选择器。添加 `--all` 可跳过选择直接安装全部。
@@ -53,7 +53,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Mizoreww/awesome-claude-code
 **本地安装**（从 clone）：
 
 ```bash
-git clone https://github.com/Mizoreww/awesome-claude-code-config.git
+git clone https://github.com/Hydraallen/claude-code-config.git
 cd awesome-claude-code-config
 ./install.sh              # 交互式选择器
 ./install.sh --all        # 安装全部（非交互）
@@ -64,7 +64,7 @@ cd awesome-claude-code-config
 **一行远程安装**（PowerShell，无需 clone）：
 
 ```powershell
-irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex
 ```
 
 自动弹出交互式选择器。如需非交互安装全部，请从本地 clone 运行 `.\install.ps1 -All`。
@@ -72,13 +72,13 @@ irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/i
 **CMD 环境**：
 
 ```cmd
-powershell -c "irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.ps1 | iex"
+powershell -c "irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex"
 ```
 
 **本地安装**（从 clone）：
 
 ```powershell
-git clone https://github.com/Mizoreww/awesome-claude-code-config.git
+git clone https://github.com/Hydraallen/claude-code-config.git
 cd awesome-claude-code-config
 .\install.ps1             # 交互式选择器
 ```
