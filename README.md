@@ -6,7 +6,7 @@
 
 ![Statusline](assets/statusline.png)
 
-Production-ready configuration for [Claude Code](https://claude.com/claude-code) — one-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 22 curated plugins, custom skills (paper-reading, [adversarial-review](https://github.com/poteto/noodle/tree/main/.agents/skills/adversarial-review), [humanizer](https://github.com/blader/humanizer), update_config), custom agents (search), shell wrapper (`cl`/`cl_auto`), custom status bar, MCP integration (Lark + Playwright), and a self-improvement loop that remembers corrections across sessions.
+Production-ready configuration for [Claude Code](https://claude.com/claude-code) — one-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 22 curated plugins, custom skills (paper-reading, [adversarial-review](https://github.com/poteto/noodle/tree/main/.agents/skills/adversarial-review), [humanizer](https://github.com/blader/humanizer), update_config), custom agents (search), shell wrapper with dual-backend support (`cl`/`cl_auto` for Claude API + GLM API, profile switching via `cl_switch`), custom status bar, MCP integration (Lark + Playwright), and a self-improvement loop that remembers corrections across sessions.
 
 ## Showcase
 
@@ -29,8 +29,9 @@ Production-ready configuration for [Claude Code](https://claude.com/claude-code)
 ├── mcp/                   # MCP server config (Lark + Playwright)
 ├── plugins/               # Plugin installation guide (22 plugins, 7 marketplaces)
 ├── skills/                # Custom skills (paper-reading, adversarial-review, humanizer, update_config)
-├── claude.zsh             # Shell wrapper (cl/cl_auto functions)
+├── claude.zsh             # Shell wrapper (cl/cl_auto + GLM dual-backend)
 ├── system-prompt.txt      # System prompt for shell wrapper
+├── glm-env.json           # GLM API credentials template
 ├── docs/                  # Research paper summaries
 ├── images/                # Showcase screenshots
 ├── VERSION                # Semantic version number
@@ -307,16 +308,38 @@ Place custom agents in `agents/<name>.md`.
 
 ### Shell Wrapper
 
-`claude.zsh` provides two Zsh functions for launching Claude Code with auto-loaded configuration:
+`claude.zsh` provides Zsh functions for launching Claude Code with auto-loaded configuration and **dual-backend support** (Claude API + GLM API):
 
-- **`cl`** — Normal mode with permission prompts. Auto-loads `system-prompt.txt`, project `CLAUDE.md`, and MCP config from `~/.claude/`.
-- **`cl_auto`** — Auto mode with `--dangerously-skip-permissions`. Same config loading as `cl`.
+| Command | Backend | Mode |
+|---------|---------|------|
+| **`cl`** | Auto (profile-based) | Normal (permission prompts) |
+| **`cl_auto`** | Auto (profile-based) | Auto (`--dangerously-skip-permissions`) |
+| **`cl_claude`** | Claude API (forced) | Normal |
+| **`cl_claude_auto`** | Claude API (forced) | Auto |
+| **`cl_glm`** | GLM API (forced) | Normal |
+| **`cl_glm_auto`** | GLM API (forced) | Auto |
+| **`cl_switch`** | — | View or change default profile (`claude` / `glm`) |
+
+The `cl` and `cl_auto` commands route to the correct backend based on `~/.claude/default-profile` (defaults to `claude`). Use `cl_switch glm` to change the default, or use explicit commands (`cl_claude`, `cl_glm`) to override temporarily.
+
+**GLM setup**: Edit `~/.claude/glm-env.json` with your GLM credentials:
+
+```json
+{
+  "ANTHROPIC_AUTH_TOKEN": "YOUR_GLM_API_KEY",
+  "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.7-flash",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-4.7",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.1"
+}
+```
 
 The wrapper automatically:
 - Loads `system-prompt.txt` as an appended system prompt
 - Appends the current project's `CLAUDE.md` if present
 - Detects and loads MCP server config from `~/.claude/mcp_settings.json` or `~/.claude/mcp/mcp-servers.json`
 - Removes `skipDangerousModePermissionPrompt` from `settings.json` if present (safety guard)
+- Injects GLM environment variables for the duration of the call when using GLM backend
 
 **Setup**: Add to your `~/.zshrc`:
 
@@ -324,7 +347,7 @@ The wrapper automatically:
 source ~/.claude/claude.zsh
 ```
 
-Then use `cl` or `cl_auto` instead of `claude`.
+Then use `cl` or `cl_auto` instead of `claude`. The installer prompts you to choose a default backend (Claude or GLM) during installation.
 
 ### Adversarial Code Review via Codex CLI
 
