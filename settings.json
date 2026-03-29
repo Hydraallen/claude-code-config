@@ -1,8 +1,11 @@
 {
   "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "API_TIMEOUT_MS": "3000000"
   },
   "model": "opus",
+  "includeCoAuthoredBy": false,
   "enabledPlugins": {
     "document-skills@anthropic-agent-skills": true,
     "example-skills@anthropic-agent-skills": true,
@@ -53,7 +56,6 @@
       }
     ]
   },
-  "skipDangerousModePermissionPrompt": true,
   "permissions": {
     "defaultMode": "auto",
     "allow": [
