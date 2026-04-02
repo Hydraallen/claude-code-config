@@ -163,7 +163,7 @@ detect_script_dir() {
         tmpdir="$(mktemp -d)"
         trap 'rm -rf "$tmpdir"' EXIT
 
-        local version="${VERSION:-dev}"
+        local version="${VERSION:-main}"
         # Sanitize VERSION to prevent command injection
         if [[ ! "$version" =~ ^[a-zA-Z0-9._-]+$ ]]; then
             error "Invalid VERSION value: $version (only alphanumeric, dots, hyphens, underscores allowed)"
