@@ -225,7 +225,7 @@ function Show-InteractiveMenu {
         @{ Label = "Review"; Hint = "adversarial-review and Codex are mutually exclusive"; Items = @(
             @{ Label = "code-review plugin"; Desc = "PR code review (claude-plugins-official)"; Default = $true; Id = "review-code-review" }
             @{ Label = "adversarial-review"; Desc = "Cross-model adversarial review (poteto/noodle)"; Default = $true; Id = "review-adversarial" }
-            @{ Label = "Codex adversarial-review"; Desc = "Codex plugin adversarial review (openai/codex)"; Default = $false; Id = "review-codex" }
+            @{ Label = "Codex CLI"; Desc = "Codex adversarial review (openai/codex)"; Default = $false; Id = "review-codex" }
         )}
         @{ Label = "Skills"; Hint = ""; Items = @(
             @{ Label = "paper-reading";   Desc = "Research paper summarization";      Default = $true;  Id = "skill-paper-reading" }

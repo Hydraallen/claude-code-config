@@ -482,7 +482,7 @@ Go rules|gofmt, table-driven tests, gosec|0|rules-go")
     GROUP_HINTS+=("adversarial-review and Codex are mutually exclusive")
     GROUP_ITEMS+=("code-review plugin|PR code review (claude-plugins-official)|1|review-code-review
 adversarial-review|Cross-model adversarial review (poteto/noodle)|1|review-adversarial
-Codex adversarial-review|Codex plugin adversarial review (openai/codex)|0|review-codex")
+Codex CLI|Codex adversarial review (openai/codex)|0|review-codex")
 
     # Group 3: Skills
     GROUP_LABELS+=("Skills")
@@ -565,7 +565,7 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
     local saved_stty
     saved_stty=$(stty -g <&3 2>/dev/null) || saved_stty=""
 
-    local _menu_active=false
+    _menu_active=false  # Not local — trap handlers need access under bash 5.x
     _menu_cleanup() {
         $_menu_active || return 0
         _menu_active=false
@@ -593,6 +593,8 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
             case "$rest" in
                 '[A') echo "UP" ;;
                 '[B') echo "DOWN" ;;
+                '[C') echo "RIGHT" ;;
+                '[D') echo "LEFT" ;;
                 '')   echo "ESC" ;;
                 *)    echo "OTHER" ;;
             esac
@@ -634,12 +636,12 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
             if [[ "$toggled_id" == "review-adversarial" ]]; then
                 # Find and turn off review-codex
                 for (( j=GROUP_START[2]; j<=GROUP_END[2]; j++ )); do
-                    [[ "${ALL_IDS[$j]}" == "review-codex" ]] && selected[$j]=0
+                    [[ "${ALL_IDS[$j]}" == "review-codex" ]] && selected[$j]=0 || true
                 done
             elif [[ "$toggled_id" == "review-codex" ]]; then
                 # Find and turn off review-adversarial
                 for (( j=GROUP_START[2]; j<=GROUP_END[2]; j++ )); do
-                    [[ "${ALL_IDS[$j]}" == "review-adversarial" ]] && selected[$j]=0
+                    [[ "${ALL_IDS[$j]}" == "review-adversarial" ]] && selected[$j]=0 || true
                 done
             fi
         fi
@@ -654,7 +656,7 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
         buf+="    \033[1;36mAwesome Claude Code Config Installer\033[0m  \033[2m${_cached_version}\033[0m\033[K\n"
         buf+='  \033[1;37m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\033[K\n'
         buf+='\033[K\n'
-        buf+='  \033[2m↑/↓ Navigate   Enter Open   a All  n None  d Defaults  q Quit\033[0m\033[K\n'
+        buf+='  \033[2m↑/↓ Navigate   Enter/→ Open   a All  n None  d Defaults  q Quit\033[0m\033[K\n'
         buf+='\033[K\n'
 
         local g
@@ -707,7 +709,7 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
         buf+='\033[K\n'
         buf+='  \033[1;37m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\033[K\n'
         buf+='\033[K\n'
-        buf+='  \033[2m↑/↓ Navigate   Space Toggle   Enter/Esc Back\033[0m\033[K\n'
+        buf+='  \033[2m↑/↓ Navigate   Space Toggle   ←/Esc/Enter Back\033[0m\033[K\n'
         buf+='  \033[2ma All   n None   d Defaults\033[0m\033[K\n'
         buf+='\033[K\n'
 
@@ -766,10 +768,11 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
             DOWN)
                 (( cursor < num_groups )) && (( cursor++ )) || true
                 ;;
-            ENTER)
+            ENTER|RIGHT)
                 if (( cursor == num_groups )); then
-                    # Submit
-                    break
+                    # Submit (only on ENTER, not RIGHT)
+                    if [[ "$key" == "ENTER" ]]; then break; fi
+                    continue
                 fi
                 # Enter sub-menu for this group
                 local sub_g=$cursor
@@ -810,7 +813,7 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
                             # Re-enforce mutex only when in the Review group
                             if (( sub_g == 2 )); then
                                 for (( j=GROUP_START[2]; j<=GROUP_END[2]; j++ )); do
-                                    [[ "${ALL_IDS[$j]}" == "review-codex" ]] && selected[$j]=0
+                                    [[ "${ALL_IDS[$j]}" == "review-codex" ]] && selected[$j]=0 || true
                                 done
                             fi
                             ;;
@@ -824,7 +827,7 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
                                 selected[$j]="${ALL_DEFAULTS[$j]}"
                             done
                             ;;
-                        QUIT|ESC)
+                        QUIT|ESC|LEFT)
                             in_sub=false
                             ;;
                     esac
@@ -837,7 +840,7 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
                 for (( i=0; i<n; i++ )); do selected[$i]=1; done
                 # Enforce review mutex: adversarial ON (default), codex OFF
                 for (( j=${GROUP_START[2]}; j<=${GROUP_END[2]}; j++ )); do
-                    [[ "${ALL_IDS[$j]}" == "review-codex" ]] && selected[$j]=0
+                    [[ "${ALL_IDS[$j]}" == "review-codex" ]] && selected[$j]=0 || true
                 done
                 ;;
             NONE)
@@ -927,7 +930,7 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
                 INSTALL_PLUGINS=true
                 local pkg
                 pkg="$(_plug_id_to_pkg "$item_id")"
-                [[ -n "$pkg" ]] && SELECTED_PLUGINS+=("$pkg")
+                [[ -n "$pkg" ]] && SELECTED_PLUGINS+=("$pkg") || true
                 ;;
         esac
     done
