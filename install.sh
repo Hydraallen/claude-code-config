@@ -438,6 +438,19 @@ interactive_menu() {
         return
     fi
 
+    # Validate fd 3 actually supports interactive reads.
+    # read -t 0.1: ret=142 (timeout) means fd is a real blocking terminal (good).
+    # ret=1 (EOF) or ret=0 with instant data means fd is broken or non-interactive.
+    local _probe="" _probe_ret=0
+    IFS= read -r -s -n 1 -t 0.2 _probe <&3 2>/dev/null || _probe_ret=$?
+    if [[ $_probe_ret -ne 142 ]]; then
+        # Did not timeout → fd returned EOF (1) or instant data (0), not a real terminal
+        warn "Terminal input not working (read returned $_probe_ret), falling back to default install"
+        exec 3<&- 2>/dev/null || true
+        INSTALL_ALL=true
+        return
+    fi
+
     # --- Two-level menu data structure ---
     # Each group has: label, hint, and an array of items.
     # Item format: "label|description|default_on|id"
