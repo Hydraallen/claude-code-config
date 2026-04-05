@@ -1,6 +1,6 @@
 # Plugins
 
-22 plugins across 7 marketplaces. Context7, GitHub, Playwright migrated from MCP to official plugins.
+23 plugins across 8 marketplaces. Context7, GitHub, Playwright migrated from MCP to official plugins.
 
 ## Plugin List
 
@@ -20,6 +20,7 @@
 | **code-simplifier** | claude-plugins-official | Code simplification and refactoring |
 | **ralph-loop** | claude-plugins-official | Session-aware AI assistant REPL |
 | **commit-commands** | claude-plugins-official | Git commit, clean branches, commit-push-PR |
+| [**codex**](https://github.com/openai/codex-plugin-cc) | openai-codex | Adversarial code review, Codex CLI integration, cross-model analysis |
 | [**tokenization**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | HuggingFace Tokenizers, SentencePiece |
 | [**fine-tuning**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | Axolotl, LLaMA-Factory, PEFT, Unsloth |
 | [**post-training**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | GRPO, RLHF, DPO, SimPO |
@@ -42,6 +43,7 @@ claude plugin marketplace add https://github.com/anthropics/skills
 claude plugin marketplace add https://github.com/affaan-m/everything-claude-code
 claude plugin marketplace add https://github.com/thedotmack/claude-mem
 claude plugin marketplace add https://github.com/zechenzhangAGI/AI-research-SKILLs
+claude plugin marketplace add https://github.com/openai/codex-plugin-cc
 
 # Install plugins (name@marketplace)
 claude plugin install superpowers@claude-plugins-official

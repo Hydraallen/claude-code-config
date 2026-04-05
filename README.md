@@ -6,7 +6,7 @@
 
 ![Statusline](assets/statusline.png)
 
-Production-ready configuration for [Claude Code](https://claude.com/claude-code) — one-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 22 curated plugins, custom skills (paper-reading, [adversarial-review](https://github.com/poteto/noodle/tree/main/.agents/skills/adversarial-review), [humanizer](https://github.com/blader/humanizer), update_config), custom agents (search), shell wrapper with dual-backend support (`cl`/`cl_auto` for Claude API + GLM API, profile switching via `cl_switch`), custom status bar, MCP integration (Lark + Playwright), and a self-improvement loop that remembers corrections across sessions.
+Production-ready configuration for [Claude Code](https://claude.com/claude-code) — one-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 23 curated plugins, custom skills ([adversarial-review](https://github.com/poteto/noodle), paper-reading, [humanizer](https://github.com/blader/humanizer), [humanizer-zh](https://github.com/op7418/Humanizer-zh), update-config), custom agents (search), shell wrapper with dual-backend support (`cl`/`cl_auto` for Claude API + GLM API, profile switching via `cl_switch`), custom status bar, MCP integration (Lark + Playwright), and a self-improvement loop that remembers corrections across sessions.
 
 ## Showcase
 
@@ -27,8 +27,8 @@ Production-ready configuration for [Claude Code](https://claude.com/claude-code)
 ├── hooks/                 # Statusline with gradient progress bars (context + 5h usage)
 ├── agents/                # Custom agents (search)
 ├── mcp/                   # MCP server config (Lark + Playwright)
-├── plugins/               # Plugin installation guide (22 plugins, 7 marketplaces)
-├── skills/                # Custom skills (paper-reading, adversarial-review, humanizer, update_config)
+├── plugins/               # Plugin installation guide (23 plugins, 8 marketplaces)
+├── skills/                # Custom skills (adversarial-review, paper-reading, humanizer, humanizer-zh, update-config)
 ├── claude.zsh             # Shell wrapper (cl/cl_auto + GLM dual-backend)
 ├── system-prompt.txt      # System prompt for shell wrapper
 ├── glm-env.json           # GLM API credentials template
@@ -90,51 +90,39 @@ Running `./install.sh` with no arguments launches an interactive menu where you 
 
 ```
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Awesome Claude Code Config Installer  1.9.2
+    Awesome Claude Code Config Installer  2.2.0
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  ↑/↓ Navigate   Space Toggle   Enter Submit
-  a All   n None   d Defaults   q Quit
+  ↑/↓ Navigate   Enter Open   a All  n None  d Defaults  q Quit
 
-  Core
-  > [*] CLAUDE.md                Global instructions template
-    [*] settings.json            Smart-merged Claude Code settings
-    [*] Common rules             Coding style, git, security, testing
-    [*] StatusLine               Gradient progress bar & usage display
-    [*] Lessons                  lessons.md template + SessionStart hook
-    [*] Custom skills            adversarial-review, paper-reading, humanizer
-    [*] Search agent             Jeff read-only web search agent
-    [*] Shell wrapper            cl/cl_auto zsh functions + system prompt
+  > [5/5] Core                    Global instructions, settings, rules...
+    [0/3] Language Rules           Python / TypeScript / Go
+    [2/3] Review                   code-review plugin + adversarial review
+    [3/4] Skills                   paper-reading, humanizer, update-config...
+    [12/12] Plugins — Official     superpowers, context7, playwright...
+    [0/3] Plugins — Community      claude-mem, claude-health, PUA
+    [0/6] Plugins — AI Research    fine-tuning, inference, optimization...
+    [0/1] MCP Servers              Lark/Feishu
 
-  Language Rules  (only install what your projects need)
-    [ ] Python rules             PEP 8, pytest, type hints, bandit
-    [ ] TypeScript rules         Zod, Playwright, immutability
-    [ ] Go rules                 gofmt, table-driven tests, gosec
-
-  Plugins
-    [*] Plugins (13)             superpowers, code-review, playwright, feature-dev...
-    [ ] claude-mem               Cross-session memory (~3k tokens/session)
-    [ ] AI Research plugins      fine-tuning, inference, optimization...
-    [ ] claude-health            Health check & wellness dashboard
-    [ ] PUA                      AI agent productivity booster (pua, pua-en, pua-ja)
-
-  MCP Servers
-    [ ] MCP Servers              Lark + Playwright integration
-
-  >  [ Submit ]
+     [ Submit ]
 ```
 
-Use ↑↓ to navigate, Enter to toggle, navigate to Submit and press Enter to install.
+**Two-level menu**: Use ↑↓ to navigate groups, Enter to open a group's sub-menu where you can toggle individual items with Space. Navigate to Submit and press Enter to install.
 
-### Plugin Groups
+The **Review** group lets you choose between [adversarial-review](https://github.com/poteto/noodle) (cross-model, spawns Codex reviewers) and [Codex CLI](https://github.com/openai/codex-plugin-cc) (Codex plugin built-in). These two are **mutually exclusive** — selecting one automatically deselects the other.
 
-| Group | Plugins | Default | Context Cost |
-|-------|---------|---------|--------------|
-| Essential (13) | everything-claude-code, superpowers, code-review, context7, commit-commands, document-skills, playwright, feature-dev, code-simplifier, ralph-loop, frontend-design, example-skills, github | On | Low |
-| claude-mem (1) | claude-mem | Off | **~3k tokens/session** (observation index + session summary) |
-| AI Research (6) | tokenization, fine-tuning, post-training, inference-serving, distributed-training, optimization | Off | Low |
-| claude-health (1) | health | Off | Low |
-| PUA (1) | pua | Off | Low |
+### Menu Groups
+
+| Group | Items | Default |
+|-------|-------|---------|
+| Core (5) | CLAUDE.md, settings.json, Common rules, StatusLine, Lessons | All On |
+| Language Rules (3) | Python, TypeScript, Go | All Off |
+| Review (3) | code-review plugin, adversarial-review, Codex CLI | code-review + adversarial-review On |
+| Skills (4) | paper-reading, humanizer, humanizer-zh, update-config | humanizer-zh Off, rest On |
+| Plugins — Official (12) | everything-claude-code, superpowers, context7, commit-commands, document-skills, playwright, feature-dev, code-simplifier, ralph-loop, frontend-design, example-skills, github | All On |
+| Plugins — Community (3) | claude-mem, claude-health, PUA | All Off |
+| Plugins — AI Research (6) | tokenization, fine-tuning, post-training, inference-serving, distributed-training, optimization | All Off |
+| MCP Servers (1) | Lark MCP server | Off |
 
 ### CLI Flags
 
@@ -219,7 +207,7 @@ When `settings.json` already exists, the installer performs a smart merge (Bash 
 
 - **env**: Incoming values as defaults, existing values take priority
 - **permissions.allow**: Union of both arrays (deduped)
-- **enabledPlugins**: Merged, existing keys take priority
+- **enabledPlugins**: Union (new plugins added, existing preserved)
 - **hooks.SessionStart**: Deduplicated by `matcher` field
 - **statusLine**: Incoming config takes priority
 
@@ -237,9 +225,9 @@ golang/       → gofmt, table-driven tests, gosec
 
 ### Plugin-First Approach
 
-22 plugins across 7 marketplaces, organized into groups:
+23 plugins across 8 marketplaces. Each plugin can be individually selected in the two-level interactive menu:
 
-**Core plugins** (14) — installed by default:
+**Plugins — Official** (12) — installed by default:
 
 | Plugin | Marketplace | What It Does |
 |--------|-------------|--------------|
@@ -247,10 +235,8 @@ golang/       → gofmt, table-driven tests, gosec
 | [**everything-claude-code**](https://github.com/affaan-m/everything-claude-code) | everything-claude-code | TDD, security review, database patterns, Go/Python/Spring Boot |
 | [**document-skills**](https://github.com/anthropics/skills) | anthropic-agent-skills | PDF, DOCX, PPTX, XLSX creation and manipulation |
 | [**example-skills**](https://github.com/anthropics/skills) | anthropic-agent-skills | Frontend design, MCP builder, canvas design, algorithmic art |
-| [**claude-mem**](https://github.com/thedotmack/claude-mem) | thedotmack | Persistent memory with smart search, timeline, AST-aware code search |
 | **frontend-design** | claude-plugins-official | Production-grade frontend interfaces |
 | [**context7**](https://github.com/upstash/context7) | claude-plugins-official | Up-to-date library documentation lookup |
-| **code-review** | claude-plugins-official | Confidence-based code review |
 | [**github**](https://github.com/github/github-mcp-server) | claude-plugins-official | GitHub integration (issues, PRs, workflows) |
 | [**playwright**](https://github.com/microsoft/playwright-mcp) | claude-plugins-official | Browser automation, E2E testing, screenshots |
 | **feature-dev** | claude-plugins-official | Guided feature development |
@@ -258,7 +244,23 @@ golang/       → gofmt, table-driven tests, gosec
 | **ralph-loop** | claude-plugins-official | Session-aware AI assistant REPL |
 | **commit-commands** | claude-plugins-official | Git commit, clean branches, commit-push-PR |
 
-**AI Research plugins** (6) — select in the interactive menu or included with `--all`:
+**Review** (3) — code-review + adversarial-review by default (adversarial-review and Codex are mutually exclusive):
+
+| Plugin/Skill | Source | What It Does |
+|--------------|--------|--------------|
+| **code-review** | claude-plugins-official | Confidence-based PR code review |
+| [**adversarial-review**](https://github.com/poteto/noodle) | skill (bundled) | Cross-model adversarial review — spawns Codex/Claude reviewers with critical lenses |
+| [**codex**](https://github.com/openai/codex-plugin-cc) | openai-codex | Codex plugin built-in adversarial review and CLI integration |
+
+**Plugins — Community** (3) — select in the interactive menu or included with `--all`:
+
+| Plugin | Marketplace | What It Does |
+|--------|-------------|--------------|
+| [**claude-mem**](https://github.com/thedotmack/claude-mem) | thedotmack | Persistent memory with smart search, timeline, AST-aware code search |
+| [**health**](https://github.com/tw93/claude-health) | claude-health | Health check and wellness dashboard for Claude Code sessions |
+| [**pua**](https://github.com/tanweai/pua) | pua-skills | AI agent productivity booster — forces exhaustive problem-solving with multi-language support (CN/EN/JA) |
+
+**Plugins — AI Research** (6) — select in the interactive menu or included with `--all`:
 
 | Plugin | Marketplace | What It Does |
 |--------|-------------|--------------|
@@ -268,18 +270,6 @@ golang/       → gofmt, table-driven tests, gosec
 | [**inference-serving**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | vLLM, SGLang, TensorRT-LLM, llama.cpp |
 | [**distributed-training**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | DeepSpeed, FSDP, Megatron-Core, Ray Train |
 | [**optimization**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | AWQ, GPTQ, GGUF, Flash Attention, bitsandbytes |
-
-**Health plugin** (1) — select in the interactive menu or included with `--all`:
-
-| Plugin | Marketplace | What It Does |
-|--------|-------------|--------------|
-| [**health**](https://github.com/tw93/claude-health) | claude-health | Health check and wellness dashboard for Claude Code sessions |
-
-**PUA plugin** (1) — select in the interactive menu or included with `--all`:
-
-| Plugin | Marketplace | What It Does |
-|--------|-------------|--------------|
-| [**pua**](https://github.com/tanweai/pua) | pua-skills | AI agent productivity booster — forces exhaustive problem-solving with multi-language support (CN/EN/JA) |
 
 See [`plugins/README.md`](plugins/README.md) for installation details.
 
@@ -291,10 +281,11 @@ CLAUDE.md includes a **Version Changelog** rule: when making version-level chang
 
 | Skill | Description |
 |-------|-------------|
+| **[adversarial-review](https://github.com/poteto/noodle)** | Cross-model adversarial code review. Spawns 1–3 reviewers on the opposing model (Claude spawns Codex, Codex spawns Claude) with distinct critical lenses (Skeptic, Architect, Minimalist), then synthesizes a structured verdict (PASS / CONTESTED / REJECT). |
 | **paper-reading** | Structured research paper summarization with automatic figure extraction. Pure PDF pipeline using pymupdf4llm for precise image/vector/table extraction (no ar5iv/Playwright dependency), outputs standardized markdown (problem, method, experiments, insights). |
-| **[adversarial-review](https://github.com/poteto/noodle/tree/main/.agents/skills/adversarial-review)** | Cross-model adversarial code review. Spawns reviewers on the opposite AI model (Claude ↔ Codex) with distinct critical lenses (Skeptic, Architect, Minimalist), then synthesizes a structured verdict (PASS/CONTESTED/REJECT). |
 | **[humanizer](https://github.com/blader/humanizer)** | Detect and remove AI writing patterns from text. Based on Wikipedia's "Signs of AI writing" guide, identifies 24 patterns across content, language, style, and communication categories (significance inflation, AI vocabulary, em dash overuse, sycophantic tone, etc.) and rewrites text to sound natural. |
-| **update_config** | In-session update command. Type `/update_config` in Claude Code to check for new versions and re-run the interactive installer — no need to leave the session. |
+| **[humanizer-zh](https://github.com/op7418/Humanizer-zh)** | Chinese version of humanizer. Detect and remove AI writing patterns from Chinese text, making it sound more natural and human-written. |
+| **update-config** | In-session update command. Type `/update-config` in Claude Code to check for new versions and re-run the interactive installer — no need to leave the session. |
 
 Place custom skills in `skills/<name>/SKILL.md`.
 
@@ -349,11 +340,14 @@ source ~/.claude/claude.zsh
 
 Then use `cl` or `cl_auto` instead of `claude`. The installer prompts you to choose a default backend (Claude or GLM) during installation.
 
-### Adversarial Code Review via Codex CLI
+### Adversarial Code Review
 
-CLAUDE.md includes a **Code Review** rule: whenever a code review is needed — whether requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — Claude invokes the `adversarial-review` skill (from [poteto/noodle](https://github.com/poteto/noodle/tree/main/.agents/skills/adversarial-review)). This skill spawns reviewers on the **opposite AI model's CLI** (`codex exec` for Claude users, `claude -p` for Codex users), producing cross-model adversarial analysis with structured verdicts (PASS / CONTESTED / REJECT).
+CLAUDE.md includes a **Code Review** rule: whenever a code review is needed — whether requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — Claude invokes the review tool selected during installation. Two options are available in the **Review** menu group:
 
-Requires Codex CLI installed and `OPENAI_API_KEY` set in your environment.
+- **[adversarial-review](https://github.com/poteto/noodle)** (default): Cross-model review that spawns reviewers on the opposite model with distinct critical lenses (Skeptic, Architect, Minimalist). Requires `codex` CLI installed. Falls back to `code-reviewer` agent if unavailable.
+- **[Codex CLI](https://github.com/openai/codex-plugin-cc)**: Codex plugin built-in review. Requires `OPENAI_API_KEY` set in your environment. Falls back to `code-reviewer` agent if unavailable.
+
+These two options are mutually exclusive. The installer dynamically configures CLAUDE.md based on your selection, including fallback behavior.
 
 ## Security Note
 
@@ -374,6 +368,7 @@ Requires Codex CLI installed and `OPENAI_API_KEY` set in your environment.
 - [**Anthropic Engineering**](https://www.anthropic.com/engineering) by Anthropic — Engineering blog covering agent development, evaluation methods, and building reliable AI systems
 - [**OpenAI Engineering**](https://openai.com/news/engineering/) by OpenAI — Engineering blog sharing technical insights on building and scaling AI systems
 - [**Claude Code Best Practice**](https://github.com/shanraisshan/claude-code-best-practice) by shanraisshan — Comprehensive best practices, workflows, and implementation patterns for Claude Code
+- [**Claude How To**](https://github.com/luongnv89/claude-howto) by luongnv89 — Example-driven guide to mastering Claude Code through progressive tutorials with copy-paste templates
 
 ## License
 

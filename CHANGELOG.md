@@ -1,5 +1,54 @@
 # Changelog
 
+## [2.2.0] - 2026-04-02
+
+### Features
+- **Two-level interactive menu**: Main menu shows group summaries (`[selected/total]`); Enter/→ opens sub-menus, ←/Esc returns. Groups: Core, Language Rules, Review, Skills, Plugins — Official/Community/AI Research, MCP Servers.
+- **Review tool selector**: New "Review" group — `code-review` plugin (ON), `adversarial-review` skill (ON), Codex CLI (OFF). adversarial-review and Codex are mutually exclusive with auto-toggle.
+- **Restored adversarial-review skill**: Cross-model reviewers (Claude↔Codex) with Skeptic/Architect/Minimalist lenses from [poteto/noodle](https://github.com/poteto/noodle).
+- **New humanizer-zh skill**: Chinese AI writing pattern removal from [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh).
+- **Per-plugin granularity**: All 23 plugins individually selectable (previously bundled into groups).
+- **Dynamic CLAUDE.md Code Review section**: Installer rewrites the Code Review rule based on selected review tool.
+- **Arrow key navigation**: ←/→ supported for sub-menu entry/exit in addition to Enter/Esc.
+
+### Bug Fixes (bash 5.x / Linux)
+- **Root cause**: `(( var++ ))` from 0 returns exit code 1 under bash 5.x `set -e`, silently killing the script. macOS bash 3.2 does not trigger `set -e` on this. Fixed all instances: `(( flat_idx++ ))` → `(( ++flat_idx ))`, `(( fixed++ ))` → `(( ++fixed ))`, `(( selected[j] )) && (( cnt++ ))` → added `|| true`.
+- **`[[ ]] && cmd` without `|| true`**: `_enforce_review_mutex` and main menu ALL handler crashed when the last loop iteration didn't match. Added `|| true` guards to all `[[ test ]] && assignment` patterns.
+- **`local _menu_active`**: Trap handlers couldn't access local variables under bash 5.x; changed to global.
+- **install.ps1**: Removed stale `$groups` override that destroyed menu data, causing Windows interactive menu crash.
+- **Terminal fd probe**: Detects broken `/dev/tty` (EOF) and falls back to non-interactive default install. Only rejects EOF (ret=1), not stray input bytes (ret=0).
+- **EXIT trap**: Added `_menu_cleanup` to EXIT trap to restore terminal on unexpected exit (prevents stuck alternate screen).
+
+### Design Rationale
+- Two-level menu keeps the main view compact while allowing fine-grained control
+- Mutual exclusion prevents conflicting review tools from being installed simultaneously
+- All `(( ))` arithmetic and `[[ ]] && cmd` patterns now systematically protected against `set -e`
+- fd probe provides defense-in-depth without false positives
+
+### Notes & Caveats
+- `--all` installs everything with adversarial-review (not Codex) as default
+- Codex CLI selection automatically installs `codex@openai-codex` plugin
+- adversarial-review skill requires `codex` CLI for cross-model review
+
+## [2.1.0] - 2026-04-02
+
+### Features
+- **Codex adversarial-review plugin**: Replaced the built-in `adversarial-review` skill with the official [Codex plugin](https://github.com/openai/codex-plugin-cc) (`codex@openai-codex`). Code reviews now use `/codex:adversarial-review` with automatic fallback to Claude's `code-reviewer` agent when Codex is unavailable. Plugin is included in the default installation.
+- **Skill rename**: Reverted `/update` back to `/update-config` — directory renamed from `skills/update/` to `skills/update-config/` to match. Installer cleans up legacy `skills/update` and `skills/adversarial-review` paths on upgrade.
+- **Smart-merge enabledPlugins strategy**: Changed from "existing wins" to "union" — new plugins from incoming config are now added alongside existing ones, ensuring upgrades pick up new plugins like `codex@openai-codex` automatically.
+
+### Design Rationale
+- The Codex plugin provides a maintained, official adversarial review implementation with shared runtime and better integration
+- Namespaced skill commands (`update-config`) prevent accidental shadowing of project-level `/update` commands across all repositories
+- Union merge for `enabledPlugins` ensures upgrade users automatically get new plugins without losing their existing configuration
+- Fallback review path (`code-reviewer` agent) ensures code review works even without Codex CLI or OpenAI API key
+
+### Notes & Caveats
+- Codex plugin requires authentication via `codex login` (run `/codex:setup` to check status)
+- The `docs/adversarial-review-showcase.md` is preserved as historical reference
+- CHANGELOG history entries for `update_config` and `adversarial-review` are preserved as-is
+- Installer migration automatically removes legacy `skills/update` and `skills/adversarial-review` directories
+
 ## [2.0.0] - 2026-03-27
 
 ### Features

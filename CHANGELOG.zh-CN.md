@@ -1,5 +1,54 @@
 # 更新日志
 
+## [2.2.0] - 2026-04-02
+
+### 新特性
+- **二级交互式菜单**：主菜单显示分组摘要（`[已选/总数]`），Enter/→ 进入子菜单，←/Esc 返回。分组：Core、Language Rules、Review、Skills、Plugins — Official/Community/AI Research、MCP Servers。
+- **Review 工具选择器**：新增 "Review" 分组——`code-review` 插件（开）、`adversarial-review` skill（开）、Codex CLI（关）。adversarial-review 和 Codex 互斥，自动联动。
+- **恢复 adversarial-review skill**：跨模型审查（Claude↔Codex），怀疑者/架构师/极简主义者三重视角，来自 [poteto/noodle](https://github.com/poteto/noodle)。
+- **新增 humanizer-zh skill**：来自 [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh) 的中文去 AI 痕迹 skill。
+- **单插件粒度选择**：23 个插件可单独选择/取消（之前按组捆绑）。
+- **CLAUDE.md Code Review 段动态生成**：安装器根据选择的审查工具动态修改 CLAUDE.md 中的 Code Review 规则。
+- **方向键导航**：←/→ 支持子菜单进入/退出，与 Enter/Esc 并行。
+
+### Bug 修复（bash 5.x / Linux）
+- **根因**：`(( var++ ))` 从 0 自增时返回 exit code 1，bash 5.x `set -e` 下直接杀掉脚本（macOS bash 3.2 不受影响）。全部修复：`(( flat_idx++ ))` → `(( ++flat_idx ))`，`(( fixed++ ))` → `(( ++fixed ))`，`(( cnt++ ))` 加 `|| true`。
+- **`[[ ]] && cmd` 缺少 `|| true`**：`_enforce_review_mutex` 和主菜单 ALL 模式中，循环最后一次迭代不匹配时返回 1 导致崩溃。全部加了 `|| true`。
+- **`local _menu_active`**：bash 5.x 下 trap handler 无法访问 local 变量，改为全局变量。
+- **install.ps1**：删除残留的 `$groups` 覆盖，修复 Windows 交互式菜单崩溃。
+- **终端 fd 探测**：检测 `/dev/tty` 断开（EOF）时自动降级为非交互安装。仅拒绝 EOF (ret=1)，不误杀残留输入 (ret=0)。
+- **EXIT trap**：`_menu_cleanup` 加入 EXIT trap，异常退出时恢复终端。
+
+### 设计考量
+- 二级菜单紧凑且细粒度可控
+- 互斥机制防止审查工具冲突
+- 所有 `(( ))` 算术和 `[[ ]] && cmd` 模式已系统性加固 `set -e` 防护
+- fd 探测提供纵深防御，不产生误报
+
+### 注意事项
+- `--all` 安装全部内容，默认使用 adversarial-review（非 Codex）
+- 选择 Codex CLI 会自动安装 `codex@openai-codex` 插件
+- adversarial-review skill 需要 `codex` CLI 以实现跨模型审查
+
+## [2.1.0] - 2026-04-02
+
+### 新特性
+- **Codex adversarial-review 插件**：用官方 [Codex 插件](https://github.com/openai/codex-plugin-cc)（`codex@openai-codex`）替代内置 `adversarial-review` skill。代码审查使用 `/codex:adversarial-review`，Codex 不可用时自动回退到 Claude 的 `code-reviewer` agent。插件已包含在默认安装中。
+- **技能重命名**：将 `/update` 恢复为 `/update-config`——目录从 `skills/update/` 重命名为 `skills/update-config/`。安装器升级时自动清理旧的 `skills/update` 和 `skills/adversarial-review` 目录。
+- **Smart-merge enabledPlugins 策略变更**：从"existing wins"改为"union"——新插件会自动补充到现有配置中，确保升级用户自动获得 `codex@openai-codex` 等新插件。
+
+### 设计理念
+- Codex 插件提供官方维护的对抗式审查实现，共享运行时，集成度更高
+- 带命名空间的技能命令（`update-config`）防止在所有仓库中意外覆盖项目级 `/update` 命令
+- enabledPlugins 的 union 合并确保升级用户自动获得新插件，同时保留现有配置
+- 回退审查路径（`code-reviewer` agent）确保没有 Codex CLI 也能正常审查代码
+
+### 注意事项
+- Codex 插件需要通过 `codex login` 认证（运行 `/codex:setup` 检查状态）
+- `docs/adversarial-review-showcase.md` 作为历史参考保留
+- CHANGELOG 中 `update_config` 和 `adversarial-review` 的历史条目保持原样
+- 安装器迁移逻辑自动删除旧的 `skills/update` 和 `skills/adversarial-review` 目录
+
 ## [2.0.0] - 2026-03-27
 
 ### 新特性
