@@ -86,7 +86,7 @@ cd awesome-claude-code-config
 
 ```
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Awesome Claude Code Config Installer  2.2.0
+    Awesome Claude Code Config Installer  2.2.1
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   ↑/↓ Navigate   Enter Open   a All  n None  d Defaults  q Quit
@@ -97,7 +97,7 @@ cd awesome-claude-code-config
     [3/4] Skills                   paper-reading, humanizer, update-config...
     [11/11] Plugins — Official     superpowers, context7, playwright...
     [0/3] Plugins — Community      claude-mem, claude-health, PUA
-    [0/6] Plugins — AI Research    fine-tuning, inference, optimization...
+    [0/9] Academic Research        fine-tuning, optimization, deepxiv-cli...
     [0/1] MCP Servers              Lark/飞书
 
      [ Submit ]
@@ -117,7 +117,7 @@ cd awesome-claude-code-config
 | Skills (4) | paper-reading、humanizer、humanizer-zh、update-config | humanizer-zh 关闭，其余开启 |
 | Plugins — Official (12) | everything-claude-code、superpowers、context7、commit-commands、document-skills、playwright、feature-dev、code-simplifier、ralph-loop、frontend-design、example-skills、github | 全部开启 |
 | Plugins — Community (3) | claude-mem、claude-health、PUA | 全部关闭 |
-| Plugins — AI Research (6) | tokenization、fine-tuning、post-training、inference-serving、distributed-training、optimization | 全部关闭 |
+| Academic Research (9) | tokenization、fine-tuning、post-training、inference-serving、distributed-training、optimization、deepxiv-cli、deepxiv-trending-digest、deepxiv-baseline-table | 全部关闭 |
 | MCP Servers (1) | Lark MCP server | 关闭 |
 
 ### CLI 参数
@@ -256,16 +256,19 @@ golang/       → gofmt、表驱动测试、gosec
 | [**health**](https://github.com/tw93/claude-health) | claude-health | Claude Code 会话健康检查和状态面板 |
 | [**pua**](https://github.com/tanweai/pua) | pua-skills | AI Agent 生产力倍增器 — 强制穷举式问题解决，支持中/英/日多语言 |
 
-**Plugins — AI Research**（6 个）— 在交互式菜单中选择，或通过 `--all` 安装：
+**Academic Research**（9 个）— 在交互式菜单中选择，或通过 `--all` 安装：
 
-| 插件 | 市场 | 功能 |
-|------|------|------|
+| 插件 / 技能 | 来源 | 功能 |
+|-------------|------|------|
 | [**tokenization**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | HuggingFace Tokenizers、SentencePiece |
 | [**fine-tuning**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | Axolotl、LLaMA-Factory、PEFT、Unsloth |
 | [**post-training**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | GRPO、RLHF、DPO、SimPO |
 | [**inference-serving**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | vLLM、SGLang、TensorRT-LLM、llama.cpp |
 | [**distributed-training**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | DeepSpeed、FSDP、Megatron-Core、Ray Train |
 | [**optimization**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | AWQ、GPTQ、GGUF、Flash Attention、bitsandbytes |
+| [**deepxiv-cli**](https://github.com/DeepXiv/deepxiv_sdk) | DeepXiv (GitHub) | arXiv/PMC 论文搜索与阅读，混合搜索覆盖 200 万+ 论文 |
+| [**deepxiv-trending-digest**](https://github.com/DeepXiv/deepxiv_sdk) | DeepXiv (GitHub) | 生成热门学术论文的 Markdown 摘要（近 7 天） |
+| [**deepxiv-baseline-table**](https://github.com/DeepXiv/deepxiv_sdk) | DeepXiv (GitHub) | 从论文构建 Baseline 对比表 |
 
 详见 [`plugins/README.md`](plugins/README.md) 了解安装方式。
 

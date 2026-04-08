@@ -302,6 +302,7 @@ INSTALL_MCP=false
 INSTALL_PLUGINS=false
 INSTALL_CLAUDE_MD=false
 INSTALL_SETTINGS=false
+INSTALL_DEEPXIV=false
 UNINSTALL=false
 FORCE=false
 SHOW_VERSION=false
@@ -313,6 +314,8 @@ REVIEW_ADVERSARIAL=false
 REVIEW_CODEX=false
 SELECTED_SKILLS=()
 SELECTED_PLUGINS=()
+SELECTED_DEEPXIV_SKILLS=()
+DEEPXIV_KNOWN_SKILLS=("deepxiv-cli" "deepxiv-trending-digest" "deepxiv-baseline-table")
 
 # --- Plugin groups ------------------------------------------------------
 
@@ -502,15 +505,18 @@ github|GitHub integration|1|plug-github")
 claude-health|Health check & wellness dashboard|0|plug-claude-health
 PUA|AI agent productivity booster (pua, pua-en, pua-ja)|0|plug-pua")
 
-    # Group 6: Plugins — AI Research
-    GROUP_LABELS+=("Plugins — AI Research")
-    GROUP_HINTS+=("")
+    # Group 6: Academic Research (AI Research plugins + DeepXiv skills)
+    GROUP_LABELS+=("Academic Research")
+    GROUP_HINTS+=("plugins + DeepXiv skills from github.com/DeepXiv/deepxiv_sdk")
     GROUP_ITEMS+=("tokenization|Tokenizer training & usage|0|plug-tokenization
 fine-tuning|Model fine-tuning|0|plug-fine-tuning
 post-training|Post-training (RLHF, DPO, GRPO)|0|plug-post-training
 inference-serving|Inference serving (vLLM, SGLang, TensorRT)|0|plug-inference-serving
 distributed-training|Distributed training (DeepSpeed, FSDP, Megatron)|0|plug-distributed-training
-optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimization")
+optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimization
+deepxiv-cli|arXiv/PMC paper search & reading CLI skill|0|deepxiv-cli
+deepxiv-trending-digest|Trending paper digest generation|0|deepxiv-trending-digest
+deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-table")
 
     # Group 7: MCP Servers
     GROUP_LABELS+=("MCP Servers")
@@ -915,6 +921,10 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
             skill-humanizer)        INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer") ;;
             skill-humanizer-zh)     INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer-zh") ;;
             skill-update-config)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("update-config") ;;
+            # DeepXiv
+            deepxiv-cli)            INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-cli") ;;
+            deepxiv-trending-digest) INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-trending-digest") ;;
+            deepxiv-baseline-table) INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-baseline-table") ;;
             # MCP
             mcp)                    INSTALL_MCP=true ;;
             # Plugins (all plug-* ids)
@@ -1261,6 +1271,73 @@ install_skills() {
     fi
 }
 
+install_deepxiv() {
+    local repo_url="https://github.com/DeepXiv/deepxiv_sdk"
+    info "Installing DeepXiv skills from github.com/DeepXiv/deepxiv_sdk..."
+    mkdir -p "$CLAUDE_DIR/skills"
+
+    # Pre-flight: git must be available
+    if ! command -v git &>/dev/null; then
+        error "git is required to install DeepXiv skills but was not found. Please install git first."
+        return 1
+    fi
+
+    local deepxiv_tmp
+    deepxiv_tmp="$(mktemp -d "${TMPDIR:-/tmp}/deepxiv_sdk.XXXXXX")" || { error "Failed to create temporary directory"; return 1; }
+
+    # Use local copy; default to known list when nothing selected (--all mode)
+    local -a skills_to_install=("${SELECTED_DEEPXIV_SKILLS[@]}")
+    if [[ ${#skills_to_install[@]} -eq 0 ]]; then
+        skills_to_install=("${DEEPXIV_KNOWN_SKILLS[@]}")
+    fi
+
+    # Clone the deepxiv_sdk repo (shallow clone for speed)
+    local clone_ok=false
+    if $DRY_RUN; then
+        info "Would clone $repo_url (shallow) to temporary directory"
+        clone_ok=true
+    else
+        if retry 3 3 "Clone deepxiv_sdk" git clone --depth 1 "$repo_url" "$deepxiv_tmp/deepxiv_sdk"; then
+            clone_ok=true
+            ok "DeepXiv SDK repo cloned (latest)"
+        else
+            error "Failed to clone deepxiv_sdk repo. Check network/proxy and try again."
+            (( INSTALL_WARNINGS++ )) || true
+            rm -rf "$deepxiv_tmp"
+            return 1
+        fi
+    fi
+
+    if $clone_ok && ! $DRY_RUN; then
+        local src_skills="$deepxiv_tmp/deepxiv_sdk/skills"
+        if [[ ! -d "$src_skills" ]]; then
+            error "deepxiv_sdk/skills directory not found in cloned repo"
+            (( INSTALL_WARNINGS++ )) || true
+            rm -rf "$deepxiv_tmp"
+            return 1
+        fi
+
+        for skill in "${skills_to_install[@]}"; do
+            local skill_src="$src_skills/$skill"
+            if [[ -d "$skill_src" ]]; then
+                rm -rf "$CLAUDE_DIR/skills/$skill"
+                cp -r "$skill_src" "$CLAUDE_DIR/skills/$skill"
+                ok "DeepXiv skill installed: $skill"
+            else
+                warn "DeepXiv skill not found in repo: $skill"
+                (( INSTALL_WARNINGS++ )) || true
+            fi
+        done
+    elif $DRY_RUN; then
+        for skill in "${skills_to_install[@]}"; do
+            info "Would install DeepXiv skill: $skill -> $CLAUDE_DIR/skills/$skill/"
+        done
+    fi
+
+    # Clean up
+    rm -rf "$deepxiv_tmp"
+}
+
 install_lessons() {
     info "Installing lessons.md template..."
     local target="$CLAUDE_DIR/lessons.md"
@@ -1456,6 +1533,7 @@ uninstall() {
     echo "  - $CLAUDE_DIR/settings.json (backed up first)"
     echo "  - $CLAUDE_DIR/rules/"
     echo "  - $CLAUDE_DIR/skills/ (installer-managed only)"
+    echo "  - $CLAUDE_DIR/skills/deepxiv-* (DeepXiv skills)"
     echo "  - $CLAUDE_DIR/lessons.md"
     echo "  - $CLAUDE_DIR/hooks/ (installer-managed only)"
     echo "  - Installed plugins (requires claude CLI)"
@@ -1494,6 +1572,12 @@ uninstall() {
     else
         rm -rf "$CLAUDE_DIR/skills" && ok "Removed skills/"
     fi
+
+    # Remove DeepXiv skills (glob to catch any installed by --all)
+    for deepxiv_skill in "$CLAUDE_DIR"/skills/deepxiv-*/; do
+        [[ -d "$deepxiv_skill" ]] || continue
+        rm -rf "$deepxiv_skill" && ok "Removed DeepXiv skill: $(basename "$deepxiv_skill")"
+    done
 
     rm -f "$CLAUDE_DIR/lessons.md" && ok "Removed lessons.md"
 
@@ -1568,8 +1652,10 @@ main() {
         # Review defaults for --all: adversarial ON, codex OFF
         REVIEW_ADVERSARIAL=true
         if $EXPLICIT_ALL; then
-            # Explicit --all: install everything including MCP and all plugin groups
+            # Explicit --all: install everything including MCP, DeepXiv, and all plugin groups
             INSTALL_MCP=true
+            INSTALL_DEEPXIV=true
+            SELECTED_DEEPXIV_SKILLS=("${DEEPXIV_KNOWN_SKILLS[@]}")
             PLUGIN_GROUPS=("all")
             # Add code-review plugin (normally from Review group)
             SELECTED_PLUGINS+=("code-review@claude-plugins-official")
@@ -1582,7 +1668,7 @@ main() {
     # Check if anything was selected
     if ! $INSTALL_CLAUDE_MD && ! $INSTALL_SETTINGS && ! $INSTALL_RULES && \
        ! $INSTALL_SKILLS && ! $INSTALL_LESSONS && ! $INSTALL_STATUSLINE && \
-       ! $INSTALL_PLUGINS && ! $INSTALL_MCP; then
+       ! $INSTALL_PLUGINS && ! $INSTALL_MCP && ! $INSTALL_DEEPXIV; then
         warn "Nothing selected to install."
         exit 0
     fi
@@ -1615,6 +1701,7 @@ main() {
     $INSTALL_STATUSLINE && install_statusline
     $INSTALL_MCP && install_mcp
     $INSTALL_PLUGINS && install_plugins
+    $INSTALL_DEEPXIV && install_deepxiv
 
     # Stamp version (skip if there were critical warnings)
     if ! $DRY_RUN; then
