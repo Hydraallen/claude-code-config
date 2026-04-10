@@ -182,6 +182,52 @@ if ! $cache_is_fresh; then
     fi
 fi
 
+# --- Terminal width ---
+# Claude Code runs statusline in a pipe (no tty on stdin), so $COLUMNS
+# and `tput cols` are unreliable. Probe the real terminal via /dev/pts/*.
+_get_term_width() {
+    # 1) $COLUMNS if set and positive
+    local c="${COLUMNS:-0}"
+    [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -gt 0 ] && { echo "$c"; return; }
+
+    # 2) Walk ancestor process fds to find the real terminal (Linux)
+    local _pid=$$
+    while [ "$_pid" -gt 1 ] 2>/dev/null; do
+        for _fd in /proc/"$_pid"/fd/*; do
+            [ -e "$_fd" ] || continue
+            local _tgt
+            _tgt=$(readlink "$_fd" 2>/dev/null) || continue
+            case "$_tgt" in /dev/pts/*|/dev/tty*)
+                c=$(stty size < "$_tgt" 2>/dev/null | awk '{print $2}')
+                [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -gt 0 ] && { echo "$c"; return; }
+            esac
+        done
+        _pid=$(awk '{print $4}' /proc/"$_pid"/stat 2>/dev/null) || break
+    done
+
+    # 3) Try tput cols as last resort before fallback
+    c=$(tput cols 2>/dev/null)
+    [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -gt 0 ] && { echo "$c"; return; }
+
+    # 4) Fallback
+    echo 120
+}
+COLUMNS=$(_get_term_width)
+
+# visible_len: compute display width of a string with ANSI escapes
+# Strips escape codes, then uses wc -L for accurate multi-byte/emoji width
+visible_len() {
+    local stripped w
+    stripped=$(printf "%b" "$1" | sed $'s/\x1b\[[0-9;]*[a-zA-Z]//g')
+    # wc -L gives display width (handles CJK/emoji double-width) — GNU only
+    w=$(printf "%b" "$stripped" | wc -L 2>/dev/null | tr -d ' ')
+    # Fallback for macOS/BSD where wc -L is unavailable
+    if [ -z "$w" ] || [ "$w" -eq 0 ] 2>/dev/null; then
+        w=${#stripped}
+    fi
+    echo "$w"
+}
+
 # --- Colors ---
 C_MODEL="\033[38;5;183m"
 C_DIR="\033[38;5;117m"
@@ -196,7 +242,7 @@ bar_colors=(71 72 78 114 150 186 222 221 220 214 208 202 196 160 124 88)
 BAR_W=20
 
 build_bar() {
-    local pct=$1 w=$BAR_W
+    local pct=$1 w=${2:-$BAR_W}
     local filled=$(( pct * w / 100 ))
     [ "$filled" -gt "$w" ] && filled=$w
     local empty=$(( w - filled ))
@@ -254,45 +300,117 @@ fmt_resets() {
     fi
 }
 
-# --- Separator ---
-sep="${C_SEP} \xe2\x94\x82 $C_R"
+# --- Assemble segments ---
+segments=()
+sep_visible_w=3  # " │ " is 3 visible characters
 
-# --- Assemble (single line) ---
-out="${ICON_MODEL} ${C_MODEL}${model}${C_R}"
+# Segment 1: Model
+segments+=("${ICON_MODEL} ${C_MODEL}${model}${C_R}")
 
+# Segment 2: Directory
 if [ -n "$dir_name" ]; then
-    out+="${sep}${ICON_DIR} ${C_DIR}${dir_name}${C_R}"
+    segments+=("${ICON_DIR} ${C_DIR}${dir_name}${C_R}")
 fi
 
-# Virtual environment (conda > venv/poetry/pipenv)
+# Segment 3: Conda/venv
 conda_env="${CONDA_DEFAULT_ENV:-}"
 conda_env="$(basename "$conda_env")"
 venv="${VIRTUAL_ENV:-}"
 venv="$(basename "$venv")"
 
 if [ -n "$conda_env" ]; then
-    out+="${sep}${ICON_CONDA} ${C_CONDA}${conda_env}${C_R}"
+    segments+=("${ICON_CONDA} ${C_CONDA}${conda_env}${C_R}")
 elif [ -n "$venv" ]; then
-    out+="${sep}${ICON_CONDA} ${C_CONDA}${venv}${C_R}"
+    segments+=("${ICON_CONDA} ${C_CONDA}${venv}${C_R}")
 fi
 
+# Segment 4: Git branch
 if [ -n "$git_branch" ]; then
-    out+="${sep}${C_GIT}${ICON_GIT} ${git_branch}${C_R}"
+    segments+=("${C_GIT}${ICON_GIT} ${git_branch}${C_R}")
 fi
 
-# Context bar
-ctx_pct_int=$(printf "%.0f" "$ctx_pct" 2>/dev/null || echo "$ctx_pct")
-ctx_bar=$(build_bar "$ctx_pct_int")
-ctx_fmt=$(fmt_ctx "$ctx_size")
-out+="${sep}${C_LABEL}context${C_R} ${ctx_bar} ${C_LABEL}${ctx_fmt}${C_R}"
+# Pre-compute widths of all segments (cached for reuse)
+_seg_widths=()
+_pre_w=0
+for _s in "${segments[@]}"; do
+    local_w=$(visible_len "$_s")
+    local_w=${local_w:-0}
+    _seg_widths+=("$local_w")
+    [ "$_pre_w" -gt 0 ] && _pre_w=$(( _pre_w + sep_visible_w ))
+    _pre_w=$(( _pre_w + local_w ))
+done
 
-# 5-hour usage bar (from API)
+# Segment 5: Context bar (adaptive width)
+ctx_pct_int=$(printf "%.0f" "$ctx_pct" 2>/dev/null || echo "$ctx_pct")
+ctx_fmt=$(fmt_ctx "$ctx_size")
+# Estimate overhead: "context " (8) + " " (1) + pct "XX%" (3-4) + " " (1) + ctx_fmt (~4) ≈ 18
+ctx_label_overhead=18
+ctx_bar_w=$BAR_W
+ctx_remaining=$(( COLUMNS - _pre_w - sep_visible_w - ctx_label_overhead ))
+if [ "$ctx_remaining" -lt "$BAR_W" ]; then
+    ctx_bar_w=$(( ctx_remaining >= 8 ? ctx_remaining : BAR_W ))
+fi
+ctx_bar=$(build_bar "$ctx_pct_int" "$ctx_bar_w")
+_ctx_seg="${C_LABEL}context${C_R} ${ctx_bar} ${C_LABEL}${ctx_fmt}${C_R}"
+segments+=("$_ctx_seg")
+_ctx_w=$(visible_len "$_ctx_seg"); _ctx_w=${_ctx_w:-0}
+_seg_widths+=("$_ctx_w")
+
+# Segment 6: 5-hour usage bar (adaptive width)
 if [ -n "$usage_5h" ]; then
     usage_pct=$(printf "%.0f" "$usage_5h" 2>/dev/null || echo "$usage_5h")
-    usage_bar=$(build_bar "$usage_pct")
     resets_fmt=$(fmt_resets "$usage_resets")
-    out+="${sep}${C_LABEL}5h${C_R} ${usage_bar}"
-    [ -n "$resets_fmt" ] && out+=" ${C_LABEL}${resets_fmt}${C_R}"
+    # Overhead: "5h " (3) + " " (1) + pct "XX%" (3-4) + " " (1) + resets (~5) ≈ 14
+    usage_label_overhead=14
+    usage_bar_w=$BAR_W
+
+    # Re-compute cumulative width including segment 5 (use cached widths + new segment)
+    _pre_w=0
+    for _w in "${_seg_widths[@]}"; do
+        [ "$_pre_w" -gt 0 ] && _pre_w=$(( _pre_w + sep_visible_w ))
+        _pre_w=$(( _pre_w + _w ))
+    done
+
+    usage_remaining=$(( COLUMNS - _pre_w - sep_visible_w - usage_label_overhead ))
+    if [ "$usage_remaining" -lt "$BAR_W" ]; then
+        usage_bar_w=$(( usage_remaining >= 8 ? usage_remaining : BAR_W ))
+    fi
+
+    usage_bar=$(build_bar "$usage_pct" "$usage_bar_w")
+    usage_seg="${C_LABEL}5h${C_R} ${usage_bar}"
+    [ -n "$resets_fmt" ] && usage_seg+=" ${C_LABEL}${resets_fmt}${C_R}"
+    segments+=("$usage_seg")
+    _usage_w=$(visible_len "$usage_seg"); _usage_w=${_usage_w:-0}
+    _seg_widths+=("$_usage_w")
 fi
+
+# --- Wrap algorithm ---
+sep_str="${C_SEP} \xe2\x94\x82 ${C_R}"
+
+out=""
+line_w=0
+
+_seg_idx=0
+for seg in "${segments[@]}"; do
+    seg_w=${_seg_widths[$_seg_idx]:-0}
+    _seg_idx=$(( _seg_idx + 1 ))
+    needed=$seg_w
+    [ "$line_w" -gt 0 ] && needed=$(( seg_w + sep_visible_w ))
+
+    if [ "$line_w" -gt 0 ] && [ $(( line_w + needed )) -gt "$COLUMNS" ]; then
+        # Wrap to next line
+        out+="\n"
+        line_w=0
+        needed=$seg_w
+    fi
+
+    if [ "$line_w" -gt 0 ]; then
+        out+="$sep_str"
+        line_w=$(( line_w + sep_visible_w ))
+    fi
+
+    out+="$seg"
+    line_w=$(( line_w + seg_w ))
+done
 
 printf "%b" "$out"

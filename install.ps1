@@ -762,7 +762,7 @@ function Install-Skills {
     if ($SelectedSkills.Count -gt 0) {
         # Install only selected skills
         foreach ($skill in $SelectedSkills) {
-            $src = Join-Path (Join-Path $SCRIPT_DIR "skills") $skill
+            $src = Join-Path $SCRIPT_DIR "skills" $skill
             $dst = Join-Path $skillsDir $skill
             if (Test-Path $src) {
                 if ($DryRun) {
