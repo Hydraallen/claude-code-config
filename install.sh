@@ -304,6 +304,7 @@ INSTALL_PLUGINS=false
 INSTALL_CLAUDE_MD=false
 INSTALL_SETTINGS=false
 INSTALL_SHELL_WRAPPER=false
+CO_AUTHOR=false
 UNINSTALL=false
 FORCE=false
 SHOW_VERSION=false
@@ -459,7 +460,8 @@ Common rules|Coding style, git, security, testing|1|rules-common
 StatusLine|Gradient progress bar & usage display|1|statusline
 Lessons|lessons.md template + SessionStart hook|1|lessons
 Search agent|Jeff read-only web search agent|1|agents
-Shell wrapper|cl/cl_auto zsh functions + system prompt|1|shell-wrapper")
+Shell wrapper|cl/cl_auto zsh functions + system prompt|1|shell-wrapper
+Co-authored-by|Add Claude as co-author in commits|0|co-author")
 
     # Group 1: Language Rules
     GROUP_LABELS+=("Language Rules")
@@ -908,6 +910,7 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
             lessons)                INSTALL_LESSONS=true ;;
             agents)                 INSTALL_AGENTS=true ;;
             shell-wrapper)          INSTALL_SHELL_WRAPPER=true ;;
+            co-author)              CO_AUTHOR=true ;;
             # Language rules
             rules-python)           INSTALL_RULES=true; RULE_LANGS+=("python") ;;
             rules-ts)               INSTALL_RULES=true; RULE_LANGS+=("typescript") ;;
@@ -933,10 +936,10 @@ optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimiza
         esac
     done
 
-    # Auto-enable settings.json when StatusLine or Lessons needs it for config
-    if ($INSTALL_STATUSLINE || $INSTALL_LESSONS) && ! $INSTALL_SETTINGS; then
+    # Auto-enable settings.json when StatusLine, Lessons, or Co-author needs it for config
+    if ($INSTALL_STATUSLINE || $INSTALL_LESSONS || $CO_AUTHOR) && ! $INSTALL_SETTINGS; then
         INSTALL_SETTINGS=true
-        info "settings.json auto-enabled (required by StatusLine/Lessons)"
+        info "settings.json auto-enabled (required by StatusLine/Lessons/Co-author)"
     fi
 }
 
@@ -1023,6 +1026,7 @@ install_settings() {
             info "Would copy: settings.json -> $CLAUDE_DIR/settings.json"
             $INSTALL_STATUSLINE || info "  - statusLine: skipped (not selected)"
             $INSTALL_LESSONS    || info "  - hooks.SessionStart: skipped (not selected)"
+            $CO_AUTHOR          && info "  - includeCoAuthoredBy: true" || info "  - includeCoAuthoredBy: skipped (not selected)"
         else
             if ! $INSTALL_STATUSLINE || ! $INSTALL_LESSONS; then
                 install_jq || true
@@ -1048,6 +1052,17 @@ install_settings() {
                     local sedtmp="$CLAUDE_DIR/settings.json.sedtmp"
                     sed 's/"defaultMode": "auto"/"defaultMode": "bypassPermissions"/' "$CLAUDE_DIR/settings.json" > "$sedtmp" && mv "$sedtmp" "$CLAUDE_DIR/settings.json"
                 fi
+            fi
+            # Set Co-authored-by preference
+            if $CO_AUTHOR && [[ -f "$CLAUDE_DIR/settings.json" ]]; then
+                if command -v jq &>/dev/null; then
+                    local tmp; tmp=$(jq '.includeCoAuthoredBy = true' "$CLAUDE_DIR/settings.json")
+                    echo "$tmp" > "$CLAUDE_DIR/settings.json"
+                else
+                    local sedtmp="$CLAUDE_DIR/settings.json.sedtmp"
+                    sed 's/"includeCoAuthoredBy": false/"includeCoAuthoredBy": true/' "$CLAUDE_DIR/settings.json" > "$sedtmp" && mv "$sedtmp" "$CLAUDE_DIR/settings.json"
+                fi
+                ok "Co-authored-by: Claude enabled in commits"
             fi
             ok "settings.json installed (new)"
         fi
@@ -1079,6 +1094,11 @@ install_settings() {
             info "  - statusLine: incoming takes priority"
         else
             info "  - statusLine: skipped (not selected)"
+        fi
+        if $CO_AUTHOR; then
+            info "  - includeCoAuthoredBy: true"
+        else
+            info "  - includeCoAuthoredBy: skipped (not selected)"
         fi
         return
     fi
@@ -1137,6 +1157,11 @@ install_settings() {
         # Downgrade auto -> bypassPermissions if Claude Code too old
         if ! $USE_AUTO_MODE; then
             jq '.permissions.defaultMode = "bypassPermissions"' "$merged" > "${merged}.tmp" && mv "${merged}.tmp" "$merged"
+        fi
+        # Set Co-authored-by preference
+        if $CO_AUTHOR; then
+            jq '.includeCoAuthoredBy = true' "$merged" > "${merged}.tmp" && mv "${merged}.tmp" "$merged"
+            ok "Co-authored-by: Claude enabled in commits"
         fi
         mv "$merged" "$existing"
         ok "settings.json smart-merged"
