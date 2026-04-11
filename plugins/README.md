@@ -1,6 +1,6 @@
 # Plugins
 
-23 plugins across 8 marketplaces. Context7, GitHub, Playwright migrated from MCP to official plugins.
+23 plugins across 8 marketplaces + 3 DeepXiv academic research skills (fetched from GitHub at install time). Context7, GitHub, Playwright migrated from MCP to official plugins.
 
 ## Plugin List
 
@@ -27,6 +27,16 @@
 | [**inference-serving**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | vLLM, SGLang, TensorRT-LLM, llama.cpp |
 | [**distributed-training**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | DeepSpeed, FSDP, Megatron-Core, Ray Train |
 | [**optimization**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | AWQ, GPTQ, GGUF, Flash Attention, bitsandbytes |
+
+## DeepXiv Academic Research Skills
+
+Pulled from [github.com/DeepXiv/deepxiv_sdk](https://github.com/DeepXiv/deepxiv_sdk) at install time (always latest). Grouped under **Academic Research** alongside the AI Research plugins above.
+
+| Skill | What It Does |
+|-------|--------------|
+| **deepxiv-cli** | arXiv/PMC paper search, section-by-section reading, AI agent analysis |
+| **deepxiv-trending-digest** | Generate markdown digests of trending papers (last 7 days) |
+| **deepxiv-baseline-table** | Build baseline comparison tables from research papers |
 
 ## Installation
 
