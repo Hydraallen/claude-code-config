@@ -1,5 +1,84 @@
 # 更新日志
 
+## [2.5.2] - 2026-04-21
+
+### 重构
+- **将 `env.CLAUDE_CODE_NO_FLICKER` 替换为顶层 `"tui": "fullscreen"`**：`tui` 是官方 schema 为"无闪烁全屏渲染"提供的原生字段。Schema 明确说明 `tui: "fullscreen"` "equivalent to `CLAUDE_CODE_NO_FLICKER=1`"。使用 schema 字段在配置上更规范、可被 JSON Schema 校验，并让 `env` 只保留没有原生字段对应的环境变量。
+
+### 注意事项
+- 行为完全一致——同样的全屏渲染器、同样的虚拟滚动缓冲。
+- `env` 仍保留 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` 和 `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING`，因为二者目前没有原生 schema 字段对应（`alwaysThinkingEnabled: false` 会完全禁用 thinking，语义不同）。
+
+## [2.5.1] - 2026-04-21
+
+### 错误修复
+- **`effortLevel` 默认值由 `max` 改为 `xhigh`**：`max` 不能作为持久默认值——Claude Code 的 `settings.json` 中 `effortLevel` 字段（以及环境变量 `CLAUDE_CODE_EFFORT_LEVEL`）仅接受 `low` / `medium` / `high` / `xhigh`。`max` 档位被官方刻意设计为会话级，只能通过 `/effort max` 每次会话手动开启。此前默认的 `max` 会被静默忽略。
+- **移除 `betas: ["extended-cache-ttl-2025-04-11"]`**：1 小时提示缓存 TTL 已正式发布（GA），该 beta header 已不再需要。保留过期的 beta ID 只是无效配置。
+
+### 注意事项
+- 如需 `max` 推理强度，请每次会话手动执行 `/effort max`——这是 Anthropic 对最高档位的刻意设计。
+- 移除 beta header 后，1h 缓存 TTL 仍原生支持。
+
+## [2.5.0] - 2026-04-21
+
+### 新特性
+- **新增插件 `andrej-karpathy-skills`**（marketplace `karpathy-skills`，仓库 `forrestchang/andrej-karpathy-skills`），默认启用。提供 Karpathy 风格的编码行为指引（Think-Before-Coding、Simplicity-First、Surgical Changes、Goal-Driven Execution），用于降低常见 LLM 编码失误。
+- **`everything-claude-code` 改为默认关闭**。从 essentials 组移动到新的 optional 组，仅在使用 `--all` 或手动勾选时安装。
+- **安装器尊重未选中状态**：运行安装器时，未在菜单中勾选但本地 `settings.json` 已有（或属于我方插件目录）的插件，会在 `enabledPlugins` 中写为 `false`。此前由于 merge 逻辑偏好已有值，未选中的插件可能仍处于启用状态。
+- **菜单重新分组**：取消旧的 "Plugins — Official" / "Plugins — Community" / "Skills" 分组，按用途重排。插件与 skill 不再按来源区分，而是按用途并列展示：
+  - **Workflow**（8）：andrej-karpathy-skills、superpowers、feature-dev、ralph-loop、commit-commands、code-simplifier、everything-claude-code、`update-config`（skill）
+  - **Integrations**（3）：context7、github、playwright
+  - **Design & Content**（5）：document-skills、example-skills、frontend-design、`humanizer`（skill）、`humanizer-zh`（skill）
+  - **Memory & Lifestyle**（3）：claude-mem、claude-health、PUA
+  - **Academic Research**（10）：`paper-reading`（skill）+ 6 个 AI-Research 插件 + 3 个 DeepXiv skill（原 9 项）
+  分组标签不再带冗余的 "Plugins —" 前缀。
+
+### 设计理由
+- Karpathy 的指引偏通用，适合大多数编码会话，故纳入 essentials。而 everything-claude-code 覆盖面广且风格强烈，改为默认关闭以减少与用户自选标准的冲突。
+- 新的 enabledPlugins 规则让交互式菜单具有"最终决定权"：选中即启用，未选中即关闭。本地 `settings.json` 中我方目录之外的键仍然保留，避免误删用户自行添加的插件。
+
+### Bug 修复（复审后）
+- **`enabledPlugins` catalogue 现在包含当前选择**。此前菜单里选中但未在 shipped `settings.json` 中声明的插件（`codex@openai-codex`、`health@claude-health`、`pua@pua-skills`）会被 `claude plugin install` 装好但被 filter 丢掉——Claude Code 视其为未启用。现在 catalogue = base keys ∪ `$selected`。
+- **Fallback 合并顺序纠正**。未交互插件时的 union 合并改为 existing 值胜出（jq 里 `$base * $over`，PowerShell 里 `$mergeHt $incoming $existing`）。此前运算对象写反，会让 v2.4.x 的用户在"只升级不动插件"时把 `everything-claude-code: true` 静默翻成 `false`。
+- **`install_jq` 提到 `install_settings` 顶部**。无 jq 的机器上，fresh install 且保留 statusline+lessons 时不再静默跳过插件 filter。
+- **Dry-run 横幅文案与实际语义一致**。此前 `--dry-run` 一律打印 "enabledPlugins: union (new plugins added, existing preserved)"，哪怕真跑时走的是 selection-aware rebuild；现在按 `$INSTALL_PLUGINS` 分支显示。
+
+### Windows 菜单对齐
+- install.ps1 现在支持 **→（右方向键）** 打开分组子菜单、**←（左方向键）** 返回主菜单，与 install.sh 对齐。两脚本提示文案同步更新。
+- README 列出完整快捷键：主菜单（↑↓ / Enter 或 → / q）、子菜单（↑↓ / Space / ← 或 Esc）、快捷（a / n / d）。
+
+### 注意事项
+- 在 `install.sh` 和 `install.ps1` 中新增 `PLUGINS_OPTIONAL` 组，`--all` 模式会同时展开 `PLUGINS_ESSENTIAL + PLUGINS_OPTIONAL`。
+- 选择感知的 enabledPlugins 合并仅在安装器处理了插件（`INSTALL_PLUGINS=true`）时生效；若本次只安装 `settings.json` 而未进入插件选择，沿用 fallback union 合并以保留现状。
+- 已有用户：之前启用的插件，只有在菜单中再次勾选才会保持启用。建议跑一遍交互式菜单复核。
+- README.md 与 README.zh-CN.md 大幅精简（从 349 → 约 195 行）：与 `plugins/README.md` 重复的逐插件细节被合并，同时保留交互菜单对应的完整链接与默认值表格。
+
+## [2.4.0] - 2026-04-21
+
+### 新特性
+- **默认权限模式 `auto`**：`settings.json` 默认使用 `permissions.defaultMode = "auto"`，让 Claude 自动批准安全操作、拦截高风险操作。安装器自动检测 Claude Code 版本，低于 2.1.80 时自动降级为 `bypassPermissions`（原有逻辑，保持不变）。
+- **最大推理强度**：在 `settings.json` 顶层新增 `effortLevel: "max"`，让 `/effort` 默认固定在最高档。旧版 CLI 不识别 `max` 时会自动回退到 `xhigh` / `high`。
+- **1 小时提示缓存 TTL**：`betas: ["extended-cache-ttl-2025-04-11"]` 启用扩展提示缓存（1 小时），替代默认的 5 分钟 TTL，显著降低长会话的缓存 churn。
+- **无闪烁渲染**：`env.CLAUDE_CODE_NO_FLICKER = "1"` 切换到全屏渲染模式（等价于 `/tui fullscreen`）。
+- **默认关闭 adaptive thinking**：`env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING = "1"` 把思考预算固定到 `MAX_THINKING_TOKENS`，不再按轮自适应。Opus 4.7 不受此开关影响（始终自适应）。
+
+### 设计理由
+- 把这些"一键开启"的默认集中到一处，简化上手——想要原版行为的用户只需改一行，其余人直接享受高配。
+- 未知键（`effortLevel`、`betas`）在旧版 Claude Code 中会被静默忽略，因此无需为它们写版本门控。
+- 只有 `auto` 模式真正需要降级，`install.sh` 中已有的 `_supports_auto_mode` 检测足够。
+
+### 注意事项
+- `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` 和 `CLAUDE_CODE_NO_FLICKER` 需要 Claude Code 2.1.104+。在更早的版本中是无害的空操作。
+- Opus 4.7 始终开启 adaptive thinking，不受该开关控制——如需严格固定预算，请切换到其他模型。
+
+## [2.3.1] - 2026-04-12
+
+### 错误修复
+- **Windows 远程安装崩溃**：修复 PowerShell 5.x 中通过 `irm URL | iex` 安装时报 `ParameterBindingException` 的问题。内部令牌（如 `"adversarial-review"`）泄漏到 `$args` 并作为位置参数传给 `Invoke-Expression`。现在通过过滤 `$args`，仅传递以 `-` 开头的 switch 参数。
+
+### 设计理由
+- `$_safeArgs` 过滤器替代原始 `@args` splatting——本地 `.\install.ps1 -All` 仍然正常工作，同时防止 `irm | iex` 管道模式下的垃圾令牌泄漏。
+
 ## [2.3.0] - 2026-04-10
 
 ### 新特性

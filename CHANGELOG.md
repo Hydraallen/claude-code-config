@@ -1,5 +1,84 @@
 # Changelog
 
+## [2.5.2] - 2026-04-21
+
+### Refactor
+- **Swap `env.CLAUDE_CODE_NO_FLICKER` for top-level `"tui": "fullscreen"`**: the `tui` setting is the schema-native way to select the flicker-free alt-screen renderer. Per the official schema it is "equivalent to `CLAUDE_CODE_NO_FLICKER=1`". Using the schema field is more discoverable, validates against settings.json's JSON Schema, and keeps `env` reserved for variables that have no native setting.
+
+### Notes & Caveats
+- Behaviour is identical — same fullscreen renderer, same virtualized scrollback.
+- `env` still carries `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` and `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` because neither has a schema-native equivalent (`alwaysThinkingEnabled: false` disables thinking entirely, which is not what we want).
+
+## [2.5.1] - 2026-04-21
+
+### Bug Fixes
+- **`effortLevel` default changed from `max` to `xhigh`**: `max` is not accepted as a persistent default — Claude Code only allows `low`/`medium`/`high`/`xhigh` for `effortLevel` in `settings.json` (and for `CLAUDE_CODE_EFFORT_LEVEL`). The `max` tier is intentionally session-scoped and must be set per session via `/effort max`. The previous default was silently ignored.
+- **Removed `betas: ["extended-cache-ttl-2025-04-11"]`**: the 1-hour prompt cache TTL is now generally available, so the beta header is no longer required. The expired beta ID was dead configuration.
+
+### Notes & Caveats
+- If you want `max` reasoning effort, invoke `/effort max` per session — this is Anthropic's deliberate design for the top tier.
+- 1h cache TTL continues to work natively after removing the beta header.
+
+## [2.5.0] - 2026-04-21
+
+### Features
+- **New plugin: `andrej-karpathy-skills`** (marketplace `karpathy-skills` at `forrestchang/andrej-karpathy-skills`) enabled by default. Adds Karpathy-inspired behavioural guidelines (Think-Before-Coding, Simplicity-First, Surgical Changes, Goal-Driven Execution) to reduce common LLM coding mistakes.
+- **`everything-claude-code` now default disabled**. Moved out of the essential plugin group into an optional group; only installed via explicit `--all` or manual opt-in.
+- **Installer respects plugin de-selection**: when running the installer, any plugin that the user did NOT select but that already exists in their local `settings.json` (or is known to the installer catalogue) is now written as `false` in `enabledPlugins`. Previously, unselected plugins could silently remain enabled because the merge logic preferred existing values.
+- **Menu reorganisation**: the "Plugins — Official" and "Plugins — Community" groups have been replaced with four usage-oriented groups and the old "Skills" group has been dissolved into them. Plugins and skills now live side-by-side in the same category, since they serve the same workflow:
+  - **Workflow** (8): andrej-karpathy-skills, superpowers, feature-dev, ralph-loop, commit-commands, code-simplifier, everything-claude-code, `update-config` (skill)
+  - **Integrations** (3): context7, github, playwright
+  - **Design & Content** (5): document-skills, example-skills, frontend-design, `humanizer` (skill), `humanizer-zh` (skill)
+  - **Memory & Lifestyle** (3): claude-mem, claude-health, PUA
+  - **Academic Research** (10): `paper-reading` (skill) + 6 AI-Research plugins + 3 DeepXiv skills (previously 9)
+  Group labels no longer carry the redundant "Plugins —" prefix.
+
+### Design Rationale
+- Karpathy's guidelines are general-purpose heuristics that apply to most coding sessions, so they belong in the essentials group. Everything-claude-code is broad and opinionated; making it opt-in reduces surprise overlap with user-selected standards.
+- The new enabledPlugins rule makes the interactive menu authoritative: what you pick is what's enabled. Unknown keys from the existing settings.json that are not in our catalogue are still preserved so manually-added plugins aren't clobbered.
+
+### Bug Fixes (post-review)
+- **`enabledPlugins` catalogue now includes the current selection**. Previously, plugins selected in the menu but not declared in the shipped `settings.json` (e.g. `codex@openai-codex`, `health@claude-health`, `pua@pua-skills`) were installed by `claude plugin install` but silently omitted from `enabledPlugins` — Claude Code treated them as disabled. The selection-aware rebuild now unions base keys with `$selected`.
+- **Fallback merge order corrected**. When plugins aren't interacted with this run, the union merge now has existing values winning on conflict (`$base * $over` in jq, `$mergeHt $incoming $existing` in PowerShell). Previously the operands were swapped, silently flipping v2.4.x users' `everything-claude-code: true` to `false` on any upgrade that didn't touch plugins.
+- **`install_jq` hoisted in `install_settings`**. Fresh installs on jq-less machines with statusline+lessons both on no longer silently skip the plugin selection filter.
+- **Dry-run banner now reflects actual semantics**. Previously `--dry-run` printed "enabledPlugins: union (new plugins added, existing preserved)" even when the real run would do a selection-aware rebuild — now branches on `$INSTALL_PLUGINS`.
+
+### Windows Menu Parity
+- Install.ps1 now accepts **→ (Right arrow)** to open a group's sub-menu and **← (Left arrow)** to return, matching install.sh. Hint strings updated in both scripts.
+- README documents the full key bindings: main menu (↑↓ / Enter or → / q), sub-menu (↑↓ / Space / ← or Esc), and shortcuts (a / n / d).
+
+### Notes & Caveats
+- `PLUGINS_OPTIONAL` group added alongside `PLUGINS_ESSENTIAL` (install.sh and install.ps1). `--all` mode expands to include both.
+- The selection-aware enabledPlugins merge only activates when the installer touches plugins (`INSTALL_PLUGINS=true`). If you install only `settings.json` without any plugin selection, the fallback union merge preserves existing state.
+- Existing users: your previously-enabled plugins stay enabled only if re-selected in the menu. Run the interactive menu to adjust.
+- README.md and README.zh-CN.md significantly trimmed (from 349 → ~195 lines): the per-plugin duplication that overlapped with `plugins/README.md` has been collapsed, while the full interactive-menu catalogue is kept inline with links and defaults.
+
+## [2.4.0] - 2026-04-21
+
+### Features
+- **Default permission mode `auto`**: `settings.json` ships with `permissions.defaultMode = "auto"` so Claude autonomously approves safe actions and blocks risky ones. Installer auto-detects Claude Code version and downgrades to `bypassPermissions` on versions older than 2.1.80 (existing logic, unchanged).
+- **Max reasoning effort default**: `effortLevel: "max"` at the top level of `settings.json`. Pins `/effort` to the highest tier by default; fall back to `xhigh` / `high` automatically on older CLIs that reject `max`.
+- **1-hour prompt cache TTL**: `betas: ["extended-cache-ttl-2025-04-11"]` enables extended prompt caching (1h) instead of the default 5-minute TTL, reducing cache churn on long sessions.
+- **Flicker-free rendering**: `env.CLAUDE_CODE_NO_FLICKER = "1"` switches to fullscreen rendering mode (equivalent to `/tui fullscreen`).
+- **Adaptive thinking disabled by default**: `env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING = "1"` pins thinking budget to `MAX_THINKING_TOKENS` instead of adapting per-turn. No effect on Opus 4.7 (always adaptive).
+
+### Design Rationale
+- Keeping these as a single "one knob on" default set simplifies onboarding — users who want the stock behaviour change one value; users who don't care get the fast path.
+- Unknown keys (`effortLevel`, `betas`) are silently ignored by older Claude Code versions, so no version gating needed in the installer.
+- `auto` mode is the only default that genuinely needs fallback; the existing `_supports_auto_mode` check in `install.sh` handles that.
+
+### Notes & Caveats
+- `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` and `CLAUDE_CODE_NO_FLICKER` are recognised by Claude Code 2.1.104+. On earlier versions they are harmless no-ops.
+- Adaptive thinking is always on for Opus 4.7 regardless of the env var — change `model` if you need strict fixed-budget behaviour.
+
+## [2.3.1] - 2026-04-12
+
+### Bug Fixes
+- **Windows remote install crash**: Fixed `ParameterBindingException` when running `irm URL | iex` on PowerShell 5.x. Internal tokens like `"adversarial-review"` leaked into `$args` and were splatted as positional arguments to `Invoke-Expression`. Now filters `$args` to only pass recognized switch-style arguments (starting with `-`).
+
+### Design Rationale
+- `$_safeArgs` filter replaces raw `@args` splatting — keeps `.\install.ps1 -All` working locally while preventing garbage token leakage in `irm | iex` piped mode.
+
 ## [2.3.0] - 2026-04-10
 
 ### Features

@@ -2,9 +2,12 @@
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1",
     "API_TIMEOUT_MS": "3000000"
   },
   "model": "opus",
+  "effortLevel": "xhigh",
+  "tui": "fullscreen",
   "includeCoAuthoredBy": false,
   "enabledPlugins": {
     "document-skills@anthropic-agent-skills": true,
@@ -15,7 +18,8 @@
     "inference-serving@ai-research-skills": true,
     "distributed-training@ai-research-skills": true,
     "optimization@ai-research-skills": true,
-    "everything-claude-code@everything-claude-code": true,
+    "everything-claude-code@everything-claude-code": false,
+    "andrej-karpathy-skills@karpathy-skills": true,
     "claude-mem@thedotmack": true,
     "frontend-design@claude-plugins-official": true,
     "context7@claude-plugins-official": true,
@@ -56,7 +60,9 @@
       }
     ]
   },
+  "skipDangerousModePermissionPrompt": true,
   "permissions": {
+    "defaultMode": "auto",
     "allow": [
       "Bash(*)",
       "Read(*)",
