@@ -1,6 +1,6 @@
 ---
 name: paper-reading
-description: Use when user asks to read, summarize, or analyze a research paper (PDF or text). Triggers on keywords like "read paper", "summarize paper", "paper summary", "literature review", "analyze this paper"
+description: Use when user asks to read, summarize, or analyze a research paper (PDF or text). Triggers on keywords like "read paper", "summarize paper", "paper summary", "literature review", "analyze this paper". Produces either a Markdown summary or a styled HTML summary with hand-drawn SVG diagrams — when the user hasn't said which, ask first.
 ---
 
 # Paper Reading - Research Paper Summarization
@@ -23,16 +23,27 @@ A structured approach to reading and summarizing scientific research papers. **A
 ```dot
 digraph paper_reading {
     rankdir=TB;
-    "Receive paper" -> "Get PDF file";
+    "Receive paper" -> "Choose format (md/html)";
+    "Choose format (md/html)" -> "Get PDF file";
     "Get PDF file" -> "Read PDF content";
     "Read PDF content" -> "Identify paper type";
     "Identify paper type" -> "Prepare output directory";
     "Prepare output directory" -> "Extract figures (pymupdf4llm)";
     "Extract figures (pymupdf4llm)" -> "Filter & rename images";
     "Filter & rename images" -> "Fill type-specific template";
-    "Fill type-specific template" -> "Write markdown file";
+    "Fill type-specific template" -> "Write markdown file" [label="md"];
+    "Fill type-specific template" -> "Render styled HTML + inline SVG" [label="html"];
 }
 ```
+
+## Step 0: Choose Output Format (md vs html)
+
+Settle the output format before doing the work — it shapes how you present everything downstream, and the token cost difference is real, so the user deserves the choice.
+
+- **User already named a format** → honor it, don't ask. Treat a request for a web page, a "nice-looking"/visual summary, or an explicit "html" as HTML; treat "md"/"markdown"/plain-text requests as Markdown. The user may phrase this in any language — match on intent, not on literal English keywords.
+- **User didn't say** → ask one short question **in the user's language** and wait for the answer. Name the trade-off honestly rather than guessing: Markdown is lightweight and token-cheap (good for archiving and re-editing), while HTML looks better and adds hand-drawn SVG flowcharts/diagrams at the key points to aid understanding, but costs more tokens.
+
+Both formats share the **same content backbone**: the type-specific template, the same extracted figures, the same depth-first writing. HTML is not a different or thinner summary — it's the same analysis, presented so a reader grasps it faster. So always do the full analysis (Steps 1–4), then either write Markdown or render it as HTML (see **HTML Output Mode** near the end).
 
 ## Step 1: PDF Acquisition
 
@@ -561,6 +572,64 @@ All types share these sections:
 - **Rating:** Choose from [Breakthrough / Important / Valuable / Incremental] with justification
 - **Comprehension verification:** Self-check with 4 questions after writing (Andrew Ng framework)
 
+## HTML Output Mode
+
+Active only when the user chose HTML (Step 0). The goal: take the exact same content you'd write into the Markdown summary and present it so a reader *gets it faster* — clean typography, the paper's own figures where they help, and **hand-drawn inline SVG diagrams at the few places where a redrawn picture beats prose or a dense screenshot**.
+
+Write a single `summary.html` where `summary.md` would otherwise go, referencing the extracted figures from `./images/` with relative paths (the same images the md path produces). Keep CSS inline in a `<style>` block so the file travels with just its `images/` folder.
+
+### Page scaffold
+
+Use semantic HTML and a calm, readable theme. A reasonable baseline (adapt freely — this is a starting point, not a cage):
+
+- Centered reading column (~760px max-width), generous line-height (~1.7), a comfortable body font.
+- A restrained palette: one accent color reused across headings, links, the Key Insight callout, and the SVG diagrams, so the page reads as one coherent document.
+- Style the shared sections distinctively: **Basic Information** as a card at the top, **Key Insight** as a highlighted callout (left border + tint), tables with a header row and zebra striping, figures as `<figure>` with `<figcaption>`.
+- Make it responsive: `<meta name="viewport">` and `img { max-width: 100%; }`.
+
+### Equations
+
+If the paper has equations, load MathJax once from CDN and keep LaTeX in `\( \)` / `\[ \]`. This is the only network dependency and it degrades gracefully — without a connection the reader still sees the raw LaTeX. Skip it entirely when there are no equations.
+
+### Hand-drawn SVG diagrams (the point of HTML mode)
+
+This is where HTML earns its extra tokens. At the **key comprehension moments**, hand-draw a clean inline SVG instead of — or alongside — the paper's screenshot. Strong candidates:
+
+- **Overall architecture / pipeline** — usually the single most valuable diagram; redraw the system as labeled blocks with data-flow arrows.
+- **Algorithm / training flow** — a step-by-step flowchart when the method is procedural.
+- **Naive-vs-proposed contrast** — two small panels showing why the obvious approach fails and what the paper's twist fixes.
+- **Data / module interaction** — what flows where, when the text describes a non-obvious dependency.
+
+You don't need a diagram for every paper or every section. 1–3 well-chosen diagrams that unlock the hardest ideas are worth more than a dozen decorative ones. A redrawn schematic often clarifies more than the paper's dense original; when both add value, show the SVG for intuition and embed the original figure for fidelity.
+
+**Keep diagrams legible and consistent**, so the page looks designed rather than scrapbooked:
+
+- Reuse one visual vocabulary: rounded rects for modules/components, solid arrows for data flow, dashed arrows for optional/feedback paths, the page accent color for emphasis.
+- Set a `viewBox` and `width="100%"` so diagrams scale; cap their height so they don't dominate the page.
+- Label nodes and edges with short text; group related blocks; keep it to ~8–10 nodes per diagram — split or simplify rather than cram.
+- Match the page font in `<text>` elements.
+
+Minimal style anchor (extend, don't copy literally):
+
+```html
+<svg viewBox="0 0 640 200" width="100%" role="img" aria-label="Pipeline overview"
+     font-family="system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3"
+            orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3b6db5"/></marker>
+  </defs>
+  <rect x="20" y="70" width="150" height="60" rx="10" fill="#eef3fb" stroke="#3b6db5"/>
+  <text x="95" y="105" text-anchor="middle" font-size="14">Input</text>
+  <line x1="170" y1="100" x2="240" y2="100" stroke="#3b6db5" stroke-width="2"
+        marker-end="url(#arrow)"/>
+  <!-- ...more blocks... -->
+</svg>
+```
+
+### What stays the same
+
+Paper-type templates, the depth-first writing principles, the figure priority guide, and the three-perspective evaluation all apply unchanged. HTML mode changes *presentation*, never the analytical substance — a beautiful page wrapped around shallow content is a failure.
+
 ## Common Mistakes
 
 | Mistake | Correction |
@@ -582,6 +651,10 @@ All types share these sections:
 | Key Insight too vague or missing | Key Insight must be a specific, actionable new idea |
 | Evaluation missing three perspectives | Separately write authors' conclusion, personal assessment, overall evaluation |
 | Not distinguishing author-acknowledged vs self-discovered limitations | Critical Analysis must separate the two types of limitations |
+| Asking md-vs-html when the user already specified | Honor an explicit format; only ask when it's genuinely ambiguous |
+| HTML summary thinner than the md version would be | HTML must carry the full template content — same depth, just better presented |
+| Decorative SVGs that don't aid understanding | Draw 1–3 diagrams that unlock the hardest ideas; skip filler |
+| SVG diagrams in clashing styles | Reuse one visual vocabulary (shapes, arrows, accent color) across all diagrams |
 
 ## Language
 

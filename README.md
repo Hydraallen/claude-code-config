@@ -1,6 +1,6 @@
 <!-- This is the source of truth. README.zh-CN.md is the Chinese translation. Keep both in sync. -->
 
-**English** | [中文](./README.zh-CN.md) | [Codex Branch](https://github.com/Mizoreww/awesome-claude-code-config/tree/codex) | [Changelog](./CHANGELOG.md)
+**English** | [中文](./README.zh-CN.md) | [Codex Branch](https://github.com/Hydraallen/claude-code-config/tree/codex) | [Changelog](./CHANGELOG.md)
 
 # Awesome Claude Code Configuration
 
@@ -20,13 +20,13 @@ Production-ready configuration for [Claude Code](https://claude.com/claude-code)
 **macOS / Linux**:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.sh)
 ```
 
 **Windows (PowerShell)**:
 
 ```powershell
-irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex
 ```
 
 Launches a two-level interactive selector. Append `--all` / `-All` to skip the menu and install everything non-interactively. Other flags: `--dry-run`, `--uninstall`, `--version` (PowerShell: `-DryRun`, `-Uninstall`, `-Version`).

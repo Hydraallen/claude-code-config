@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.6.0] - 2026-05-22
+
+### Features
+- **`paper-reading` skill gains an HTML output mode.** The skill now asks, when the user hasn't specified, whether to produce a Markdown summary (lightweight, token-cheap) or a styled HTML summary (richer, more tokens). HTML mode reuses the exact same content backbone (paper-type templates, depth-first writing, extracted figures) but presents it with a clean reading layout and **hand-drawn inline SVG diagrams** at key comprehension moments (architecture/pipeline, algorithm flow, naive-vs-proposed contrast). A new `Step 0: Choose Output Format` gates the workflow; an `HTML Output Mode` section documents the page scaffold, optional MathJax-via-CDN for equations, and SVG diagram conventions.
+
+### Design Rationale
+- **Ask, don't guess**: the token cost gap between md and html is real, so when intent is ambiguous the skill surfaces the trade-off rather than defaulting silently.
+- **Inline SVG over Mermaid/CDN** for diagrams: chosen for full offline self-containment and maximum visual control; the only network dependency is optional MathJax for equation rendering, which degrades gracefully to raw LaTeX.
+- **HTML references `./images/` with relative paths** (not base64-embedded): keeps the file lean and shares the same extracted figures the md path already produces.
+- **Same substance, better presentation**: HTML is explicitly framed as the same analysis presented for faster comprehension, never a thinner summary — guarded by new Common Mistakes rows.
+
+### Notes & Caveats
+- HTML output travels with its sibling `images/` folder; moving the `.html` alone drops the paper's figures (redrawn SVGs still render).
+- Both `skills/paper-reading/SKILL.md` (repo source) and `~/.claude/skills/paper-reading/SKILL.md` (installed copy) were updated and verified identical.
+
 ## [2.5.2] - 2026-04-21
 
 ### Refactor

@@ -1,5 +1,20 @@
 # 更新日志
 
+## [2.6.0] - 2026-05-22
+
+### 新功能
+- **`paper-reading` skill 新增 HTML 输出模式。** 当用户未指明时，skill 会先询问要 Markdown 总结（轻量、省 token，适合归档与再编辑）还是 HTML 总结（更好看、更费 token）。HTML 模式复用与 Markdown 完全相同的内容骨架（论文类型模板、深度优先写法、抽取的图表），但配以整洁的阅读排版，并在关键理解点处**手绘内联 SVG 示意图**（架构/流水线、算法流程、朴素 vs 改进方案对比）。新增 `Step 0: Choose Output Format` 作为流程入口；`HTML Output Mode` 小节说明页面骨架、可选的 MathJax（CDN 渲染公式）以及 SVG 绘图规范。
+
+### 设计取舍
+- **询问而非猜测**：md 与 html 的 token 成本差异真实存在，意图不明确时让 skill 把权衡摆给用户，而非静默走默认。
+- **用内联 SVG 而非 Mermaid/CDN** 画图：为了完全离线自包含与最大可控性；唯一的网络依赖是可选的 MathJax 公式渲染，且离线时优雅降级为原始 LaTeX。
+- **HTML 用相对路径引用 `./images/`**（而非 base64 内嵌）：保持文件精简，并复用 md 路径已经抽取的同一批图。
+- **同样的实质、更好的呈现**：HTML 被明确定位为"同一份分析、呈现得让人更快读懂"，绝非更单薄的总结——并由新增的 Common Mistakes 条目守住这一点。
+
+### 注意事项
+- HTML 产物随其同级 `images/` 目录一起移动；单独搬走 `.html` 会丢失论文原图（重绘的 SVG 仍可显示）。
+- 仓库源文件 `skills/paper-reading/SKILL.md` 与已安装副本 `~/.claude/skills/paper-reading/SKILL.md` 同步更新并校验一致。
+
 ## [2.5.2] - 2026-04-21
 
 ### 重构

@@ -1,6 +1,6 @@
 <!-- 本文件与 README.md 同步维护。README.md 为主，本文件为翻译。 -->
 
-[English](./README.md) | **中文** | [Codex 分支](https://github.com/Mizoreww/awesome-claude-code-config/tree/codex) | [更新日志](./CHANGELOG.zh-CN.md)
+[English](./README.md) | **中文** | [Codex 分支](https://github.com/Hydraallen/claude-code-config/tree/codex) | [更新日志](./CHANGELOG.zh-CN.md)
 
 # Awesome Claude Code Configuration
 
@@ -20,13 +20,13 @@
 **macOS / Linux**:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.sh)
 ```
 
 **Windows (PowerShell)**:
 
 ```powershell
-irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex
 ```
 
 启动两级交互菜单。追加 `--all` / `-All` 跳过菜单全量安装。其他参数：`--dry-run`、`--uninstall`、`--version`（PowerShell 对应 `-DryRun`、`-Uninstall`、`-Version`）。
