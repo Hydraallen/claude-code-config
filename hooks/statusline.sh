@@ -135,7 +135,7 @@ bg_fetch_usage() {
         --connect-timeout 2 --max-time 5 \
         -H "Authorization: Bearer $token" \
         -H "Content-Type: application/json" \
-        -H "User-Agent: claude-code/2.1.71" \
+        -H "User-Agent: claude-code/$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo 'unknown')" \
         -H "anthropic-beta: oauth-2025-04-20" \
         "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
 
