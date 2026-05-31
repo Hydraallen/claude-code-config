@@ -164,9 +164,9 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | Key | Value | Effect |
 |-----|-------|--------|
 | `permissions.defaultMode` | `auto` | Auto-approve safe actions, block risky ones |
-| `effortLevel` | `max` | Pin `/effort` to highest reasoning tier |
-| `betas` | `extended-cache-ttl-2025-04-11` | 1-hour prompt cache (vs default 5 min) |
-| `env.CLAUDE_CODE_NO_FLICKER` | `1` | Fullscreen rendering |
+| `skipDangerousModePermissionPrompt` | `true` | Suppresses the warning prompt when using `auto` or `bypassPermissions` mode — remove this key if you want the safety prompt |
+| `effortLevel` | `xhigh` | High reasoning effort tier |
+| `tui` | `fullscreen` | Flicker-free alt-screen rendering |
 | `env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` | `1` | Fixed thinking budget (no effect on Opus 4.7) |
 
 Smart merge on re-install preserves your overrides for `env`, `permissions.allow`, `enabledPlugins`, `hooks.SessionStart`, and `statusLine`. Third-party plugins in your `enabledPlugins` that are outside this catalogue are left untouched.

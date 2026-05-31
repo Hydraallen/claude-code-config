@@ -294,6 +294,7 @@ DRY_RUN=false
 INSTALL_ALL=false
 EXPLICIT_ALL=false
 INSTALL_WARNINGS=0
+INSTALL_CRITICAL=0
 INSTALL_RULES=false
 INSTALL_SKILLS=false
 INSTALL_AGENTS=false
@@ -494,6 +495,7 @@ ralph-loop|Automated iteration loop|1|plug-ralph-loop
 commit-commands|git commit / push / PR workflow|1|plug-commit-commands
 code-simplifier|Code simplification & cleanup|1|plug-code-simplifier
 everything-claude-code|TDD, security, database, Go/Python/Spring Boot|0|plug-everything-claude-code
+harness-workflow|Structured development workflow (Planner→Generator→Evaluator)|1|skill-harness-workflow
 update-config|Configure Claude Code via settings.json (skill)|1|skill-update-config")
 
     # Group 4: Integrations
@@ -940,6 +942,7 @@ deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-
             skill-humanizer)        INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer") ;;
             skill-humanizer-zh)     INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer-zh") ;;
             skill-update-config)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("update-config") ;;
+            skill-harness-workflow) INSTALL_SKILLS=true; SELECTED_SKILLS+=("harness-workflow") ;;
             # DeepXiv
             deepxiv-cli)            INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-cli") ;;
             deepxiv-trending-digest) INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-trending-digest") ;;
@@ -956,10 +959,10 @@ deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-
         esac
     done
 
-    # Auto-enable settings.json when StatusLine, Lessons, or Co-author needs it for config
-    if ($INSTALL_STATUSLINE || $INSTALL_LESSONS || $CO_AUTHOR) && ! $INSTALL_SETTINGS; then
+    # Auto-enable settings.json when StatusLine, Lessons, Co-author, or Plugins need it for config
+    if ($INSTALL_STATUSLINE || $INSTALL_LESSONS || $CO_AUTHOR || $INSTALL_PLUGINS) && ! $INSTALL_SETTINGS; then
         INSTALL_SETTINGS=true
-        info "settings.json auto-enabled (required by StatusLine/Lessons/Co-author)"
+        info "settings.json auto-enabled (required by StatusLine/Lessons/Co-author/Plugins)"
     fi
 }
 
@@ -989,28 +992,42 @@ confirm() {
 
 install_claude_md() {
     info "Installing CLAUDE.md..."
+
+    # Build the target content in a temp file first (so we can diff before writing)
+    local review_line
+    if $REVIEW_ADVERSARIAL; then
+        review_line='Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — always invoke the `adversarial-review` skill to perform it. If the adversarial-review skill is unavailable (e.g., `codex` CLI not installed), fall back to using the `code-reviewer` agent for the review. Never substitute the actual review call with a text-only description.'
+    elif $REVIEW_CODEX; then
+        review_line='Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — first check if the Codex plugin is available by running `/codex:setup`. If Codex is ready (`ready: true`), invoke `/codex:adversarial-review` to perform the review. If Codex is unavailable or not authenticated, fall back to using the `code-reviewer` agent for the review. Never substitute the actual review call with a text-only description.'
+    else
+        review_line='Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — use the `code-reviewer` agent to perform it. Never substitute the actual review call with a text-only description.'
+    fi
+
     if $DRY_RUN; then
         info "Would copy: CLAUDE.md -> $CLAUDE_DIR/CLAUDE.md"
         info "  Code Review: adversarial=$REVIEW_ADVERSARIAL codex=$REVIEW_CODEX"
     else
-        cp "$SCRIPT_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
-
-        # Dynamic Code Review section based on review tool selection
-        local review_line
-        if $REVIEW_ADVERSARIAL; then
-            review_line='Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — always invoke the `adversarial-review` skill to perform it. If the adversarial-review skill is unavailable (e.g., `codex` CLI not installed), fall back to using the `code-reviewer` agent for the review. Never substitute the actual review call with a text-only description.'
-        elif $REVIEW_CODEX; then
-            review_line='Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — first check if the Codex plugin is available by running `/codex:setup`. If Codex is ready (`ready: true`), invoke `/codex:adversarial-review` to perform the review. If Codex is unavailable or not authenticated, fall back to using the `code-reviewer` agent for the review. Never substitute the actual review call with a text-only description.'
-        else
-            review_line='Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — use the `code-reviewer` agent to perform it. Never substitute the actual review call with a text-only description.'
-        fi
-
-        # Replace the Code Review line in CLAUDE.md (the line after "## Code Review\n")
+        # Prepare new content in a temp file
+        local new_claude_md; new_claude_md="$(mktemp)"
+        cp "$SCRIPT_DIR/CLAUDE.md" "$new_claude_md"
         if command -v sed &>/dev/null; then
-            # Use a temp file to avoid sed -i portability issues
-            local tmp="$CLAUDE_DIR/CLAUDE.md.tmp"
-            sed '/^Whenever a code review is needed/c\'"$review_line" "$CLAUDE_DIR/CLAUDE.md" > "$tmp" && mv "$tmp" "$CLAUDE_DIR/CLAUDE.md"
+            local _sedtmp="$new_claude_md._sedtmp"
+            sed '/^Whenever a code review is needed/c\'"$review_line" "$new_claude_md" > "$_sedtmp" && mv "$_sedtmp" "$new_claude_md"
         fi
+
+        # Compare with existing — skip if identical
+        if [[ -f "$CLAUDE_DIR/CLAUDE.md" ]] && diff -q "$CLAUDE_DIR/CLAUDE.md" "$new_claude_md" &>/dev/null; then
+            ok "CLAUDE.md unchanged, skipping"
+            rm -f "$new_claude_md"
+            return
+        fi
+
+        # Content differs: back up existing before overwriting
+        if [[ -f "$CLAUDE_DIR/CLAUDE.md" ]]; then
+            cp "$CLAUDE_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md.bak"
+            warn "Existing CLAUDE.md backed up to CLAUDE.md.bak — merge your customizations manually"
+        fi
+        mv "$new_claude_md" "$CLAUDE_DIR/CLAUDE.md"
 
         ok "CLAUDE.md installed"
     fi
@@ -1098,8 +1115,17 @@ install_settings() {
                     $INSTALL_LESSONS    || filter="$filter | del(.hooks.SessionStart)"
                     jq "$filter" "$SCRIPT_DIR/settings.json" > "$CLAUDE_DIR/settings.json"
                 else
+                    # Fallback: use sed to strip unwanted fields (jq unavailable)
                     cp "$SCRIPT_DIR/settings.json" "$CLAUDE_DIR/settings.json"
-                    warn "jq not available — settings.json includes all fields (statusLine/SessionStart)"
+                    if ! $INSTALL_STATUSLINE && command -v sed &>/dev/null; then
+                        local _sedtmp="$CLAUDE_DIR/settings.json._sedtmp"
+                        sed '/"statusLine"/,/^    }$/d' "$CLAUDE_DIR/settings.json" > "$_sedtmp" && mv "$_sedtmp" "$CLAUDE_DIR/settings.json"
+                    fi
+                    if ! $INSTALL_LESSONS && command -v sed &>/dev/null; then
+                        local _sedtmp="$CLAUDE_DIR/settings.json._sedtmp"
+                        sed '/"SessionStart"/,/^        \]/d' "$CLAUDE_DIR/settings.json" > "$_sedtmp" && mv "$_sedtmp" "$CLAUDE_DIR/settings.json"
+                    fi
+                    warn "jq not available — used sed fallback for settings.json field removal"
                     (( INSTALL_WARNINGS++ )) || true
                 fi
             else
@@ -1148,7 +1174,19 @@ install_settings() {
         warn "  Cannot perform smart merge. Please merge manually:"
         warn "  Source: $SCRIPT_DIR/settings.json"
         warn "  Target: $CLAUDE_DIR/settings.json"
-        (( INSTALL_WARNINGS++ )) || true
+        (( INSTALL_CRITICAL++ )) || true
+        return
+    fi
+
+    # Validate existing settings.json before merge
+    if ! jq empty "$CLAUDE_DIR/settings.json" 2>/dev/null; then
+        error "Existing settings.json is not valid JSON — cannot merge safely"
+        error "  Fix the file manually: $CLAUDE_DIR/settings.json"
+        error "  Validate with: jq empty $CLAUDE_DIR/settings.json"
+        # Back up the broken file so the user can inspect it
+        cp "$CLAUDE_DIR/settings.json" "$CLAUDE_DIR/settings.json.broken"
+        warn "Broken file backed up to settings.json.broken"
+        (( INSTALL_CRITICAL++ )) || true
         return
     fi
 
@@ -1276,7 +1314,7 @@ install_settings() {
         rm -f "$merged"
         error "Merge produced invalid JSON — keeping existing file"
         warn "Please merge manually: $incoming -> $existing"
-        (( INSTALL_WARNINGS++ )) || true
+        (( INSTALL_CRITICAL++ )) || true
     fi
 }
 
@@ -1397,6 +1435,33 @@ install_skills() {
             fi
         done
     fi
+
+    # Clean up installer-managed skills that were NOT selected (from previous installs)
+    # Only runs in interactive mode where specific skills were selected
+    if [[ ${#SELECTED_SKILLS[@]} -gt 0 ]]; then
+        local known_skills=()
+        for skill_dir in "$SCRIPT_DIR"/skills/*/; do
+            [[ -d "$skill_dir" ]] || continue
+            known_skills+=("$(basename "$skill_dir")")
+        done
+        for known in "${known_skills[@]}"; do
+            local keep=false
+            for skill in "${SELECTED_SKILLS[@]}"; do
+                if [[ "$skill" == "$known" ]]; then
+                    keep=true
+                    break
+                fi
+            done
+            if ! $keep && [[ -d "$CLAUDE_DIR/skills/$known" ]]; then
+                if $DRY_RUN; then
+                    info "Would remove unselected skill: $known"
+                else
+                    rm -rf "$CLAUDE_DIR/skills/$known"
+                    ok "Removed unselected skill: $known"
+                fi
+            fi
+        done
+    fi
 }
 
 install_agents() {
@@ -1427,8 +1492,18 @@ install_shell_wrapper() {
         cp "$SCRIPT_DIR/claude.zsh" "$target"
         ok "Shell wrapper installed to $target"
         if [[ -f "$SCRIPT_DIR/system-prompt.txt" ]]; then
-            cp "$SCRIPT_DIR/system-prompt.txt" "$CLAUDE_DIR/system-prompt.txt"
-            ok "system-prompt.txt installed"
+            # Compare with existing — skip if identical
+            if [[ -f "$CLAUDE_DIR/system-prompt.txt" ]] && diff -q "$CLAUDE_DIR/system-prompt.txt" "$SCRIPT_DIR/system-prompt.txt" &>/dev/null; then
+                ok "system-prompt.txt unchanged, skipping"
+            else
+                # Content differs: back up existing before overwriting
+                if [[ -f "$CLAUDE_DIR/system-prompt.txt" ]]; then
+                    cp "$CLAUDE_DIR/system-prompt.txt" "$CLAUDE_DIR/system-prompt.txt.bak"
+                    warn "Existing system-prompt.txt backed up to system-prompt.txt.bak — merge your customizations manually"
+                fi
+                cp "$SCRIPT_DIR/system-prompt.txt" "$CLAUDE_DIR/system-prompt.txt"
+                ok "system-prompt.txt installed"
+            fi
         fi
         # Install glm-env.json template only if not already present
         if [[ ! -f "$CLAUDE_DIR/glm-env.json" ]] && [[ -f "$SCRIPT_DIR/glm-env.json" ]]; then
@@ -1586,19 +1661,34 @@ install_mcp() {
         claude mcp list 2>/dev/null | grep -q "^${1}:" 2>/dev/null
     }
 
-    # Lark MCP
+    # Lark MCP — prompt for credentials in interactive mode, skip in non-interactive
     if $DRY_RUN; then
         info "Would add MCP server: lark-mcp (stdio)"
     else
         if _mcp_exists lark-mcp; then
             ok "MCP server lark-mcp already exists, skipping"
-        elif retry 3 3 "Add MCP server lark-mcp" claude mcp add --scope user --transport stdio lark-mcp \
-            -- npx -y @larksuiteoapi/lark-mcp mcp -a YOUR_APP_ID -s YOUR_APP_SECRET 2>/dev/null; then
-            ok "MCP server added: lark-mcp"
+        elif ! can_interact; then
+            warn "Skipping lark-mcp (requires interactive credential input)"
+            warn "  Run interactively to set up, or add manually:"
+            warn "  claude mcp add --scope user --transport stdio lark-mcp -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET>"
         else
-            warn "MCP server lark-mcp could not be added, skipping"
+            echo ""
+            info "Lark MCP requires Feishu App credentials:"
+            info "  Get them from: https://open.feishu.cn/app"
+            local lark_app_id="" lark_app_secret=""
+            echo -n "  App ID: " > /dev/tty
+            read -r lark_app_id </dev/tty
+            echo -n "  App Secret: " > /dev/tty
+            read -r lark_app_secret </dev/tty
+            if [[ -z "$lark_app_id" || -z "$lark_app_secret" ]]; then
+                warn "Empty credentials — skipping lark-mcp (add manually later)"
+            elif retry 3 3 "Add MCP server lark-mcp" claude mcp add --scope user --transport stdio lark-mcp \
+                -- npx -y @larksuiteoapi/lark-mcp mcp -a "$lark_app_id" -s "$lark_app_secret" 2>/dev/null; then
+                ok "MCP server added: lark-mcp"
+            else
+                warn "MCP server lark-mcp could not be added, skipping"
+            fi
         fi
-        warn "Replace YOUR_APP_ID and YOUR_APP_SECRET with your Feishu credentials"
     fi
 
     # Playwright MCP
@@ -1945,18 +2035,19 @@ main() {
     $INSTALL_SHELL_WRAPPER && install_shell_wrapper
     $INSTALL_DEEPXIV && install_deepxiv
 
-    # Stamp version (skip if there were critical warnings)
+    # Stamp version (skip only on critical warnings — non-critical like plugin failures are OK)
     if ! $DRY_RUN; then
-        if [[ $INSTALL_WARNINGS -eq 0 ]]; then
+        if [[ $INSTALL_CRITICAL -eq 0 ]]; then
             stamp_version
         else
-            warn "Skipping version stamp due to $INSTALL_WARNINGS warning(s)"
+            warn "Skipping version stamp due to $INSTALL_CRITICAL critical warning(s)"
         fi
     fi
 
     echo ""
-    if [[ $INSTALL_WARNINGS -gt 0 ]]; then
-        warn "Installation completed with $INSTALL_WARNINGS warning(s) — review messages above"
+    if [[ $INSTALL_WARNINGS -gt 0 || $INSTALL_CRITICAL -gt 0 ]]; then
+        local total=$((INSTALL_WARNINGS + INSTALL_CRITICAL))
+        warn "Installation completed with $total issue(s) ($INSTALL_CRITICAL critical, $INSTALL_WARNINGS non-critical) — review messages above"
     else
         ok "Installation complete! ($(get_source_version))"
     fi
@@ -1965,7 +2056,7 @@ main() {
     echo "  1. Restart Claude Code for changes to take effect"
     echo "  2. Customize CLAUDE.md for your specific projects"
     if $INSTALL_MCP; then
-        echo "  3. Replace YOUR_APP_ID/YOUR_APP_SECRET in Lark MCP config"
+        echo "  3. To add Lark MCP later: claude mcp add --scope user --transport stdio lark-mcp -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET>"
     fi
     echo ""
 }

@@ -164,9 +164,9 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 | 键 | 值 | 作用 |
 |----|-----|-----|
 | `permissions.defaultMode` | `auto` | 自动批准安全操作、拦截高风险操作 |
-| `effortLevel` | `max` | `/effort` 固定最高推理档 |
-| `betas` | `extended-cache-ttl-2025-04-11` | 1 小时提示缓存（替代默认 5 分钟） |
-| `env.CLAUDE_CODE_NO_FLICKER` | `1` | 全屏渲染 |
+| `skipDangerousModePermissionPrompt` | `true` | 禁用 `auto`/`bypassPermissions` 模式的安全警告提示 — 如需恢复提示请删除此键 |
+| `effortLevel` | `xhigh` | 高推理档位 |
+| `tui` | `fullscreen` | 无闪烁全屏渲染 |
 | `env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` | `1` | 固定思考预算（Opus 4.7 不受影响） |
 
 重新安装时会智能合并 `env`、`permissions.allow`、`enabledPlugins`、`hooks.SessionStart`、`statusLine`，保留你的改动。你在 `enabledPlugins` 中手动添加的本目录之外的插件会原样保留。

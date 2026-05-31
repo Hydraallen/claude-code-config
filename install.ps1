@@ -72,6 +72,7 @@ function Invoke-Retry {
 $script:SCRIPT_DIR = ""
 $script:REMOTE_MODE = $false
 $script:InstallWarnings = 0
+$script:InstallCritical = 0
 
 function Initialize-ScriptDir {
     $script:SCRIPT_DIR = $PSScriptRoot
@@ -247,6 +248,7 @@ function Show-InteractiveMenu {
             @{ Label = "commit-commands"; Desc = "git commit / push / PR workflow";   Default = $true;  Id = "plug-commit-commands" }
             @{ Label = "code-simplifier"; Desc = "Code simplification & cleanup";     Default = $true;  Id = "plug-code-simplifier" }
             @{ Label = "everything-claude-code"; Desc = "TDD, security, database, Go/Python/Spring Boot"; Default = $false; Id = "plug-everything-claude-code" }
+            @{ Label = "harness-workflow"; Desc = "Structured development workflow (Planner->Generator->Evaluator)"; Default = $true; Id = "skill-harness-workflow" }
             @{ Label = "update-config";   Desc = "Configure Claude Code via settings.json (skill)"; Default = $true; Id = "skill-update-config" }
         )}
         @{ Label = "Integrations"; Hint = "external tools & services"; Items = @(
@@ -542,6 +544,7 @@ function Show-InteractiveMenu {
             "skill-humanizer"      { $result.Skills = $true; $result.SelectedSkills += "humanizer" }
             "skill-humanizer-zh"   { $result.Skills = $true; $result.SelectedSkills += "humanizer-zh" }
             "skill-update-config"  { $result.Skills = $true; $result.SelectedSkills += "update-config" }
+            "skill-harness-workflow" { $result.Skills = $true; $result.SelectedSkills += "harness-workflow" }
             "deepxiv-cli"          { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-cli" }
             "deepxiv-trending-digest" { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-trending-digest" }
             "deepxiv-baseline-table"  { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-baseline-table" }
@@ -561,24 +564,42 @@ function Show-InteractiveMenu {
 function Install-ClaudeMd {
     param([bool]$ReviewAdversarial = $false, [bool]$ReviewCodex = $false)
     Write-Info "Installing CLAUDE.md..."
+
+    # Dynamic Code Review section
+    if ($ReviewAdversarial) {
+        $reviewLine = 'Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — always invoke the `adversarial-review` skill to perform it. If the adversarial-review skill is unavailable (e.g., `codex` CLI not installed), fall back to using the `code-reviewer` agent for the review. Never substitute the actual review call with a text-only description.'
+    } elseif ($ReviewCodex) {
+        $reviewLine = 'Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — first check if the Codex plugin is available by running `/codex:setup`. If Codex is ready (`ready: true`), invoke `/codex:adversarial-review` to perform the review. If Codex is unavailable or not authenticated, fall back to using the `code-reviewer` agent for the review. Never substitute the actual review call with a text-only description.'
+    } else {
+        $reviewLine = 'Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — use the `code-reviewer` agent to perform it. Never substitute the actual review call with a text-only description.'
+    }
+
     if ($DryRun) {
         Write-Info "Would copy: CLAUDE.md -> $CLAUDE_DIR\CLAUDE.md"
         Write-Info "  Code Review: adversarial=$ReviewAdversarial codex=$ReviewCodex"
     } else {
         $target = Join-Path $CLAUDE_DIR "CLAUDE.md"
-        Copy-Item (Join-Path $SCRIPT_DIR "CLAUDE.md") $target -Force
 
-        # Dynamic Code Review section
-        if ($ReviewAdversarial) {
-            $reviewLine = 'Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — always invoke the `adversarial-review` skill to perform it. If the adversarial-review skill is unavailable (e.g., `codex` CLI not installed), fall back to using the `code-reviewer` agent for the review. Never substitute the actual review call with a text-only description.'
-        } elseif ($ReviewCodex) {
-            $reviewLine = 'Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — first check if the Codex plugin is available by running `/codex:setup`. If Codex is ready (`ready: true`), invoke `/codex:adversarial-review` to perform the review. If Codex is unavailable or not authenticated, fall back to using the `code-reviewer` agent for the review. Never substitute the actual review call with a text-only description.'
-        } else {
-            $reviewLine = 'Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — use the `code-reviewer` agent to perform it. Never substitute the actual review call with a text-only description.'
-        }
-        $content = Get-Content $target -Raw
+        # Build the target content in a temp file (with the review line replaced)
+        $tmpFile = Join-Path ([System.IO.Path]::GetTempPath()) "CLAUDE_md_$(Get-Random)"
+        Copy-Item (Join-Path $SCRIPT_DIR "CLAUDE.md") $tmpFile -Force
+        $content = Get-Content $tmpFile -Raw
         $content = $content -replace '(?m)^Whenever a code review is needed.*$', $reviewLine
-        Set-Content $target $content -NoNewline
+        Set-Content $tmpFile $content -NoNewline
+
+        # Compare with existing — skip if identical
+        if ((Test-Path $target) -and ((Get-FileHash $target).Hash -eq (Get-FileHash $tmpFile).Hash)) {
+            Write-Ok "CLAUDE.md unchanged, skipping"
+            Remove-Item $tmpFile -Force
+            return
+        }
+
+        # Content differs: back up existing before overwriting
+        if (Test-Path $target) {
+            Copy-Item $target "$target.bak" -Force
+            Write-Warn "Existing CLAUDE.md backed up to CLAUDE.md.bak — merge your customizations manually"
+        }
+        Move-Item $tmpFile $target -Force
         Write-Ok "CLAUDE.md installed"
     }
 }
@@ -668,6 +689,18 @@ function Install-Settings {
         }
         Write-Info "  - hooks.SessionStart: deduplicated by matcher"
         Write-Info "  - statusLine: incoming takes priority"
+        return
+    }
+
+    # Validate existing settings.json before merge
+    try {
+        Get-Content $target -Raw | ConvertFrom-Json | Out-Null
+    } catch {
+        Write-Err "Existing settings.json is not valid JSON — cannot merge safely"
+        Write-Err "  Fix the file manually: $target"
+        Copy-Item $target "$target.broken" -Force
+        Write-Warn "Broken file backed up to settings.json.broken"
+        $script:InstallCritical++
         return
     }
 
@@ -771,7 +804,7 @@ function Install-Settings {
         Set-StrictMode -Version Latest
         Write-Err "Merge failed: $_"
         Write-Warn "Please merge manually: $source -> $target"
-        $script:InstallWarnings++
+        $script:InstallCritical++
     }
 }
 
@@ -896,6 +929,32 @@ function Install-Skills {
                 if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
                 Copy-Item $_.FullName $dst -Recurse -Force
                 Write-Ok "Skill installed: $skill"
+            }
+        }
+    }
+
+    # Clean up installer-managed skills that were NOT selected (from previous installs)
+    # Only runs in interactive mode where specific skills were selected
+    if ($SelectedSkills.Count -gt 0) {
+        $repoSkillsDir = Join-Path $SCRIPT_DIR "skills"
+        if (Test-Path $repoSkillsDir) {
+            Get-ChildItem $repoSkillsDir -Directory | ForEach-Object {
+                $known = $_.Name
+                $keep = $false
+                foreach ($skill in $SelectedSkills) {
+                    if ($skill -eq $known) { $keep = $true; break }
+                }
+                if (-not $keep) {
+                    $removePath = Join-Path $skillsDir $known
+                    if (Test-Path $removePath) {
+                        if ($DryRun) {
+                            Write-Info "Would remove unselected skill: $known"
+                        } else {
+                            Remove-Item $removePath -Recurse -Force
+                            Write-Ok "Removed unselected skill: $known"
+                        }
+                    }
+                }
             }
         }
     }
@@ -1123,26 +1182,56 @@ function Install-Mcp {
         return
     }
 
+    # Helper: check if an MCP server already exists
+    function Test-McpExists($name) {
+        $list = & claude mcp list 2>$null
+        if ($list -match "^${name}:") { return $true }
+        return $false
+    }
+
+    # Lark MCP -- prompt for credentials in interactive mode, skip in non-interactive
     if ($DryRun) {
         Write-Info "Would add MCP server: lark-mcp (stdio)"
     } else {
-        $ok = Invoke-Retry -MaxAttempts 5 -DelaySeconds 3 -Description "Add MCP server lark-mcp" -Action {
-            & claude mcp add --scope user --transport stdio lark-mcp -- npx -y "@larksuiteoapi/lark-mcp" mcp -a YOUR_APP_ID -s YOUR_APP_SECRET 2>$null
+        if (Test-McpExists "lark-mcp") {
+            Write-Ok "MCP server lark-mcp already exists, skipping"
+        } elseif (-not $Force -or -not ([Environment]::UserInteractive -and $Host.Name -eq "ConsoleHost")) {
+            # Non-interactive or piped mode: skip with warning
+            Write-Warn "Skipping lark-mcp (requires interactive credential input)"
+            Write-Warn "  Run interactively to set up, or add manually:"
+            Write-Warn "  claude mcp add --scope user --transport stdio lark-mcp -- npx -y `"@larksuiteoapi/lark-mcp`" mcp -a <APP_ID> -s <APP_SECRET>"
+        } else {
+            # Interactive mode: prompt for credentials
+            Write-Host ""
+            Write-Info "Lark MCP requires Feishu App credentials:"
+            Write-Info "  Get them from: https://open.feishu.cn/app"
+            $larkAppId = Read-Host "  App ID"
+            $larkAppSecret = Read-Host "  App Secret"
+            if ([string]::IsNullOrWhiteSpace($larkAppId) -or [string]::IsNullOrWhiteSpace($larkAppSecret)) {
+                Write-Warn "Empty credentials -- skipping lark-mcp (add manually later)"
+            } else {
+                $ok = Invoke-Retry -MaxAttempts 3 -DelaySeconds 3 -Description "Add MCP server lark-mcp" -Action {
+                    & claude mcp add --scope user --transport stdio lark-mcp -- npx -y "@larksuiteoapi/lark-mcp" mcp -a $larkAppId -s $larkAppSecret 2>$null
+                }
+                if ($ok) { Write-Ok "MCP server added: lark-mcp" }
+                else { Write-Warn "MCP server lark-mcp could not be added, skipping" }
+            }
         }
-        if ($ok) { Write-Ok "MCP server added: lark-mcp" }
-        else { Write-Warn "MCP server lark-mcp may already exist or could not be added, skipping" }
-        Write-Warn "Replace YOUR_APP_ID and YOUR_APP_SECRET with your Feishu credentials"
     }
 
     # Playwright MCP
     if ($DryRun) {
         Write-Info "Would add MCP server: playwright (stdio)"
     } else {
-        $ok = Invoke-Retry -MaxAttempts 5 -DelaySeconds 3 -Description "Add MCP server playwright" -Action {
-            & claude mcp add --scope user --transport stdio playwright -- npx @playwright/mcp@latest 2>$null
+        if (Test-McpExists "playwright") {
+            Write-Ok "MCP server playwright already exists, skipping"
+        } else {
+            $ok = Invoke-Retry -MaxAttempts 5 -DelaySeconds 3 -Description "Add MCP server playwright" -Action {
+                & claude mcp add --scope user --transport stdio playwright -- npx @playwright/mcp@latest 2>$null
+            }
+            if ($ok) { Write-Ok "MCP server added: playwright" }
+            else { Write-Warn "MCP server playwright could not be added, skipping" }
         }
-        if ($ok) { Write-Ok "MCP server added: playwright" }
-        else { Write-Warn "MCP server playwright may already exist or could not be added, skipping" }
     }
 }
 
@@ -1482,6 +1571,12 @@ function Main {
         $pluginGroups = @("essential")
     }
 
+    # Auto-enable settings.json when StatusLine, Lessons, or Plugins need it for config
+    if (($doHooks -or $doLessons -or $doPlugins) -and -not $doSettings) {
+        $doSettings = $true
+        Write-Info "settings.json auto-enabled (required by StatusLine/Lessons/Plugins)"
+    }
+
     # Check if anything was selected
     if (-not $doClaudeMd -and -not $doSettings -and -not $doRules -and
         -not $doSkills -and -not $doAgents -and -not $doLessons -and -not $doHooks -and
@@ -1524,16 +1619,17 @@ function Main {
     if ($doDeepXiv) { Install-DeepXiv -SelectedDeepXivSkills $deepXivSkills }
 
     if (-not $DryRun) {
-        if ($InstallWarnings -eq 0) {
+        if ($InstallCritical -eq 0) {
             Save-VersionStamp
         } else {
-            Write-Warn "Skipping version stamp due to $InstallWarnings warning(s)"
+            Write-Warn "Skipping version stamp due to $InstallCritical critical warning(s)"
         }
     }
 
     Write-Host ""
-    if ($InstallWarnings -gt 0) {
-        Write-Warn "Installation completed with $InstallWarnings warning(s) - review messages above"
+    if ($InstallWarnings -gt 0 -or $InstallCritical -gt 0) {
+        $total = $InstallWarnings + $InstallCritical
+        Write-Warn "Installation completed with $total issue(s) ($InstallCritical critical, $InstallWarnings non-critical) - review messages above"
     } else {
         Write-Ok "Installation complete! ($sourceVer)"
     }
@@ -1542,7 +1638,7 @@ function Main {
     Write-Host "  1. Restart Claude Code for changes to take effect"
     Write-Host "  2. Customize CLAUDE.md for your specific projects"
     if ($doMcp) {
-        Write-Host "  3. Replace YOUR_APP_ID/YOUR_APP_SECRET in Lark MCP config"
+        Write-Host "  3. To add Lark MCP later: claude mcp add --scope user --transport stdio lark-mcp -- npx -y `"@larksuiteoapi/lark-mcp`" mcp -a <APP_ID> -s <APP_SECRET>"
     }
     Write-Host ""
 }
