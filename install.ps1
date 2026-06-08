@@ -32,7 +32,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $CLAUDE_DIR = Join-Path $env:USERPROFILE ".claude"
-$REPO_URL = "https://github.com/Mizoreww/awesome-claude-code-config"
+$script:REPO_OWNER = if ($env:REPO_OWNER) { $env:REPO_OWNER } else { "Mizoreww" }
+$script:REPO_NAME = if ($env:REPO_NAME) { $env:REPO_NAME } else { "awesome-claude-code-config" }
+$script:REPO_BRANCH = if ($env:REPO_BRANCH) { $env:REPO_BRANCH } else { "main" }
+# Validate metadata so the assembled URLs stay well-formed and safe.
+if ($script:REPO_OWNER -notmatch '^[A-Za-z0-9._-]+$') { Write-Host "Invalid REPO_OWNER: $($script:REPO_OWNER)" -ForegroundColor Red; exit 1 }
+if ($script:REPO_NAME -notmatch '^[A-Za-z0-9._-]+$') { Write-Host "Invalid REPO_NAME: $($script:REPO_NAME)" -ForegroundColor Red; exit 1 }
+if ($script:REPO_BRANCH -notmatch '^[A-Za-z0-9._/-]+$') { Write-Host "Invalid REPO_BRANCH: $($script:REPO_BRANCH)" -ForegroundColor Red; exit 1 }
+$script:REPO_URL = "https://github.com/$($script:REPO_OWNER)/$($script:REPO_NAME)"
 $VERSION_STAMP_FILE = Join-Path $CLAUDE_DIR ".awesome-claude-code-config-version"
 
 # --- Colors ----------------------------------------------------------------
@@ -86,10 +93,10 @@ function Initialize-ScriptDir {
     $tmpdir = Join-Path ([System.IO.Path]::GetTempPath()) "claude-config-$(Get-Random)"
     New-Item -ItemType Directory -Path $tmpdir -Force | Out-Null
 
-    $ver = if ($env:VERSION) { $env:VERSION } else { "main" }
-    $zipUrl = "$REPO_URL/archive/refs/heads/$ver.zip"
+    $ver = if ($env:VERSION) { $env:VERSION } else { $script:REPO_BRANCH }
+    $zipUrl = "$($script:REPO_URL)/archive/refs/heads/$ver.zip"
     if ($ver -match '^v\d') {
-        $zipUrl = "$REPO_URL/archive/refs/tags/$ver.zip"
+        $zipUrl = "$($script:REPO_URL)/archive/refs/tags/$ver.zip"
     }
 
     Write-Info "Remote mode: downloading $ver..."
@@ -124,7 +131,7 @@ function Get-InstalledVersion {
 }
 
 function Get-RemoteVersion {
-    $url = "https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/VERSION"
+    $url = "https://raw.githubusercontent.com/$($script:REPO_OWNER)/$($script:REPO_NAME)/$($script:REPO_BRANCH)/VERSION"
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $result = (Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 10).Content.Trim()
@@ -1326,7 +1333,7 @@ Examples:
     .\install.ps1 -All             # Install everything
     .\install.ps1 -Uninstall       # Uninstall everything
     .\install.ps1 -DryRun -All     # Preview full install
-    & ([scriptblock]::Create((irm $REPO_URL/raw/main/install.ps1)))  # Remote install
+    & ([scriptblock]::Create((irm $($script:REPO_URL)/raw/$($script:REPO_BRANCH)/install.ps1)))  # Remote install
 
 "@
 }
