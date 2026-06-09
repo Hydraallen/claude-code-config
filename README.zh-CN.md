@@ -6,7 +6,7 @@
 
 ![Statusline](assets/statusline.png)
 
-[Claude Code](https://claude.com/claude-code) 的生产级配置。一条命令安装：全局指令、多语言编码规则（Python / TypeScript / Go）、9 个 marketplace 下的 24 个精选插件、5 个内置 skill、渐变状态栏，以及能跨会话记住纠正的自我改进回路。
+[Claude Code](https://claude.com/claude-code) 的生产级配置。一条命令安装：全局指令、多语言编码规则（Python / TypeScript / Go）、9 个 marketplace 下的 24 个精选插件、7 个内置 skill、渐变状态栏，以及能跨会话记住纠正的自我改进回路。
 
 ## 示例
 
@@ -35,7 +35,7 @@ irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/i
   > [5/5] Core                   全局指令、设置、规则...
     [0/3] Language Rules          Python / TypeScript / Go
     [2/3] Review                  code-review + adversarial-review
-    [8/9] Workflow                karpathy、superpowers、update-config、handoff...
+    [9/10] Workflow                karpathy、superpowers、update-config、handoff...
     [3/3] Integrations            context7、github、playwright
     [4/5] Design & Content        document-skills、frontend-design、humanizer...
     [0/3] Memory & Lifestyle      claude-mem、claude-health、PUA
@@ -74,7 +74,7 @@ irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/i
 | [**adversarial-review**](https://github.com/poteto/noodle/blob/main/.agents/skills/adversarial-review/SKILL.md) | 内置 skill | 跨模型审查（Skeptic / Architect / Minimalist 视角） | 开启 |
 | [**codex**](https://github.com/openai/codex-plugin-cc) | openai-codex（插件） | Codex CLI 驱动的对抗式审查 | 关闭 |
 
-**Workflow (9)** — 规划、迭代、代码质量、元配置。
+**Workflow (10)** — 规划、迭代、代码质量、元配置。
 
 | 项目 | 来源 | 功能 | 默认 |
 |------|------|------|------|
@@ -87,6 +87,7 @@ irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/i
 | [**everything-claude-code**](https://github.com/affaan-m/everything-claude-code) | everything-claude-code | TDD、安全、数据库、Go/Python/Spring Boot | 关闭 |
 | [**update-config**](skills/update-config/) | 内置 skill | `/update-config` — 在会话内重新运行安装器 | 开启 |
 | [**handoff**](https://github.com/mattpocock/skills/blob/main/skills/productivity/handoff/SKILL.md) | 内置 skill | 把当前对话压缩成交接文档，便于下一个 agent 接手 | 开启 |
+| [**teach**](https://github.com/mattpocock/skills/blob/main/skills/productivity/teach/SKILL.md) | 内置 skill | 跨多次会话教学某个主题（mission、lessons、学习记录） | 开启 |
 
 **Integrations (3)** — 外部工具与服务。
 

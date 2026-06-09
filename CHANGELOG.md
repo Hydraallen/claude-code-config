@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.7.1] - 2026-06-09
+
+### Features
+- **New bundled skill: `teach`** (from [`mattpocock/skills`](https://github.com/mattpocock/skills/blob/main/skills/productivity/teach/SKILL.md)) — a stateful, multi-session learning-workspace skill. It treats the current directory as a teaching workspace grounded in a `MISSION.md`, producing self-contained HTML lessons that sit in the user's zone of proximal development, plus reference docs, sequential learning records, and a curated resources list. Ships 5 files (`SKILL.md` + `MISSION-` / `LEARNING-RECORD-` / `GLOSSARY-` / `RESOURCES-FORMAT.md` templates). Registered in the **Workflow** group of both installers and **enabled by default**.
+
+### Notes & Caveats
+- `teach` is user-invoked only (`disable-model-invocation: true` → `/teach`); "default on" refers to installer selection, not model auto-invocation.
+- First multi-file bundled skill — no installer logic changes were needed since skills are copied recursively (`cp -r` / `Copy-Item -Recurse`).
+- Source attribution preserved as an HTML comment in `skills/teach/SKILL.md`.
+
 ## [2.7.0] - 2026-06-08
 
 ### Features
