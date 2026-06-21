@@ -32,8 +32,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $CLAUDE_DIR = Join-Path $env:USERPROFILE ".claude"
-$script:REPO_OWNER = if ($env:REPO_OWNER) { $env:REPO_OWNER } else { "Mizoreww" }
-$script:REPO_NAME = if ($env:REPO_NAME) { $env:REPO_NAME } else { "awesome-claude-code-config" }
+$script:REPO_OWNER = if ($env:REPO_OWNER) { $env:REPO_OWNER } else { "Hydraallen" }
+$script:REPO_NAME = if ($env:REPO_NAME) { $env:REPO_NAME } else { "claude-code-config" }
 $script:REPO_BRANCH = if ($env:REPO_BRANCH) { $env:REPO_BRANCH } else { "main" }
 # Validate metadata so the assembled URLs stay well-formed and safe.
 if ($script:REPO_OWNER -notmatch '^[A-Za-z0-9._-]+$') { Write-Host "Invalid REPO_OWNER: $($script:REPO_OWNER)" -ForegroundColor Red; exit 1 }

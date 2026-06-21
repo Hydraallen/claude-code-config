@@ -7,8 +7,8 @@ set -euo pipefail
 # ============================================================
 
 CLAUDE_DIR="$HOME/.claude"
-REPO_OWNER="${REPO_OWNER:-Mizoreww}"
-REPO_NAME="${REPO_NAME:-awesome-claude-code-config}"
+REPO_OWNER="${REPO_OWNER:-Hydraallen}"
+REPO_NAME="${REPO_NAME:-claude-code-config}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 # These values are interpolated into URLs that, in remote mode, are evaluated by
 # `bash -c` (see detect_script_dir). Validate against a safe charset to prevent
