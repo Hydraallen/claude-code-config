@@ -19,11 +19,11 @@ MANDATORY workflow:
 
 ## Troubleshooting Test Failures
 
-1. Use **tdd-guide** agent
+1. Invoke the **superpowers:test-driven-development** skill
 2. Check test isolation
 3. Verify mocks are correct
 4. Fix implementation, not tests (unless tests are wrong)
 
-## Agent Support
+## Skill Support
 
-- **tdd-guide** - Use PROACTIVELY for new features, enforces write-tests-first
+- **superpowers:test-driven-development** - Invoke PROACTIVELY for new features, enforces write-tests-first
