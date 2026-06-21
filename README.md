@@ -6,7 +6,7 @@
 
 ![Statusline](assets/statusline.png)
 
-Production-ready configuration for [Claude Code](https://claude.com/claude-code). One-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 24 curated plugins across 9 marketplaces, five bundled skills, a gradient status bar, and a self-improvement loop that remembers corrections across sessions.
+Production-ready configuration for [Claude Code](https://claude.com/claude-code). One-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 24 curated plugins across 9 marketplaces, seven bundled skills, a gradient status bar, and a self-improvement loop that remembers corrections across sessions.
 
 ## Showcase
 
@@ -35,7 +35,7 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
   > [5/5] Core                   Global instructions, settings, rules...
     [0/3] Language Rules          Python / TypeScript / Go
     [2/3] Review                  code-review + adversarial-review
-    [7/8] Workflow                karpathy, superpowers, update-config...
+    [9/10] Workflow                karpathy, superpowers, update-config, handoff...
     [3/3] Integrations            context7, github, playwright
     [4/5] Design & Content        document-skills, frontend-design, humanizer...
     [0/3] Memory & Lifestyle      claude-mem, claude-health, PUA
@@ -74,7 +74,7 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | [**adversarial-review**](https://github.com/poteto/noodle/blob/main/.agents/skills/adversarial-review/SKILL.md) | bundled skill | Cross-model review (Skeptic / Architect / Minimalist lenses) | on |
 | [**codex**](https://github.com/openai/codex-plugin-cc) | openai-codex (plugin) | Codex CLI-backed adversarial review | off |
 
-**Workflow (8)** — planning, iteration, code quality, meta-config.
+**Workflow (10)** — planning, iteration, code quality, meta-config.
 
 | Item | Source | What It Does | Default |
 |------|--------|--------------|---------|
@@ -86,6 +86,8 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | **code-simplifier** | claude-plugins-official | Code simplification and refactoring | on |
 | [**everything-claude-code**](https://github.com/affaan-m/everything-claude-code) | everything-claude-code | TDD, security, database, Go/Python/Spring Boot | off |
 | [**update-config**](skills/update-config/) | bundled skill | `/update-config` — re-run installer from inside a session | on |
+| [**handoff**](https://github.com/mattpocock/skills/blob/main/skills/productivity/handoff/SKILL.md) | bundled skill | Compact the current conversation into a handoff doc for the next agent | on |
+| [**teach**](https://github.com/mattpocock/skills/blob/main/skills/productivity/teach/SKILL.md) | bundled skill | Teach a topic over multiple sessions (mission, lessons, learning records) | on |
 
 **Integrations (3)** — external tools and services.
 

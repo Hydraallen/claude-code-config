@@ -7,7 +7,23 @@ set -euo pipefail
 # ============================================================
 
 CLAUDE_DIR="$HOME/.claude"
-REPO_URL="https://github.com/Mizoreww/awesome-claude-code-config"
+REPO_OWNER="${REPO_OWNER:-Mizoreww}"
+REPO_NAME="${REPO_NAME:-awesome-claude-code-config}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
+# These values are interpolated into URLs that, in remote mode, are evaluated by
+# `bash -c` (see detect_script_dir). Validate against a safe charset to prevent
+# command injection from a hostile/garbled environment. (error() is not defined
+# yet at this point in the script, so emit to stderr directly.)
+if [[ ! "$REPO_OWNER" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "Invalid REPO_OWNER: $REPO_OWNER" >&2; exit 1
+fi
+if [[ ! "$REPO_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "Invalid REPO_NAME: $REPO_NAME" >&2; exit 1
+fi
+if [[ ! "$REPO_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    echo "Invalid REPO_BRANCH: $REPO_BRANCH" >&2; exit 1
+fi
+REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}"
 VERSION_STAMP_FILE="$CLAUDE_DIR/.awesome-claude-code-config-version"
 
 # Colors
@@ -163,10 +179,11 @@ detect_script_dir() {
         tmpdir="$(mktemp -d)"
         trap 'rm -rf "$tmpdir"' EXIT
 
-        local version="${VERSION:-main}"
-        # Sanitize VERSION to prevent command injection
-        if [[ ! "$version" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-            error "Invalid VERSION value: $version (only alphanumeric, dots, hyphens, underscores allowed)"
+        local version="${VERSION:-$REPO_BRANCH}"
+        # Sanitize VERSION/branch to prevent command injection. Slash is allowed
+        # so branch refs like "feature/foo" work; it is safe inside the quoted URL.
+        if [[ ! "$version" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+            error "Invalid VERSION value: $version (only alphanumeric, dots, slashes, hyphens, underscores allowed)"
             exit 1
         fi
         local tarball_url="$REPO_URL/archive/refs/heads/${version}.tar.gz"
@@ -215,7 +232,7 @@ get_installed_version() {
 }
 
 get_remote_version() {
-    local url="https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/VERSION"
+    local url="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}/VERSION"
     local result=""
     _fetch_version() {
         if command -v curl &>/dev/null; then
@@ -283,8 +300,8 @@ Examples:
     $(basename "$0") --all                           # Install everything
     $(basename "$0") --uninstall                     # Uninstall everything
     $(basename "$0") --dry-run --all                 # Preview full install
-    bash <(curl -fsSL $REPO_URL/raw/main/install.sh)        # Remote install (interactive)
-    bash <(curl -fsSL $REPO_URL/raw/main/install.sh) --all  # Remote install (everything)
+    bash <(curl -fsSL $REPO_URL/raw/$REPO_BRANCH/install.sh)        # Remote install (interactive)
+    bash <(curl -fsSL $REPO_URL/raw/$REPO_BRANCH/install.sh) --all  # Remote install (everything)
 EOF
 }
 
@@ -496,7 +513,9 @@ commit-commands|git commit / push / PR workflow|1|plug-commit-commands
 code-simplifier|Code simplification & cleanup|1|plug-code-simplifier
 everything-claude-code|TDD, security, database, Go/Python/Spring Boot|0|plug-everything-claude-code
 harness-workflow|Structured development workflow (Planner→Generator→Evaluator)|1|skill-harness-workflow
-update-config|Configure Claude Code via settings.json (skill)|1|skill-update-config")
+update-config|Configure Claude Code via settings.json (skill)|1|skill-update-config
+handoff|Compact conversation into a handoff doc (mattpocock) (skill)|1|skill-handoff
+teach|Teach a topic over multiple sessions (mattpocock) (skill)|1|skill-teach")
 
     # Group 4: Integrations
     GROUP_LABELS+=("Integrations")
@@ -943,6 +962,8 @@ deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-
             skill-humanizer-zh)     INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer-zh") ;;
             skill-update-config)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("update-config") ;;
             skill-harness-workflow) INSTALL_SKILLS=true; SELECTED_SKILLS+=("harness-workflow") ;;
+            skill-handoff)          INSTALL_SKILLS=true; SELECTED_SKILLS+=("handoff") ;;
+            skill-teach)            INSTALL_SKILLS=true; SELECTED_SKILLS+=("teach") ;;
             # DeepXiv
             deepxiv-cli)            INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-cli") ;;
             deepxiv-trending-digest) INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-trending-digest") ;;
@@ -1346,7 +1367,10 @@ install_rules() {
     fi
     # If RULE_LANGS_EXPLICIT=true and RULE_LANGS is empty, skip language rules
 
-    for lang in "${langs[@]}"; do
+    # Use `"${arr[@]+"${arr[@]}"}"` for langs: macOS ships bash 3.2 where the
+    # plain form aborts under `set -u` when the array is empty (selective install
+    # picking rules-common with no language rules).
+    for lang in "${langs[@]+"${langs[@]}"}"; do
         if [[ -d "$SCRIPT_DIR/rules/$lang" ]]; then
             if $DRY_RUN; then
                 info "Would copy: rules/$lang/ -> $CLAUDE_DIR/rules/$lang/"
@@ -1366,7 +1390,7 @@ install_rules() {
         local known_langs=("python" "typescript" "golang")
         for known in "${known_langs[@]}"; do
             local keep=false
-            for lang in "${langs[@]}"; do
+            for lang in "${langs[@]+"${langs[@]}"}"; do
                 if [[ "$lang" == "$known" ]]; then
                     keep=true
                     break

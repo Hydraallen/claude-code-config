@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.7.1] - 2026-06-09
+
+### Features
+- **New bundled skill: `teach`** (from [`mattpocock/skills`](https://github.com/mattpocock/skills/blob/main/skills/productivity/teach/SKILL.md)) — a stateful, multi-session learning-workspace skill. It treats the current directory as a teaching workspace grounded in a `MISSION.md`, producing self-contained HTML lessons that sit in the user's zone of proximal development, plus reference docs, sequential learning records, and a curated resources list. Ships 5 files (`SKILL.md` + `MISSION-` / `LEARNING-RECORD-` / `GLOSSARY-` / `RESOURCES-FORMAT.md` templates). Registered in the **Workflow** group of both installers and **enabled by default**.
+
+### Notes & Caveats
+- `teach` is user-invoked only (`disable-model-invocation: true` → `/teach`); "default on" refers to installer selection, not model auto-invocation.
+- First multi-file bundled skill — no installer logic changes were needed since skills are copied recursively (`cp -r` / `Copy-Item -Recurse`).
+- Source attribution preserved as an HTML comment in `skills/teach/SKILL.md`.
+
+## [2.7.0] - 2026-06-08
+
+### Features
+- **Fork-friendly installers: repository metadata is now configurable** (#41, thanks @Yastruhank). `install.sh` and `install.ps1` no longer hard-code `Mizoreww/awesome-claude-code-config/main`. The owner, name, and branch are read from `REPO_OWNER` / `REPO_NAME` / `REPO_BRANCH` (defaulting to the upstream values) and composed into every download URL — tarball/zip source, the remote `VERSION` check, and the `Show-Help` remote-install one-liner. This lets a fork or mirror run the installer (including the `curl | bash` / `irm | iex` remote forms) without editing source.
+
+### Bug Fixes
+- **Validate repository-metadata overrides to prevent command injection.** In remote mode `install.sh` builds the download command from `REPO_URL` and executes it via `bash -c`. The new env-controlled `REPO_OWNER`/`REPO_NAME`/`REPO_BRANCH` are now validated against a safe charset (`^[A-Za-z0-9._-]+$`, plus `/` for branch refs) before use, mirroring the existing `VERSION` guard. The remote `version` sanitizer also now permits `/` so `feature/*` branches work as a `REPO_BRANCH` override.
+- **Remove invalid `mcp__*` wildcard from `permissions.allow`**: Claude Code's `/doctor` rejects a bare `mcp__*` in *allow* rules. In allow rules a glob is only valid in the **tool position** after a literal `mcp__<server>__` prefix (e.g. `mcp__github__*`) — the server-name segment itself cannot be globbed. The entry was silently skipped, so removing it is behaviour-preserving (MCP tools already fell through to the `auto` permission prompt). To pre-allow MCP tools, add valid per-server entries such as `mcp__github` or `mcp__github__*`. (Deny/ask rules still accept wildcards anywhere.)
+
+### Design Rationale
+- **One override per field, not two.** The contributed PR shipped both `REPO_OWNER` and a parallel `REPO_OWNER_OVERRIDE` (×3 fields, ×2 scripts) with a hidden precedence rule. These were collapsed to a single variable per field — same capability, no ambiguity about which one wins.
+- **Validate at the boundary.** The override values cross a trust boundary (environment → shell-evaluated URL), so they are checked the moment they are read, consistent with the project's existing input-validation stance.
+
+### Notes & Caveats
+- The PR's experimental `--dry-run` directory guard was reverted: it only covered the top-level `$CLAUDE_DIR` `mkdir`, while component installers still create subdirectories (and remove legacy skills) before their dry-run checks — so it gave a false sense of safety. Making `--dry-run` fully non-mutating is tracked as a separate follow-up.
+- Comment-based help blocks in both scripts still reference the upstream URL literally; PowerShell's `<# … #>` help is static text parsed by `Get-Help` and cannot interpolate runtime variables.
+
+## [2.6.1] - 2026-05-25
+
+### Features
+- **New bundled skill: `handoff`** (from [`mattpocock/skills`](https://github.com/mattpocock/skills/blob/main/skills/productivity/handoff/SKILL.md)) — compacts the current conversation into a handoff document written to the OS temp directory, so a fresh agent can pick up the work without inheriting the full context. Includes a `suggested skills` section, references existing artifacts by path/URL rather than duplicating them, and redacts sensitive data. Registered in the **Workflow** group of both installers and **enabled by default**.
+
+### Notes & Caveats
+- The skill writes to the user's OS temp directory (e.g. `/tmp` or `%TEMP%`), not the current workspace — handoff docs do not pollute the repo.
+- Source attribution preserved as an HTML comment in `skills/handoff/SKILL.md`.
+
 ## [2.6.0] - 2026-05-22
 
 ### Features

@@ -1,5 +1,41 @@
 # 更新日志
 
+## [2.7.1] - 2026-06-09
+
+### 新功能
+- **新增内置 skill：`teach`**（来自 [`mattpocock/skills`](https://github.com/mattpocock/skills/blob/main/skills/productivity/teach/SKILL.md)）—— 一个有状态、跨多次会话的「教学工作区」skill。它把当前目录视为教学工作区，以 `MISSION.md` 为根基锚定教学目标，产出位于学习者「最近发展区」(zone of proximal development) 内的自包含 HTML 课程，并配套参考文档、按序编号的学习记录 (learning records) 与精选资源清单。共 5 个文件（`SKILL.md` + `MISSION-` / `LEARNING-RECORD-` / `GLOSSARY-` / `RESOURCES-FORMAT.md` 模板）。已注册到两个安装器的 **Workflow** 分组，**默认开启**。
+
+### 注意事项
+- `teach` 仅限用户主动调用（`disable-model-invocation: true` → `/teach`）；这里的「默认开启」指安装器选单中默认勾选，而非模型自动触发。
+- 首个多文件内置 skill —— 由于 skill 目录是递归复制的（`cp -r` / `Copy-Item -Recurse`），无须改动任何安装器逻辑。
+- 原作者归属以 HTML 注释形式保留在 `skills/teach/SKILL.md` 顶部。
+
+## [2.7.0] - 2026-06-08
+
+### 新功能
+- **对 fork 友好的安装器：仓库元数据现在可配置**（#41，感谢 @Yastruhank）。`install.sh` 与 `install.ps1` 不再硬编码 `Mizoreww/awesome-claude-code-config/main`。owner、name、branch 改为从 `REPO_OWNER` / `REPO_NAME` / `REPO_BRANCH` 读取（默认回退到上游值），并拼接进每一处下载 URL —— tarball/zip 源、远程 `VERSION` 检查，以及 `Show-Help` 的远程安装一行命令。这样 fork 或镜像无须改动源码即可运行安装器（包括 `curl | bash` / `irm | iex` 远程形式）。
+
+### 问题修复
+- **校验仓库元数据覆盖值以防命令注入。** 远程模式下 `install.sh` 会用 `REPO_URL` 拼出下载命令并通过 `bash -c` 执行。新增的、由环境变量控制的 `REPO_OWNER`/`REPO_NAME`/`REPO_BRANCH` 现在会在使用前按安全字符集校验（`^[A-Za-z0-9._-]+$`，branch 额外允许 `/`），与既有的 `VERSION` 防护一致。远程 `version` 清洗逻辑也放行了 `/`，使 `feature/*` 分支可作为 `REPO_BRANCH` 覆盖值。
+- **从 `permissions.allow` 移除无效的 `mcp__*` 通配符**：Claude Code 的 `/doctor` 会拒绝 *allow* 规则中裸写的 `mcp__*`。在 allow 规则里，通配符只能用于字面前缀 `mcp__<server>__` 之后的**工具位**（如 `mcp__github__*`）—— server 名段本身不能被通配。该条目此前被静默忽略，因此移除它行为等价（MCP 工具本就回退到 `auto` 权限提示）。若要预先放行 MCP 工具，请添加有效的按 server 条目，如 `mcp__github` 或 `mcp__github__*`。（deny/ask 规则仍允许任意位置使用通配符。）
+
+### 设计取舍
+- **每个字段一个覆盖变量，而非两个。** 贡献的 PR 同时提供了 `REPO_OWNER` 和并行的 `REPO_OWNER_OVERRIDE`（×3 字段、×2 脚本），且带有隐式优先级规则。已收敛为每字段单一变量 —— 能力不变，但消除了「哪个生效」的歧义。
+- **在边界处校验。** 覆盖值跨越信任边界（环境变量 → shell 求值的 URL），因此在读取的那一刻即校验，与项目既有的输入校验立场一致。
+
+### 注意事项
+- PR 中实验性的 `--dry-run` 目录守卫已回退：它只覆盖了顶层 `$CLAUDE_DIR` 的 `mkdir`，而各组件安装器仍会在各自的 dry-run 检查之前创建子目录（并删除旧 skill）—— 因此会给人虚假的安全感。让 `--dry-run` 完全不产生副作用，作为单独的后续项跟踪。
+- 两个脚本的注释式帮助块仍字面引用上游 URL；PowerShell 的 `<# … #>` 帮助是由 `Get-Help` 解析的静态文本，无法插值运行时变量。
+
+## [2.6.1] - 2026-05-25
+
+### 新功能
+- **新增内置 skill：`handoff`**（来自 [`mattpocock/skills`](https://github.com/mattpocock/skills/blob/main/skills/productivity/handoff/SKILL.md)）—— 把当前对话压缩成一份交接文档并写入操作系统的临时目录，方便下一个 agent 直接接手而无须继承完整上下文。文档包含 `suggested skills` 章节、用路径/URL 引用已有制品（PRD、计划、ADR、issue、commit、diff）而非重复粘贴、并对密钥与隐私敏感信息做脱敏。已注册到两个安装器的 **Workflow** 分组，**默认开启**。
+
+### 注意事项
+- skill 会把交接文档写入用户操作系统的临时目录（如 `/tmp` 或 `%TEMP%`），不会污染当前仓库。
+- 原作者归属以 HTML 注释形式保留在 `skills/handoff/SKILL.md` 顶部。
+
 ## [2.6.0] - 2026-05-22
 
 ### 新功能
