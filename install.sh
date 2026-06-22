@@ -356,7 +356,7 @@ PLUGINS_ESSENTIAL=(
 )
 
 PLUGINS_OPTIONAL=(
-    "everything-claude-code@everything-claude-code"
+    "ecc@ecc"
 )
 
 PLUGINS_CLAUDE_MEM=(
@@ -372,12 +372,20 @@ PLUGINS_AI_RESEARCH=(
     "optimization@ai-research-skills"
 )
 
-PLUGINS_HEALTH=(
-    "health@claude-health"
-)
-
 PLUGINS_PUA=(
     "pua@pua-skills"
+)
+
+# Plugins/marketplaces retired or renamed upstream. Re-running the installer
+# uninstalls these stale ids and removes their orphaned marketplaces so a
+# rename (e.g. everything-claude-code -> ecc) self-heals on the next run.
+RETIRED_PLUGINS=(
+    "everything-claude-code@everything-claude-code"  # renamed to ecc@ecc
+    "health@claude-health"                           # claude-health renamed to the waza suite
+)
+RETIRED_MARKETPLACES=(
+    "everything-claude-code"  # superseded by the ecc marketplace
+    "claude-health"           # superseded by waza
 )
 
 # --- Terminal detection (single source of truth) -----------------------
@@ -511,7 +519,7 @@ feature-dev|Guided feature development|1|plug-feature-dev
 ralph-loop|Automated iteration loop|1|plug-ralph-loop
 commit-commands|git commit / push / PR workflow|1|plug-commit-commands
 code-simplifier|Code simplification & cleanup|1|plug-code-simplifier
-everything-claude-code|TDD, security, database, Go/Python/Spring Boot|1|plug-everything-claude-code
+ecc|Everything Claude Code: TDD, security, database, Go/Python/Spring Boot|1|plug-everything-claude-code
 harness-workflow|Structured development workflow (Planner→Generator→Evaluator)|1|skill-harness-workflow
 update-config|Configure Claude Code via settings.json (skill)|1|skill-update-config
 handoff|Compact conversation into a handoff doc (mattpocock) (skill)|1|skill-handoff
@@ -537,7 +545,6 @@ humanizer-zh|Remove AI writing patterns (Chinese, op7418) (skill)|0|skill-humani
     GROUP_LABELS+=("Memory & Lifestyle")
     GROUP_HINTS+=("session memory and personal productivity")
     GROUP_ITEMS+=("claude-mem|Cross-session memory (~3k tokens/session)|1|plug-claude-mem
-claude-health|Health check & wellness dashboard|1|plug-claude-health
 PUA|AI agent productivity booster (pua, pua-en, pua-ja)|0|plug-pua")
 
     # Group 7: Academic Research (AI Research plugins + DeepXiv skills + paper-reading)
@@ -908,7 +915,7 @@ deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-
     _plug_id_to_pkg() {
         case "$1" in
             plug-andrej-karpathy-skills) echo "andrej-karpathy-skills@karpathy-skills" ;;
-            plug-everything-claude-code) echo "everything-claude-code@everything-claude-code" ;;
+            plug-everything-claude-code) echo "ecc@ecc" ;;
             plug-superpowers)       echo "superpowers@claude-plugins-official" ;;
             plug-context7)          echo "context7@claude-plugins-official" ;;
             plug-commit-commands)   echo "commit-commands@claude-plugins-official" ;;
@@ -921,7 +928,6 @@ deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-
             plug-example-skills)    echo "example-skills@anthropic-agent-skills" ;;
             plug-github)            echo "github@claude-plugins-official" ;;
             plug-claude-mem)        echo "claude-mem@thedotmack" ;;
-            plug-claude-health)     echo "health@claude-health" ;;
             plug-pua)               echo "pua@pua-skills" ;;
             plug-tokenization)      echo "tokenization@ai-research-skills" ;;
             plug-fine-tuning)       echo "fine-tuning@ai-research-skills" ;;
@@ -1068,9 +1074,8 @@ _effective_selected_plugins_json() {
                 essential|core) pkgs+=("${PLUGINS_ESSENTIAL[@]}") ;;
                 claude-mem)     pkgs+=("${PLUGINS_CLAUDE_MEM[@]}") ;;
                 ai-research)    pkgs+=("${PLUGINS_AI_RESEARCH[@]}") ;;
-                health)         pkgs+=("${PLUGINS_HEALTH[@]}") ;;
                 pua)            pkgs+=("${PLUGINS_PUA[@]}") ;;
-                all)            pkgs+=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}" "${PLUGINS_AI_RESEARCH[@]}" "${PLUGINS_HEALTH[@]}" "${PLUGINS_PUA[@]}") ;;
+                all)            pkgs+=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}" "${PLUGINS_AI_RESEARCH[@]}" "${PLUGINS_PUA[@]}") ;;
             esac
         done
     fi
@@ -1799,14 +1804,11 @@ install_plugins() {
                 ai-research)
                     plugins+=("${PLUGINS_AI_RESEARCH[@]}")
                     ;;
-                health)
-                    plugins+=("${PLUGINS_HEALTH[@]}")
-                    ;;
                 pua)
                     plugins+=("${PLUGINS_PUA[@]}")
                     ;;
                 all)
-                    plugins+=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}" "${PLUGINS_AI_RESEARCH[@]}" "${PLUGINS_HEALTH[@]}" "${PLUGINS_PUA[@]}")
+                    plugins+=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}" "${PLUGINS_AI_RESEARCH[@]}" "${PLUGINS_PUA[@]}")
                     ;;
             esac
         done
@@ -1826,11 +1828,10 @@ install_plugins() {
     # Collect required marketplaces from selected plugins
     local marketplace_list=(
         "anthropic-agent-skills|anthropics/skills"
-        "everything-claude-code|affaan-m/everything-claude-code"
+        "ecc|affaan-m/everything-claude-code"
         "ai-research-skills|zechenzhangAGI/AI-research-SKILLs"
         "claude-plugins-official|anthropics/claude-plugins-official"
         "thedotmack|thedotmack/claude-mem"
-        "claude-health|tw93/claude-health"
         "pua-skills|tanweai/pua"
         "openai-codex|openai/codex-plugin-cc"
         "karpathy-skills|forrestchang/andrej-karpathy-skills"
@@ -1908,6 +1909,37 @@ install_plugins() {
 # catalog. Runs on every invocation, independent of which components were
 # selected, so a plain `./install.sh` re-run keeps plugins fresh.
 # (A Claude Code restart is required for updates to take effect.)
+# Uninstall plugins and remove marketplaces that were renamed/removed upstream.
+prune_retired_plugins() {
+    command -v claude &>/dev/null || return
+    local list_json="$HOME/.claude/plugins/installed_plugins.json"
+    local pkg mkt
+    for pkg in "${RETIRED_PLUGINS[@]}"; do
+        if [[ ! -f "$list_json" ]]; then
+            continue  # nothing installed yet
+        elif command -v jq &>/dev/null; then
+            jq -e --arg k "$pkg" '.plugins | has($k)' "$list_json" >/dev/null 2>&1 || continue
+        fi
+        if $DRY_RUN; then
+            info "Would uninstall retired plugin: $pkg"
+        elif claude plugin uninstall "$pkg" 2>/dev/null; then
+            ok "Removed retired plugin: $pkg"
+        else
+            warn "Could not uninstall retired plugin: $pkg (may already be gone)"
+        fi
+    done
+    for mkt in "${RETIRED_MARKETPLACES[@]}"; do
+        [[ -d "$HOME/.claude/plugins/marketplaces/$mkt" ]] || continue
+        if $DRY_RUN; then
+            info "Would remove retired marketplace: $mkt"
+        elif claude plugin marketplace remove "$mkt" 2>/dev/null; then
+            ok "Removed retired marketplace: $mkt"
+        else
+            warn "Could not remove retired marketplace: $mkt"
+        fi
+    done
+}
+
 update_installed_plugins() {
     if ! command -v claude &>/dev/null; then
         info "claude CLI not found — skipping plugin updates"
@@ -1947,7 +1979,7 @@ update_installed_plugins() {
     local pkg
     while IFS= read -r pkg; do
         [[ -z "$pkg" ]] && continue
-        if retry 3 3 "Update plugin $pkg" claude plugin update "$pkg" 2>/dev/null; then
+        if retry 3 3 "Update plugin $pkg" claude plugin update "$pkg"; then
             ok "Plugin updated: ${pkg%@*}"
         else
             warn "Could not update plugin: $pkg"
@@ -2048,7 +2080,7 @@ uninstall() {
     fi
 
     if command -v claude &>/dev/null; then
-        local all_plugins=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}" "${PLUGINS_AI_RESEARCH[@]}" "${PLUGINS_HEALTH[@]}" "${PLUGINS_PUA[@]}")
+        local all_plugins=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}" "${PLUGINS_AI_RESEARCH[@]}" "${PLUGINS_PUA[@]}")
         for entry in "${all_plugins[@]}"; do
             local plugin_name="${entry%%@*}"
             claude plugin uninstall "$entry" 2>/dev/null && \
@@ -2125,7 +2157,7 @@ main() {
             # (lark-mcp is skipped non-interactively as it needs credentials;
             # playwright MCP installs fine.)
             PLUGIN_GROUPS=("essential")
-            SELECTED_PLUGINS+=("${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}" "${PLUGINS_HEALTH[@]}")
+            SELECTED_PLUGINS+=("${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}")
             INSTALL_MCP=true
         fi
     fi
@@ -2167,6 +2199,7 @@ main() {
     $INSTALL_LESSONS && install_lessons
     $INSTALL_STATUSLINE && install_statusline
     $INSTALL_MCP && install_mcp
+    prune_retired_plugins
     $INSTALL_PLUGINS && install_plugins
     # Always refresh marketplaces and update installed plugins, even when no
     # plugins were selected this run — keeps third-party plugins current.

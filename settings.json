@@ -20,7 +20,7 @@
     "inference-serving@ai-research-skills": true,
     "distributed-training@ai-research-skills": true,
     "optimization@ai-research-skills": true,
-    "everything-claude-code@everything-claude-code": false,
+    "ecc@ecc": true,
     "andrej-karpathy-skills@karpathy-skills": true,
     "claude-mem@thedotmack": true,
     "frontend-design@claude-plugins-official": true,

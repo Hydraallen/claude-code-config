@@ -188,7 +188,7 @@ $PLUGINS_ESSENTIAL = @(
 )
 
 $PLUGINS_OPTIONAL = @(
-    "everything-claude-code@everything-claude-code"
+    "ecc@ecc"
 )
 
 $PLUGINS_CLAUDE_MEM = @(
@@ -204,21 +204,28 @@ $PLUGINS_AI_RESEARCH = @(
     "optimization@ai-research-skills"
 )
 
-$PLUGINS_HEALTH = @(
-    "health@claude-health"
-)
-
 $PLUGINS_PUA = @(
     "pua@pua-skills"
 )
 
+# Plugins/marketplaces retired or renamed upstream. Re-running the installer
+# uninstalls these stale ids and removes their orphaned marketplaces so a
+# rename (e.g. everything-claude-code -> ecc) self-heals on the next run.
+$RETIRED_PLUGINS = @(
+    "everything-claude-code@everything-claude-code"
+    "health@claude-health"
+)
+$RETIRED_MARKETPLACES = @(
+    "everything-claude-code"
+    "claude-health"
+)
+
 $MARKETPLACE_LIST = @(
     @{ Name = "anthropic-agent-skills"; Repo = "anthropics/skills" }
-    @{ Name = "everything-claude-code"; Repo = "affaan-m/everything-claude-code" }
+    @{ Name = "ecc"; Repo = "affaan-m/everything-claude-code" }
     @{ Name = "ai-research-skills"; Repo = "zechenzhangAGI/AI-research-SKILLs" }
     @{ Name = "claude-plugins-official"; Repo = "anthropics/claude-plugins-official" }
     @{ Name = "thedotmack"; Repo = "thedotmack/claude-mem" }
-    @{ Name = "claude-health"; Repo = "tw93/claude-health" }
     @{ Name = "pua-skills"; Repo = "tanweai/pua" }
     @{ Name = "openai-codex"; Repo = "openai/codex-plugin-cc" }
     @{ Name = "karpathy-skills"; Repo = "forrestchang/andrej-karpathy-skills" }
@@ -254,7 +261,7 @@ function Show-InteractiveMenu {
             @{ Label = "ralph-loop";      Desc = "Automated iteration loop";          Default = $true;  Id = "plug-ralph-loop" }
             @{ Label = "commit-commands"; Desc = "git commit / push / PR workflow";   Default = $true;  Id = "plug-commit-commands" }
             @{ Label = "code-simplifier"; Desc = "Code simplification & cleanup";     Default = $true;  Id = "plug-code-simplifier" }
-            @{ Label = "everything-claude-code"; Desc = "TDD, security, database, Go/Python/Spring Boot"; Default = $true; Id = "plug-everything-claude-code" }
+            @{ Label = "ecc"; Desc = "Everything Claude Code: TDD, security, database, Go/Python/Spring Boot"; Default = $true; Id = "plug-everything-claude-code" }
             @{ Label = "harness-workflow"; Desc = "Structured development workflow (Planner->Generator->Evaluator)"; Default = $true; Id = "skill-harness-workflow" }
             @{ Label = "update-config";   Desc = "Configure Claude Code via settings.json (skill)"; Default = $true; Id = "skill-update-config" }
             @{ Label = "handoff";         Desc = "Compact conversation into a handoff doc (mattpocock) (skill)"; Default = $true; Id = "skill-handoff" }
@@ -274,7 +281,6 @@ function Show-InteractiveMenu {
         )}
         @{ Label = "Memory & Lifestyle"; Hint = "session memory and personal productivity"; Items = @(
             @{ Label = "claude-mem";      Desc = "Cross-session memory (~3k tokens/session)"; Default = $true; Id = "plug-claude-mem" }
-            @{ Label = "claude-health";   Desc = "Health check & wellness dashboard"; Default = $true; Id = "plug-claude-health" }
             @{ Label = "PUA";             Desc = "AI agent productivity booster (pua, pua-en, pua-ja)"; Default = $false; Id = "plug-pua" }
         )}
         @{ Label = "Academic Research"; Hint = "training/inference plugins + paper-reading & DeepXiv skills"; Items = @(
@@ -485,7 +491,7 @@ function Show-InteractiveMenu {
     # Plugin ID -> package mapping
     $pluginMap = @{
         "plug-andrej-karpathy-skills" = "andrej-karpathy-skills@karpathy-skills"
-        "plug-everything-claude-code" = "everything-claude-code@everything-claude-code"
+        "plug-everything-claude-code" = "ecc@ecc"
         "plug-superpowers" = "superpowers@claude-plugins-official"
         "plug-context7" = "context7@claude-plugins-official"
         "plug-commit-commands" = "commit-commands@claude-plugins-official"
@@ -498,7 +504,6 @@ function Show-InteractiveMenu {
         "plug-example-skills" = "example-skills@anthropic-agent-skills"
         "plug-github" = "github@claude-plugins-official"
         "plug-claude-mem" = "claude-mem@thedotmack"
-        "plug-claude-health" = "health@claude-health"
         "plug-pua" = "pua@pua-skills"
         "plug-tokenization" = "tokenization@ai-research-skills"
         "plug-fine-tuning" = "fine-tuning@ai-research-skills"
@@ -627,9 +632,8 @@ function Get-EffectiveSelectedPlugins {
             "essential" { $pkgs += $PLUGINS_ESSENTIAL }
             "claude-mem" { $pkgs += $PLUGINS_CLAUDE_MEM }
             "ai-research" { $pkgs += $PLUGINS_AI_RESEARCH }
-            "health" { $pkgs += $PLUGINS_HEALTH }
             "pua" { $pkgs += $PLUGINS_PUA }
-            "all" { $pkgs += $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_AI_RESEARCH + $PLUGINS_HEALTH + $PLUGINS_PUA }
+            "all" { $pkgs += $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_AI_RESEARCH + $PLUGINS_PUA }
         }
     }
     return @($pkgs | Select-Object -Unique)
@@ -1315,9 +1319,8 @@ function Install-Plugins {
             "essential" { $plugins += $PLUGINS_ESSENTIAL }
             "claude-mem" { $plugins += $PLUGINS_CLAUDE_MEM }
             "ai-research" { $plugins += $PLUGINS_AI_RESEARCH }
-            "health" { $plugins += $PLUGINS_HEALTH }
             "pua" { $plugins += $PLUGINS_PUA }
-            "all" { $plugins += $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_AI_RESEARCH + $PLUGINS_HEALTH + $PLUGINS_PUA }
+            "all" { $plugins += $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_AI_RESEARCH + $PLUGINS_PUA }
         }
     }
 
@@ -1380,6 +1383,42 @@ function Install-Plugins {
 # re-run of install.ps1 keeps third-party plugins current — the built-in
 # session auto-update skips community marketplaces. Uses native JSON parsing
 # (no jq). A Claude Code restart is required for updates to take effect.
+# Uninstall plugins and remove marketplaces that were renamed/removed upstream.
+function Remove-RetiredPlugins {
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { return }
+    $listJson = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
+    $installedKeys = @()
+    if (Test-Path $listJson) {
+        try {
+            $parsed = Get-Content $listJson -Raw | ConvertFrom-Json
+            if ($parsed.PSObject.Properties['plugins']) {
+                $installedKeys = $parsed.plugins.PSObject.Properties.Name
+            }
+        } catch { }
+    }
+    foreach ($pkg in $RETIRED_PLUGINS) {
+        if ($installedKeys -notcontains $pkg) { continue }
+        if ($DryRun) {
+            Write-Info "Would uninstall retired plugin: $pkg"
+        } else {
+            & claude plugin uninstall "$pkg" 2>$null
+            if ($LASTEXITCODE -eq 0) { Write-Ok "Removed retired plugin: $pkg" }
+            else { Write-Warn "Could not uninstall retired plugin: $pkg (may already be gone)" }
+        }
+    }
+    foreach ($mkt in $RETIRED_MARKETPLACES) {
+        $mktDir = Join-Path $env:USERPROFILE ".claude\plugins\marketplaces\$mkt"
+        if (-not (Test-Path $mktDir)) { continue }
+        if ($DryRun) {
+            Write-Info "Would remove retired marketplace: $mkt"
+        } else {
+            & claude plugin marketplace remove "$mkt" 2>$null
+            if ($LASTEXITCODE -eq 0) { Write-Ok "Removed retired marketplace: $mkt" }
+            else { Write-Warn "Could not remove retired marketplace: $mkt" }
+        }
+    }
+}
+
 function Update-InstalledPlugins {
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
         Write-Info "claude CLI not found - skipping plugin updates"
@@ -1433,7 +1472,7 @@ function Update-InstalledPlugins {
     foreach ($name in $plugins.PSObject.Properties.Name) {
         $shortName = ($name -split '@')[0]
         $ok = Invoke-Retry -MaxAttempts 3 -DelaySeconds 3 -Description "Update plugin $name" -Action {
-            & claude plugin update "$name" 2>$null
+            & claude plugin update "$name"
             if ($LASTEXITCODE -ne 0) { throw "plugin update failed" }
         }
         if ($ok) { Write-Ok "Plugin updated: $shortName" }
@@ -1542,7 +1581,7 @@ function Invoke-Uninstall {
 
     $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
     if ($claudeCmd) {
-        $allPlugins = $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_AI_RESEARCH + $PLUGINS_HEALTH + $PLUGINS_PUA
+        $allPlugins = $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_AI_RESEARCH + $PLUGINS_PUA
         foreach ($entry in $allPlugins) {
             $pluginName = ($entry -split '@')[0]
             & claude plugin uninstall $entry 2>$null
@@ -1695,7 +1734,7 @@ function Main {
             $doHooks = $true
             $doPlugins = $true
             $pluginGroups = @("essential")
-            $selectedPlugins = $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_HEALTH
+            $selectedPlugins = $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM
             $doMcp = $true
         }
     } else {
@@ -1711,7 +1750,7 @@ function Main {
         $doHooks = $true
         $doPlugins = $true
         $pluginGroups = @("essential")
-        $selectedPlugins = $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_HEALTH
+        $selectedPlugins = $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM
         $doMcp = $true
     }
 
@@ -1760,6 +1799,7 @@ function Main {
     if ($doLessons) { Install-Lessons }
     if ($doHooks) { Install-Hooks }
     if ($doMcp) { Install-Mcp }
+    Remove-RetiredPlugins
     if ($doPlugins) { Install-Plugins -Groups $pluginGroups -SelectedPluginsList $selectedPlugins }
     # Always refresh marketplaces and update installed plugins, even when no
     # plugins were selected this run — keeps third-party plugins current.
