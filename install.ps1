@@ -1005,6 +1005,35 @@ function Install-Scripts {
     }
 }
 
+# Run the installed data-cleanup script. Mirrors run_cleanup() in install.sh.
+# The cleanup script is bash (cleanup-claude-data.sh), so on Windows it needs a
+# bash interpreter (Git Bash or WSL); if none is available it is skipped with a
+# warning rather than failing the install. In DryRun the cleanup runs its own
+# (non-deleting) dry-run report.
+function Invoke-Cleanup {
+    $script = Join-Path $CLAUDE_DIR "scripts\cleanup-claude-data.sh"
+    if (-not (Test-Path $script)) {
+        Write-Info "Cleanup script not installed; skipping data cleanup"
+        return
+    }
+    if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
+        Write-Warn "bash not found - skipping data cleanup (install Git Bash or WSL, or run scripts\cleanup-claude-data.sh manually)"
+        return
+    }
+    if ($DryRun) {
+        Write-Info "Would run data cleanup (dry-run report):"
+        if (Test-Path $CLAUDE_DIR) {
+            & bash "$script"
+        } else {
+            Write-Info "  (skipped report - $CLAUDE_DIR does not exist yet)"
+        }
+        return
+    }
+    Write-Info "Running Claude data cleanup (--apply)..."
+    & bash "$script" --apply
+    if ($LASTEXITCODE -ne 0) { Write-Warn "Data cleanup reported a non-fatal error" }
+}
+
 function Install-DeepXiv {
     param(
         [string[]]$SelectedDeepXivSkills = @()
@@ -1345,6 +1374,73 @@ function Install-Plugins {
     }
 }
 
+# Refresh ALL marketplace catalogs and update every installed plugin to its
+# latest version. Mirrors update_installed_plugins() in install.sh. Runs on
+# every invocation, independent of which components were selected, so a plain
+# re-run of install.ps1 keeps third-party plugins current — the built-in
+# session auto-update skips community marketplaces. Uses native JSON parsing
+# (no jq). A Claude Code restart is required for updates to take effect.
+function Update-InstalledPlugins {
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+        Write-Info "claude CLI not found - skipping plugin updates"
+        return
+    }
+
+    $listJson = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
+
+    if ($DryRun) {
+        Write-Info "Would run: claude plugin marketplace update (all catalogs)"
+        if (Test-Path $listJson) {
+            try {
+                $data = Get-Content $listJson -Raw | ConvertFrom-Json
+                if ($data.PSObject.Properties['plugins']) {
+                    foreach ($name in $data.plugins.PSObject.Properties.Name) {
+                        Write-Info "Would update plugin: $name"
+                    }
+                }
+            } catch { }
+        }
+        return
+    }
+
+    Write-Info "Refreshing marketplace catalogs (official + third-party)..."
+    $ok = Invoke-Retry -MaxAttempts 3 -DelaySeconds 3 -Description "Refresh marketplaces" -Action {
+        & claude plugin marketplace update 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "marketplace update failed" }
+    }
+    if ($ok) { Write-Ok "Marketplace catalogs refreshed" }
+    else { Write-Warn "Could not refresh some marketplace catalogs" }
+
+    if (-not (Test-Path $listJson)) {
+        Write-Warn "installed_plugins.json not found - cannot enumerate installed plugins to update"
+        return
+    }
+
+    $plugins = $null
+    try {
+        $parsed = Get-Content $listJson -Raw | ConvertFrom-Json
+        if ($parsed.PSObject.Properties['plugins']) { $plugins = $parsed.plugins }
+    } catch {
+        Write-Warn "installed_plugins.json is not valid JSON - skipping plugin updates"
+        return
+    }
+    if (-not $plugins) {
+        Write-Warn "No installed plugins found in installed_plugins.json"
+        return
+    }
+
+    Write-Info "Updating installed plugins to latest (restart required to apply)..."
+    foreach ($name in $plugins.PSObject.Properties.Name) {
+        $shortName = ($name -split '@')[0]
+        $ok = Invoke-Retry -MaxAttempts 3 -DelaySeconds 3 -Description "Update plugin $name" -Action {
+            & claude plugin update "$name" 2>$null
+            if ($LASTEXITCODE -ne 0) { throw "plugin update failed" }
+        }
+        if ($ok) { Write-Ok "Plugin updated: $shortName" }
+        else { Write-Warn "Could not update plugin: $name" }
+    }
+}
+
 # --- Uninstall -------------------------------------------------------------
 
 function Invoke-Uninstall {
@@ -1658,6 +1754,9 @@ function Main {
     if ($doHooks) { Install-Hooks }
     if ($doMcp) { Install-Mcp }
     if ($doPlugins) { Install-Plugins -Groups $pluginGroups -SelectedPluginsList $selectedPlugins }
+    # Always refresh marketplaces and update installed plugins, even when no
+    # plugins were selected this run — keeps third-party plugins current.
+    Update-InstalledPlugins
     if ($doDeepXiv) { Install-DeepXiv -SelectedDeepXivSkills $deepXivSkills }
 
     if (-not $DryRun) {
@@ -1667,6 +1766,10 @@ function Main {
             Write-Warn "Skipping version stamp due to $InstallCritical critical warning(s)"
         }
     }
+
+    # Data cleanup runs last so it also sweeps temp dirs created during this run
+    # (e.g. plugin marketplace temp dirs from the updates above).
+    Invoke-Cleanup
 
     Write-Host ""
     if ($InstallWarnings -gt 0 -or $InstallCritical -gt 0) {

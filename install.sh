@@ -1525,6 +1525,29 @@ install_scripts() {
     done
 }
 
+# Run the installed data-cleanup script. Reuses scripts/cleanup-claude-data.sh
+# (installed by install_scripts) rather than duplicating its logic here.
+# In DRY_RUN the cleanup runs in its own dry-run mode (no --apply), which only
+# reports sizes and never deletes.
+run_cleanup() {
+    local script="$CLAUDE_DIR/scripts/cleanup-claude-data.sh"
+    if [[ ! -f "$script" ]]; then
+        info "Cleanup script not installed; skipping data cleanup"
+        return
+    fi
+    if $DRY_RUN; then
+        info "Would run data cleanup (dry-run report):"
+        if [[ -d "$CLAUDE_DIR" ]]; then
+            bash "$script" || true
+        else
+            info "  (skipped report — $CLAUDE_DIR does not exist yet)"
+        fi
+        return
+    fi
+    info "Running Claude data cleanup (--apply)..."
+    bash "$script" --apply || warn "Data cleanup reported a non-fatal error"
+}
+
 install_shell_wrapper() {
     info "Installing shell wrapper (claude.zsh)..."
     local target="$CLAUDE_DIR/claude.zsh"
@@ -1878,6 +1901,60 @@ install_plugins() {
     fi
 }
 
+# Refresh ALL marketplace catalogs and update every installed plugin to its
+# latest version. This is what makes re-running install.sh keep third-party
+# plugins current — the built-in session auto-update skips community
+# marketplaces, and `claude plugin install` alone reads a possibly-stale
+# catalog. Runs on every invocation, independent of which components were
+# selected, so a plain `./install.sh` re-run keeps plugins fresh.
+# (A Claude Code restart is required for updates to take effect.)
+update_installed_plugins() {
+    if ! command -v claude &>/dev/null; then
+        info "claude CLI not found — skipping plugin updates"
+        return
+    fi
+
+    local list_json="$HOME/.claude/plugins/installed_plugins.json"
+
+    if $DRY_RUN; then
+        info "Would run: claude plugin marketplace update (all catalogs)"
+        if command -v jq &>/dev/null && [[ -f "$list_json" ]]; then
+            local pkg
+            while IFS= read -r pkg; do
+                [[ -n "$pkg" ]] && info "Would update plugin: $pkg"
+            done < <(jq -r '.plugins | keys[]' "$list_json" 2>/dev/null)
+        fi
+        return
+    fi
+
+    info "Refreshing marketplace catalogs (official + third-party)..."
+    if retry 3 3 "Refresh marketplaces" claude plugin marketplace update 2>/dev/null; then
+        ok "Marketplace catalogs refreshed"
+    else
+        warn "Could not refresh some marketplace catalogs"
+    fi
+
+    if ! command -v jq &>/dev/null || [[ ! -f "$list_json" ]]; then
+        warn "jq or installed_plugins.json unavailable — cannot enumerate installed plugins to update"
+        return
+    fi
+    if ! jq empty "$list_json" 2>/dev/null; then
+        warn "installed_plugins.json is not valid JSON — skipping plugin updates"
+        return
+    fi
+
+    info "Updating installed plugins to latest (restart required to apply)..."
+    local pkg
+    while IFS= read -r pkg; do
+        [[ -z "$pkg" ]] && continue
+        if retry 3 3 "Update plugin $pkg" claude plugin update "$pkg" 2>/dev/null; then
+            ok "Plugin updated: ${pkg%@*}"
+        else
+            warn "Could not update plugin: $pkg"
+        fi
+    done < <(jq -r '.plugins | keys[]' "$list_json" 2>/dev/null)
+}
+
 # --- Uninstall ----------------------------------------------------------
 
 uninstall() {
@@ -2085,6 +2162,9 @@ main() {
     $INSTALL_STATUSLINE && install_statusline
     $INSTALL_MCP && install_mcp
     $INSTALL_PLUGINS && install_plugins
+    # Always refresh marketplaces and update installed plugins, even when no
+    # plugins were selected this run — keeps third-party plugins current.
+    update_installed_plugins
     $INSTALL_SHELL_WRAPPER && install_shell_wrapper
     $INSTALL_DEEPXIV && install_deepxiv
 
@@ -2096,6 +2176,10 @@ main() {
             warn "Skipping version stamp due to $INSTALL_CRITICAL critical warning(s)"
         fi
     fi
+
+    # Data cleanup runs last so it also sweeps temp dirs created during this run
+    # (e.g. plugin marketplace temp dirs from updates above).
+    run_cleanup
 
     echo ""
     if [[ $INSTALL_WARNINGS -gt 0 || $INSTALL_CRITICAL -gt 0 ]]; then

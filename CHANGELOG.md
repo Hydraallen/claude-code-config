@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.8.0] - 2026-06-22
+
+### Features
+- **`install.sh` now keeps plugins up to date on every run.** New `update_installed_plugins()` runs `claude plugin marketplace update` (refreshing *all* catalogs, official and third-party) then iterates `installed_plugins.json` calling `claude plugin update <name@marketplace>` for every installed plugin. It runs unconditionally — independent of which components were selected — so a plain `./install.sh` re-run brings stale plugins current. A Claude Code restart is required for updates to take effect.
+- **`install.sh` now auto-runs data cleanup at the end of each install.** New `run_cleanup()` invokes the already-installed `scripts/cleanup-claude-data.sh --apply`, placed last in `main()` so it also sweeps temp dirs created by the plugin updates above. In `--dry-run` it runs the cleanup script's own (non-deleting) dry-run report instead.
+
+### Design Rationale
+- Claude Code's built-in session auto-update **skips third-party/community marketplaces** (only official Anthropic repos refresh on startup — see [issue #26744](https://github.com/anthropics/claude-code/issues/26744)). `claude plugin install` alone reads a possibly-stale catalog, so community plugins (e.g. `everything-claude-code`, `claude-mem`, `health`) were stuck months behind. Driving the official `marketplace update` + `plugin update` CLI is the supported path and is fully scriptable.
+- Cleanup reuses the existing `cleanup-claude-data.sh` rather than duplicating its logic into the installer (single source of truth).
+
+### Notes & Caveats
+- Plugin updates can pull large version jumps (e.g. `claude-mem` was ~2000 commits behind) which may include breaking changes — restart and verify after a big update.
+- `update_installed_plugins` guards against missing `claude` CLI / `jq` and against malformed `installed_plugins.json` (validated with `jq empty`), skipping gracefully with a warning rather than failing the install.
+- Cleanup runs with `--apply` (deletes) on real installs by design (user opt-in); the age-based targets honour the script's 30-day threshold, and `temp_*`/`*.bak` marketplace scratch dirs are removed unconditionally.
+- **`install.ps1` (Windows) mirrors both behaviours** via `Update-InstalledPlugins` (native `ConvertFrom-Json`, no `jq`) and `Invoke-Cleanup`. Since `cleanup-claude-data.sh` is a bash script, the Windows cleanup step requires a `bash` interpreter (Git Bash or WSL) on `PATH`; if absent it is skipped with a warning rather than failing the install.
+
 ## [2.7.1] - 2026-06-09
 
 ### Features
