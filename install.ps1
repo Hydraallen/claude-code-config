@@ -254,7 +254,7 @@ function Show-InteractiveMenu {
             @{ Label = "ralph-loop";      Desc = "Automated iteration loop";          Default = $true;  Id = "plug-ralph-loop" }
             @{ Label = "commit-commands"; Desc = "git commit / push / PR workflow";   Default = $true;  Id = "plug-commit-commands" }
             @{ Label = "code-simplifier"; Desc = "Code simplification & cleanup";     Default = $true;  Id = "plug-code-simplifier" }
-            @{ Label = "everything-claude-code"; Desc = "TDD, security, database, Go/Python/Spring Boot"; Default = $false; Id = "plug-everything-claude-code" }
+            @{ Label = "everything-claude-code"; Desc = "TDD, security, database, Go/Python/Spring Boot"; Default = $true; Id = "plug-everything-claude-code" }
             @{ Label = "harness-workflow"; Desc = "Structured development workflow (Planner->Generator->Evaluator)"; Default = $true; Id = "skill-harness-workflow" }
             @{ Label = "update-config";   Desc = "Configure Claude Code via settings.json (skill)"; Default = $true; Id = "skill-update-config" }
             @{ Label = "handoff";         Desc = "Compact conversation into a handoff doc (mattpocock) (skill)"; Default = $true; Id = "skill-handoff" }

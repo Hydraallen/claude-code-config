@@ -511,7 +511,7 @@ feature-dev|Guided feature development|1|plug-feature-dev
 ralph-loop|Automated iteration loop|1|plug-ralph-loop
 commit-commands|git commit / push / PR workflow|1|plug-commit-commands
 code-simplifier|Code simplification & cleanup|1|plug-code-simplifier
-everything-claude-code|TDD, security, database, Go/Python/Spring Boot|0|plug-everything-claude-code
+everything-claude-code|TDD, security, database, Go/Python/Spring Boot|1|plug-everything-claude-code
 harness-workflow|Structured development workflow (Planner→Generator→Evaluator)|1|skill-harness-workflow
 update-config|Configure Claude Code via settings.json (skill)|1|skill-update-config
 handoff|Compact conversation into a handoff doc (mattpocock) (skill)|1|skill-handoff
