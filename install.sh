@@ -557,7 +557,7 @@ deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-
     # Group 8: MCP Servers
     GROUP_LABELS+=("MCP Servers")
     GROUP_HINTS+=("")
-    GROUP_ITEMS+=("MCP Servers|Lark + Playwright integration|0|mcp")
+    GROUP_ITEMS+=("MCP Servers|Lark + Playwright integration|1|mcp")
 
     local num_groups=${#GROUP_LABELS[@]}
 
@@ -2119,8 +2119,14 @@ main() {
             # Add code-review plugin (normally from Review group)
             SELECTED_PLUGINS+=("code-review@claude-plugins-official")
         else
-            # Implicit (non-TTY fallback): essential plugins only, no MCP
+            # Implicit (non-TTY fallback): essential plugins plus the
+            # default-selected third-party plugins and MCP servers, so a
+            # `curl | bash` install without --all still brings them along.
+            # (lark-mcp is skipped non-interactively as it needs credentials;
+            # playwright MCP installs fine.)
             PLUGIN_GROUPS=("essential")
+            SELECTED_PLUGINS+=("${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}" "${PLUGINS_HEALTH[@]}")
+            INSTALL_MCP=true
         fi
     fi
 

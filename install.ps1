@@ -290,7 +290,7 @@ function Show-InteractiveMenu {
             @{ Label = "deepxiv-baseline-table"; Desc = "Baseline comparison table from papers"; Default = $false; Id = "deepxiv-baseline-table" }
         )}
         @{ Label = "MCP Servers"; Hint = ""; Items = @(
-            @{ Label = "MCP Servers"; Desc = "Lark + Playwright integration";        Default = $false; Id = "mcp" }
+            @{ Label = "MCP Servers"; Desc = "Lark + Playwright integration";        Default = $true; Id = "mcp" }
         )}
     )
 
@@ -1695,9 +1695,14 @@ function Main {
             $doHooks = $true
             $doPlugins = $true
             $pluginGroups = @("essential")
+            $selectedPlugins = $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_HEALTH
+            $doMcp = $true
         }
     } else {
-        # Non-interactive fallback: essential plugins, no MCP
+        # Non-interactive fallback: essential plugins plus the default-selected
+        # third-party plugins and MCP servers, so a `irm | iex` install without
+        # -All still brings them along. (lark-mcp is skipped non-interactively
+        # as it needs credentials; playwright MCP installs fine.)
         $doClaudeMd = $true
         $doSettings = $true
         $doRules = $true
@@ -1706,6 +1711,8 @@ function Main {
         $doHooks = $true
         $doPlugins = $true
         $pluginGroups = @("essential")
+        $selectedPlugins = $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_HEALTH
+        $doMcp = $true
     }
 
     # Auto-enable settings.json when StatusLine, Lessons, or Plugins need it for config
