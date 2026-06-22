@@ -273,8 +273,8 @@ function Show-InteractiveMenu {
             @{ Label = "humanizer-zh";    Desc = "Remove AI writing patterns (Chinese, op7418) (skill)"; Default = $false; Id = "skill-humanizer-zh" }
         )}
         @{ Label = "Memory & Lifestyle"; Hint = "session memory and personal productivity"; Items = @(
-            @{ Label = "claude-mem";      Desc = "Cross-session memory (~3k tokens/session)"; Default = $false; Id = "plug-claude-mem" }
-            @{ Label = "claude-health";   Desc = "Health check & wellness dashboard"; Default = $false; Id = "plug-claude-health" }
+            @{ Label = "claude-mem";      Desc = "Cross-session memory (~3k tokens/session)"; Default = $true; Id = "plug-claude-mem" }
+            @{ Label = "claude-health";   Desc = "Health check & wellness dashboard"; Default = $true; Id = "plug-claude-health" }
             @{ Label = "PUA";             Desc = "AI agent productivity booster (pua, pua-en, pua-ja)"; Default = $false; Id = "plug-pua" }
         )}
         @{ Label = "Academic Research"; Hint = "training/inference plugins + paper-reading & DeepXiv skills"; Items = @(

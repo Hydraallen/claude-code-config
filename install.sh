@@ -536,8 +536,8 @@ humanizer-zh|Remove AI writing patterns (Chinese, op7418) (skill)|0|skill-humani
     # Group 6: Memory & Lifestyle
     GROUP_LABELS+=("Memory & Lifestyle")
     GROUP_HINTS+=("session memory and personal productivity")
-    GROUP_ITEMS+=("claude-mem|Cross-session memory (~3k tokens/session)|0|plug-claude-mem
-claude-health|Health check & wellness dashboard|0|plug-claude-health
+    GROUP_ITEMS+=("claude-mem|Cross-session memory (~3k tokens/session)|1|plug-claude-mem
+claude-health|Health check & wellness dashboard|1|plug-claude-health
 PUA|AI agent productivity booster (pua, pua-en, pua-ja)|0|plug-pua")
 
     # Group 7: Academic Research (AI Research plugins + DeepXiv skills + paper-reading)
