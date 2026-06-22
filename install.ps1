@@ -985,6 +985,26 @@ function Install-Agents {
     }
 }
 
+$USER_SCRIPTS = @("cleanup-claude-data.sh")
+
+function Install-Scripts {
+    Write-Info "Installing maintenance scripts..."
+    $srcDir = Join-Path $SCRIPT_DIR "scripts"
+    if (-not (Test-Path $srcDir)) { Write-Info "No scripts/ directory in source, skipping"; return }
+    $destDir = Join-Path $CLAUDE_DIR "scripts"
+    if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+    foreach ($script in $USER_SCRIPTS) {
+        $src = Join-Path $srcDir $script
+        if (-not (Test-Path $src)) { Write-Warn "Expected script missing in source: $script"; continue }
+        if ($DryRun) {
+            Write-Info "Would copy: scripts/$script -> $destDir\$script"
+        } else {
+            Copy-Item $src (Join-Path $destDir $script) -Force
+            Write-Ok "Script installed: $script (run manually; not auto-executed)"
+        }
+    }
+}
+
 function Install-DeepXiv {
     param(
         [string[]]$SelectedDeepXivSkills = @()
@@ -1392,6 +1412,16 @@ function Invoke-Uninstall {
         if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Ok "Removed agents/" }
     }
 
+    # Only remove maintenance scripts that this installer manages
+    foreach ($script in $USER_SCRIPTS) {
+        $sp = Join-Path $CLAUDE_DIR "scripts\$script"
+        if (Test-Path $sp) { Remove-Item $sp -Force; Write-Ok "Removed script: $script" }
+    }
+    $scriptsDir = Join-Path $CLAUDE_DIR "scripts"
+    if ((Test-Path $scriptsDir) -and -not (Get-ChildItem $scriptsDir -ErrorAction SilentlyContinue)) {
+        Remove-Item $scriptsDir -Force
+    }
+
     # Remove DeepXiv skills (glob to catch any installed by --All)
     $deepxivPattern = Join-Path $CLAUDE_DIR "skills\deepxiv-*"
     Get-ChildItem $deepxivPattern -Directory -ErrorAction SilentlyContinue | ForEach-Object {
@@ -1623,6 +1653,7 @@ function Main {
     if ($doRules) { Install-Rules -Langs $ruleLangs -LangsExplicit $ruleLangsExplicit }
     if ($doSkills) { Install-Skills -SelectedSkills $selectedSkills }
     if ($doAgents) { Install-Agents }
+    Install-Scripts
     if ($doLessons) { Install-Lessons }
     if ($doHooks) { Install-Hooks }
     if ($doMcp) { Install-Mcp }

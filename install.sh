@@ -1504,6 +1504,27 @@ install_agents() {
     done
 }
 
+# User-facing maintenance scripts to install into ~/.claude/scripts.
+# Repo-dev-only scripts (e.g. check-readme-sync.sh) are deliberately excluded.
+USER_SCRIPTS=("cleanup-claude-data.sh")
+
+install_scripts() {
+    info "Installing maintenance scripts..."
+    [[ -d "$SCRIPT_DIR/scripts" ]] || { info "No scripts/ directory in source, skipping"; return; }
+    mkdir -p "$CLAUDE_DIR/scripts"
+    for script in "${USER_SCRIPTS[@]}"; do
+        local src="$SCRIPT_DIR/scripts/$script"
+        [[ -f "$src" ]] || { warn "Expected script missing in source: $script"; continue; }
+        if $DRY_RUN; then
+            info "Would copy: scripts/$script -> $CLAUDE_DIR/scripts/$script"
+        else
+            cp "$src" "$CLAUDE_DIR/scripts/$script"
+            chmod +x "$CLAUDE_DIR/scripts/$script"
+            ok "Script installed: $script (run manually; not auto-executed)"
+        fi
+    done
+}
+
 install_shell_wrapper() {
     info "Installing shell wrapper (claude.zsh)..."
     local target="$CLAUDE_DIR/claude.zsh"
@@ -1867,6 +1888,7 @@ uninstall() {
     echo "  - $CLAUDE_DIR/rules/"
     echo "  - $CLAUDE_DIR/skills/ (installer-managed only)"
     echo "  - $CLAUDE_DIR/agents/ (installer-managed only)"
+    echo "  - $CLAUDE_DIR/scripts/ (installer-managed only)"
     echo "  - $CLAUDE_DIR/skills/deepxiv-* (DeepXiv skills)"
     echo "  - $CLAUDE_DIR/lessons.md"
     echo "  - $CLAUDE_DIR/hooks/ (installer-managed only)"
@@ -1918,6 +1940,12 @@ uninstall() {
     else
         rm -rf "$CLAUDE_DIR/agents" && ok "Removed agents/"
     fi
+
+    # Only remove maintenance scripts that this installer manages
+    for script in "${USER_SCRIPTS[@]}"; do
+        rm -f "$CLAUDE_DIR/scripts/$script" && ok "Removed script: $script"
+    done
+    rmdir "$CLAUDE_DIR/scripts" 2>/dev/null || true
 
     rm -f "$CLAUDE_DIR/claude.zsh" && ok "Removed claude.zsh"
     rm -f "$CLAUDE_DIR/system-prompt.txt" && ok "Removed system-prompt.txt"
@@ -2052,6 +2080,7 @@ main() {
     $INSTALL_RULES && install_rules
     $INSTALL_SKILLS && install_skills
     $INSTALL_AGENTS && install_agents
+    install_scripts
     $INSTALL_LESSONS && install_lessons
     $INSTALL_STATUSLINE && install_statusline
     $INSTALL_MCP && install_mcp
