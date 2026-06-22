@@ -1559,7 +1559,7 @@ install_shell_wrapper() {
     if $DRY_RUN; then
         info "Would copy: claude.zsh -> $target"
         info "Would copy: system-prompt.txt -> $CLAUDE_DIR/system-prompt.txt"
-        info "Would copy: glm-env.json -> $CLAUDE_DIR/glm-env.json (template, if not exists)"
+        info "Would install glm-env.json (if absent) or merge model defaults into existing (credentials preserved)"
         info "Would prompt for default API backend (claude or glm)"
     else
         cp "$SCRIPT_DIR/claude.zsh" "$target"
@@ -1578,10 +1578,34 @@ install_shell_wrapper() {
                 ok "system-prompt.txt installed"
             fi
         fi
-        # Install glm-env.json template only if not already present
-        if [[ ! -f "$CLAUDE_DIR/glm-env.json" ]] && [[ -f "$SCRIPT_DIR/glm-env.json" ]]; then
-            cp "$SCRIPT_DIR/glm-env.json" "$CLAUDE_DIR/glm-env.json"
-            ok "glm-env.json template installed (edit with your GLM credentials)"
+        # Install glm-env.json template, or merge updated model defaults into an
+        # existing file while preserving the user's credentials.
+        if [[ -f "$SCRIPT_DIR/glm-env.json" ]]; then
+            if [[ ! -f "$CLAUDE_DIR/glm-env.json" ]]; then
+                cp "$SCRIPT_DIR/glm-env.json" "$CLAUDE_DIR/glm-env.json"
+                ok "glm-env.json template installed (edit with your GLM credentials)"
+            elif command -v jq &>/dev/null; then
+                # Take all model fields from the template; keep local token/base URL.
+                local merged
+                merged=$(jq -n \
+                    --slurpfile ex "$CLAUDE_DIR/glm-env.json" \
+                    --slurpfile tpl "$SCRIPT_DIR/glm-env.json" \
+                    '$tpl[0] * {
+                        ANTHROPIC_AUTH_TOKEN: ($ex[0].ANTHROPIC_AUTH_TOKEN // $tpl[0].ANTHROPIC_AUTH_TOKEN),
+                        ANTHROPIC_BASE_URL:   ($ex[0].ANTHROPIC_BASE_URL   // $tpl[0].ANTHROPIC_BASE_URL)
+                    }' 2>/dev/null)
+                if [[ -z "$merged" ]]; then
+                    warn "glm-env.json could not be parsed by jq — leaving it untouched"
+                elif [[ "$(printf '%s' "$merged" | jq -S .)" == "$(jq -S . "$CLAUDE_DIR/glm-env.json")" ]]; then
+                    ok "glm-env.json model defaults already up to date"
+                else
+                    cp "$CLAUDE_DIR/glm-env.json" "$CLAUDE_DIR/glm-env.json.bak"
+                    printf '%s\n' "$merged" > "$CLAUDE_DIR/glm-env.json"
+                    ok "glm-env.json model defaults updated (credentials preserved, backup: glm-env.json.bak)"
+                fi
+            else
+                warn "glm-env.json exists but jq not found — cannot merge model updates. Install jq to enable auto-update."
+            fi
         fi
 
         # Choose default profile
