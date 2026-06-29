@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.8.0] - 2026-06-29
+
+### Features
+- **Replaced the bundled `handoff` / `teach` skills with the `mattpocock/skills` collection, installed via npx.** The two vendored skills (`skills/handoff/`, `skills/teach/`) are removed. The **Workflow** group now offers a single `mattpocock/skills` item (default **on**) that runs `skills add mattpocock/skills` scoped to the 17 skills declared in the collection's `plugin.json` (via explicit `--skill` flags), installing them into `~/.claude/skills/` for Claude Code.
+- **New `Slides` group with two AI-presentation plugins, both default OFF:** [`frontend-slides`](https://github.com/zarazhangrui/frontend-slides) (zero-dependency HTML slide generator with PPT conversion) and [`ppt-master`](https://github.com/hugohe3/ppt-master) (editable PPTX from PDF/DOCX/URL/Markdown). They install only via explicit `--all` or a manual pick.
+- **`superpowers` is now default OFF.** It moved from the essential plugin tier to the optional tier (`PLUGINS_OPTIONAL`), so it installs only via explicit `--all` or a manual pick. It coexists with `mattpocock/skills` — the two are **not** mutually exclusive.
+- **Removed the `everything-claude-code` plugin** entirely: Workflow menu entry, optional-plugin slot, the `affaan-m/everything-claude-code` marketplace, the id→package mapping, and its `settings.json` entry. A tombstone (`PLUGINS_REMOVED`) strips it from an upgrading user's `enabledPlugins` and uninstalls it on `--uninstall`, so it does not linger.
+
+### Design Rationale
+- **npx over vendoring.** Installing the collection through the `skills` CLI keeps the repo free of vendored skill directories. `DO_NOT_TRACK=1` disables the CLI's anonymous telemetry; `--copy` writes real files (not symlinks) so uninstall can delete them; `--agent claude-code` scopes the install to Claude Code only.
+- **Scoped to the 17 plugin.json skills, not `--skill '*'`.** The repo actually contains 35 `SKILL.md` files (including personal/in-progress ones); `--skill '*'` would install all 35. The installer passes the exact 17 names from a single `MATTPOCOCK_SKILLS` array, which also seeds the install manifest that drives uninstall, so install / docs / uninstall stay consistent.
+- **superpowers and mattpocock/skills are not mutually exclusive.** They overlap in spirit but can be installed together; `mattpocock/skills` is simply the new default and `superpowers` becomes opt-in, mirroring the optional tier `everything-claude-code` previously occupied.
+
+### Notes & Caveats
+- Installing `mattpocock/skills` requires Node.js / `npx` and network access at install time. If `npx` is missing the installer prints a Node.js install hint and the exact command, then skips it without blocking the rest of the install or the version stamp (it is an optional add-on).
+- `ppt-master` needs `pip install -r requirements.txt` inside its installed plugin directory for its Python post-processing scripts to work.
+- Upgraders' vendored `~/.claude/skills/{handoff,teach}` are **not** force-deleted: when `mattpocock/skills` is selected its `--copy` install overwrites them with the upstream versions; when it is deselected (or `npx` is unavailable) the old copies keep working. The legacy-skill migration is also `--dry-run` safe.
+- `--uninstall` removes only the mattpocock skills recorded in an install manifest (`~/.claude/.mattpocock-skills`, written on a successful install), so a user-authored skill that merely shares a generic name (e.g. `tdd`, `handoff`) is never deleted.
+- README plugin / marketplace / bundled-skill counts updated to 25 / 10 / 5.
+
 ## [2.7.1] - 2026-06-09
 
 ### Features

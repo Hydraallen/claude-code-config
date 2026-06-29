@@ -6,7 +6,7 @@
 
 ![Statusline](assets/statusline.png)
 
-Production-ready configuration for [Claude Code](https://claude.com/claude-code). One-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 24 curated plugins across 9 marketplaces, seven bundled skills, a gradient status bar, and a self-improvement loop that remembers corrections across sessions.
+Production-ready configuration for [Claude Code](https://claude.com/claude-code). One-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 25 curated plugins across 10 marketplaces, five bundled skills (plus the [mattpocock/skills](https://github.com/mattpocock/skills) collection via npx), a gradient status bar, and a self-improvement loop that remembers corrections across sessions.
 
 ## Showcase
 
@@ -35,9 +35,10 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
   > [5/5] Core                   Global instructions, settings, rules...
     [0/3] Language Rules          Python / TypeScript / Go
     [2/3] Review                  code-review + adversarial-review
-    [9/10] Workflow                karpathy, superpowers, update-config, handoff...
+    [7/8] Workflow                karpathy, mattpocock/skills, update-config...
     [3/3] Integrations            context7, github, playwright
     [4/5] Design & Content        document-skills, frontend-design, humanizer...
+    [0/2] Slides                  frontend-slides, ppt-master
     [0/3] Memory & Lifestyle      claude-mem, claude-health, PUA
     [1/10] Academic Research      paper-reading, deepxiv-cli...
     [0/1] MCP Servers             Lark/Feishu
@@ -74,20 +75,18 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | [**adversarial-review**](https://github.com/poteto/noodle/blob/main/.agents/skills/adversarial-review/SKILL.md) | bundled skill | Cross-model review (Skeptic / Architect / Minimalist lenses) | on |
 | [**codex**](https://github.com/openai/codex-plugin-cc) | openai-codex (plugin) | Codex CLI-backed adversarial review | off |
 
-**Workflow (10)** — planning, iteration, code quality, meta-config.
+**Workflow (8)** — planning, iteration, code quality, meta-config.
 
 | Item | Source | What It Does | Default |
 |------|--------|--------------|---------|
 | [**andrej-karpathy-skills**](https://github.com/forrestchang/andrej-karpathy-skills) | karpathy-skills (plugin) | Karpathy coding guidelines: Think-First, Simplicity, Surgical, Goal-Driven | on |
-| [**superpowers**](https://github.com/obra/superpowers) | claude-plugins-official | Brainstorming, debugging, code review, git worktrees, plan writing | on |
+| [**superpowers**](https://github.com/obra/superpowers) | claude-plugins-official (plugin) | Brainstorming, debugging, code review, git worktrees, plan writing | off |
+| [**mattpocock/skills**](https://github.com/mattpocock/skills) | npx `skills` | 17 agent skills (tdd, to-prd, to-issues, diagnosing-bugs, handoff, teach, grilling…) installed into `~/.claude/skills/` via the `skills` CLI | on |
 | **feature-dev** | claude-plugins-official | Guided feature development | on |
 | **ralph-loop** | claude-plugins-official | Automated iteration loop (session-aware REPL) | on |
 | **commit-commands** | claude-plugins-official | Git commit / push / PR workflow | on |
 | **code-simplifier** | claude-plugins-official | Code simplification and refactoring | on |
-| [**everything-claude-code**](https://github.com/affaan-m/everything-claude-code) | everything-claude-code | TDD, security, database, Go/Python/Spring Boot | off |
 | [**update-config**](skills/update-config/) | bundled skill | `/update-config` — re-run installer from inside a session | on |
-| [**handoff**](https://github.com/mattpocock/skills/blob/main/skills/productivity/handoff/SKILL.md) | bundled skill | Compact the current conversation into a handoff doc for the next agent | on |
-| [**teach**](https://github.com/mattpocock/skills/blob/main/skills/productivity/teach/SKILL.md) | bundled skill | Teach a topic over multiple sessions (mission, lessons, learning records) | on |
 
 **Integrations (3)** — external tools and services.
 
@@ -106,6 +105,13 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | **frontend-design** | claude-plugins-official | Production-grade frontend interfaces | on |
 | [**humanizer**](https://github.com/blader/humanizer) | bundled skill | Remove AI writing patterns (English) | on |
 | [**humanizer-zh**](https://github.com/op7418/Humanizer-zh) | bundled skill | Remove AI writing patterns (Chinese) | off |
+
+**Slides (2)** — AI slide / PPTX generation, both off by default.
+
+| Item | Source | What It Does | Default |
+|------|--------|--------------|---------|
+| [**frontend-slides**](https://github.com/zarazhangrui/frontend-slides) | frontend-slides | Zero-dependency HTML slide generator with PPT conversion and bold template styles | off |
+| [**ppt-master**](https://github.com/hugohe3/ppt-master) | ppt-master | Editable PPTX from PDF/DOCX/URL/Markdown — real shapes & animations (run `pip install -r requirements.txt` post-install) | off |
 
 **Memory & Lifestyle (3)** — session memory and personal productivity, all off by default.
 

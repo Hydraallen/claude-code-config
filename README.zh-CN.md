@@ -6,7 +6,7 @@
 
 ![Statusline](assets/statusline.png)
 
-[Claude Code](https://claude.com/claude-code) 的生产级配置。一条命令安装：全局指令、多语言编码规则（Python / TypeScript / Go）、9 个 marketplace 下的 24 个精选插件、7 个内置 skill、渐变状态栏，以及能跨会话记住纠正的自我改进回路。
+[Claude Code](https://claude.com/claude-code) 的生产级配置。一条命令安装：全局指令、多语言编码规则（Python / TypeScript / Go）、10 个 marketplace 下的 25 个精选插件、5 个内置 skill（外加通过 npx 安装的 [mattpocock/skills](https://github.com/mattpocock/skills) 集合）、渐变状态栏，以及能跨会话记住纠正的自我改进回路。
 
 ## 示例
 
@@ -35,9 +35,10 @@ irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/i
   > [5/5] Core                   全局指令、设置、规则...
     [0/3] Language Rules          Python / TypeScript / Go
     [2/3] Review                  code-review + adversarial-review
-    [9/10] Workflow                karpathy、superpowers、update-config、handoff...
+    [7/8] Workflow                karpathy、mattpocock/skills、update-config...
     [3/3] Integrations            context7、github、playwright
     [4/5] Design & Content        document-skills、frontend-design、humanizer...
+    [0/2] Slides                  frontend-slides、ppt-master
     [0/3] Memory & Lifestyle      claude-mem、claude-health、PUA
     [1/10] Academic Research      paper-reading、deepxiv-cli...
     [0/1] MCP Servers             Lark/飞书
@@ -74,20 +75,18 @@ irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/i
 | [**adversarial-review**](https://github.com/poteto/noodle/blob/main/.agents/skills/adversarial-review/SKILL.md) | 内置 skill | 跨模型审查（Skeptic / Architect / Minimalist 视角） | 开启 |
 | [**codex**](https://github.com/openai/codex-plugin-cc) | openai-codex（插件） | Codex CLI 驱动的对抗式审查 | 关闭 |
 
-**Workflow (10)** — 规划、迭代、代码质量、元配置。
+**Workflow (8)** — 规划、迭代、代码质量、元配置。
 
 | 项目 | 来源 | 功能 | 默认 |
 |------|------|------|------|
 | [**andrej-karpathy-skills**](https://github.com/forrestchang/andrej-karpathy-skills) | karpathy-skills（插件） | Karpathy 编码守则：Think-First、Simplicity、Surgical、Goal-Driven | 开启 |
-| [**superpowers**](https://github.com/obra/superpowers) | claude-plugins-official | 头脑风暴、调试、代码审查、Git worktree、计划编写 | 开启 |
+| [**superpowers**](https://github.com/obra/superpowers) | claude-plugins-official（插件） | 头脑风暴、调试、代码审查、Git worktree、计划编写 | 关闭 |
+| [**mattpocock/skills**](https://github.com/mattpocock/skills) | npx `skills` | 17 个 agent skill（tdd、to-prd、to-issues、diagnosing-bugs、handoff、teach、grilling…），通过 `skills` CLI 安装到 `~/.claude/skills/` | 开启 |
 | **feature-dev** | claude-plugins-official | 引导式功能开发 | 开启 |
 | **ralph-loop** | claude-plugins-official | 自动化迭代循环（会话感知 REPL） | 开启 |
 | **commit-commands** | claude-plugins-official | Git 提交 / 推送 / PR 工作流 | 开启 |
 | **code-simplifier** | claude-plugins-official | 代码简化与重构 | 开启 |
-| [**everything-claude-code**](https://github.com/affaan-m/everything-claude-code) | everything-claude-code | TDD、安全、数据库、Go/Python/Spring Boot | 关闭 |
 | [**update-config**](skills/update-config/) | 内置 skill | `/update-config` — 在会话内重新运行安装器 | 开启 |
-| [**handoff**](https://github.com/mattpocock/skills/blob/main/skills/productivity/handoff/SKILL.md) | 内置 skill | 把当前对话压缩成交接文档，便于下一个 agent 接手 | 开启 |
-| [**teach**](https://github.com/mattpocock/skills/blob/main/skills/productivity/teach/SKILL.md) | 内置 skill | 跨多次会话教学某个主题（mission、lessons、学习记录） | 开启 |
 
 **Integrations (3)** — 外部工具与服务。
 
@@ -106,6 +105,13 @@ irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/i
 | **frontend-design** | claude-plugins-official | 生产级前端界面设计 | 开启 |
 | [**humanizer**](https://github.com/blader/humanizer) | 内置 skill | 去除 AI 写作特征（英文） | 开启 |
 | [**humanizer-zh**](https://github.com/op7418/Humanizer-zh) | 内置 skill | 去除 AI 写作特征（中文） | 关闭 |
+
+**Slides (2)** — AI 幻灯片 / PPTX 生成，默认全部关闭。
+
+| 项目 | 来源 | 功能 | 默认 |
+|------|------|------|------|
+| [**frontend-slides**](https://github.com/zarazhangrui/frontend-slides) | frontend-slides | 零依赖 HTML 幻灯片生成器，支持 PPT 转换与 bold 模板风格 | 关闭 |
+| [**ppt-master**](https://github.com/hugohe3/ppt-master) | ppt-master | 从 PDF/DOCX/URL/Markdown 生成可编辑 PPTX——真实形状与动画（安装后需 `pip install -r requirements.txt`） | 关闭 |
 
 **Memory & Lifestyle (3)** — 会话记忆与个人生产力，默认全部关闭。
 
