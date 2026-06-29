@@ -20,6 +20,25 @@
 - `prune_unlisted_plugins` 对缺失的 `claude` CLI / `jq` / `installed_plugins.json` 以及非法 JSON 做了防护，遇到则告警跳过而非中断安装。
 - 既有的 `RETIRED_PLUGINS` / `prune_retired_plugins` 自愈行为保持不变。
 - 兼容 bash 3.2（采用 `|entry|` 管道分隔的集合字符串，不使用关联数组）。
+## [Upstream merge: 2.8.0] - 2026-06-29
+
+### 功能
+- **用通过 npx 安装的 `mattpocock/skills` 集合替换内置的 `handoff` / `teach` skill。** 删除两个 vendored skill（`skills/handoff/`、`skills/teach/`）。**Workflow** 组改为提供单个 `mattpocock/skills` 条目（默认**开启**），执行 `skills add mattpocock/skills`，并通过显式 `--skill` 参数限定为集合 `plugin.json` 声明的 17 个 skill，安装到 Claude Code 的 `~/.claude/skills/`。
+- **新增 `Slides` 分组，含两个 AI 演示文稿插件，默认全部关闭：** [`frontend-slides`](https://github.com/zarazhangrui/frontend-slides)（零依赖 HTML 幻灯片生成器，支持 PPT 转换）与 [`ppt-master`](https://github.com/hugohe3/ppt-master)（从 PDF/DOCX/URL/Markdown 生成可编辑 PPTX）。仅在 `--all` 或手动勾选时安装。
+- **`superpowers` 改为默认关闭。** 从 essentials 插件层移动到 optional 层（`PLUGINS_OPTIONAL`），仅在使用 `--all` 或手动勾选时安装。它与 `mattpocock/skills` 可以共存——两者**不**互斥。
+- **彻底移除 `everything-claude-code` 插件**：Workflow 菜单项、optional 插件组槽位、`affaan-m/everything-claude-code` marketplace、id→包名映射，以及 `settings.json` 条目。新增墓碑机制（`PLUGINS_REMOVED`）：升级时从用户 `enabledPlugins` 中剔除它，并在 `--uninstall` 时卸载，确保不残留。
+
+### 设计理由
+- **npx 而非 vendoring。** 通过 `skills` CLI 安装可避免仓库塞进 vendored skill 目录。`DO_NOT_TRACK=1` 关闭 CLI 的匿名遥测；`--copy` 写入真实文件（非 symlink），便于卸载删除；`--agent claude-code` 仅安装到 Claude Code。
+- **限定为 plugin.json 的 17 个 skill，而非 `--skill '*'`。** 该仓库实际包含 35 个 `SKILL.md`（含个人/未完成的 skill），`--skill '*'` 会全部安装。安装器从同一个 `MATTPOCOCK_SKILLS` 数组传入精确的 17 个名字，该数组同时生成卸载用的安装清单（manifest），使安装 / 文档 / 卸载保持一致。
+- **superpowers 与 mattpocock/skills 不互斥。** 二者理念上有重叠但可同时安装；`mattpocock/skills` 只是新的默认项，而 `superpowers` 变为可选项，沿用此前 `everything-claude-code` 所处的 optional 层定位。
+
+### 注意事项
+- 安装 `mattpocock/skills` 在安装时需要 Node.js / `npx` 及联网。若缺少 `npx`，安装器会打印 Node.js 安装指引和完整命令后跳过，不阻塞其余安装，也不阻塞版本戳（属可选附加项）。
+- `ppt-master` 需在其安装目录内执行 `pip install -r requirements.txt`，其 Python 后处理脚本才能工作。
+- 升级用户残留的 vendored `~/.claude/skills/{handoff,teach}` **不会**被强制删除：勾选 `mattpocock/skills` 时其 `--copy` 安装会用上游版本覆盖它们；取消勾选（或没有 `npx`）时旧副本仍可正常使用。legacy skill 迁移也对 `--dry-run` 安全。
+- `--uninstall` 仅删除安装清单（`~/.claude/.mattpocock-skills`，安装成功时写入）中记录的 mattpocock skill，因此用户自建的同名 skill（如 `tdd`、`handoff`）不会被误删。
+- README 的插件 / marketplace / 内置 skill 计数相应更新为 25 / 10 / 5。
 
 ## [2.7.1] - 2026-06-09
 
