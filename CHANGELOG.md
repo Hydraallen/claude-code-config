@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.9.0] - 2026-06-29
+
+### Features
+- **Plugin catalogue reconciliation: the installer now prunes and reinstalls.** On every run, after computing the plugins selected for this run, both installers reconcile the selection against what is actually installed in `installed_plugins.json`:
+  - **Prune** — a plugin that is in the installer's catalogue (the union of `PLUGINS_ESSENTIAL` / `PLUGINS_OPTIONAL` / `PLUGINS_CLAUDE_MEM` / `PLUGINS_AI_RESEARCH` / `PLUGINS_PUA`), is installed, but is **not** selected this run, is now `claude plugin uninstall`-ed. New `prune_unlisted_plugins()` (bash) / `Remove-UnlistedPlugins` (PowerShell), run right after install and gated on the plugin step being selected.
+  - **Reinstall = update** — a selected plugin that is already installed is uninstalled then reinstalled fresh (instead of `claude plugin update`), reading the just-refreshed catalog.
+  - **Preserve** — a plugin that is installed but **not** in the catalogue (the user's own third-party plugin, e.g. `code-review@claude-plugins-official`) is never touched.
+- **Pure, unit-tested decision logic.** The prune decision is extracted into a side-effect-free `compute_plugins_to_prune()` (plus `build_plugin_catalogue()` / `plugin_is_installed()`), so it can be tested without the `claude` CLI or filesystem.
+- **First test harness in the repo.** New plain-bash harness under `tests/` (`tests/run.sh` runner + `tests/test_plugin_resolution.sh`) — no `bats` dependency. `install.sh` now ends with a source guard (`if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then main "$@"; fi`) so it can be sourced by tests without running `main`.
+
+### Design Rationale
+- **Uninstall-then-reinstall as the update mechanism** (over `claude plugin update`) guarantees the plugin is rebuilt from the refreshed catalog, avoiding partial/stale update states.
+- **Catalogue membership is the safety boundary.** Only plugins the installer manages are eligible for pruning; anything else is assumed to be a deliberate user install and is preserved. The pruning core is pure so this boundary is provable in tests.
+- **Pruning is double-guarded against mass-deletion.** It runs only when the plugin step is selected, AND `prune_unlisted_plugins()` / `Remove-UnlistedPlugins` early-return when `RESOLVED_PLUGINS` is empty — because an empty selection (e.g. the plugin step ran but the user deselected everything, so `install_plugins` resolves zero plugins) would otherwise mark every installed catalogue plugin for removal. The empty-resolved guard has a dedicated test.
+
+### Notes & Caveats
+- `update_installed_plugins()` / `Update-InstalledPlugins` now **skip catalogue plugins** (selected ones were just reinstalled, unselected ones were just pruned) and only `claude plugin update` the preserved third-party plugins — it never resurrects a pruned plugin.
+- `prune_unlisted_plugins` guards against a missing `claude` CLI / `jq` / `installed_plugins.json` and against malformed JSON, skipping with a warning rather than failing the install.
+- Existing `RETIRED_PLUGINS` / `prune_retired_plugins` self-healing behaviour is unchanged.
+- bash 3.2 compatible (pipe-delimited `|entry|` set strings, no associative arrays).
+
 ## [2.8.0] - 2026-06-22
 
 ### Features

@@ -1,5 +1,26 @@
 # 更新日志
 
+## [2.9.0] - 2026-06-29
+
+### 新功能
+- **插件目录对账：安装器现在会按选择「裁剪」与「重装」。** 每次运行时，在计算出本次选择的插件后，两个安装器都会把本次选择与 `installed_plugins.json` 中实际已安装的插件进行对账：
+  - **裁剪 (prune)** —— 若某插件属于安装器目录（`PLUGINS_ESSENTIAL` / `PLUGINS_OPTIONAL` / `PLUGINS_CLAUDE_MEM` / `PLUGINS_AI_RESEARCH` / `PLUGINS_PUA` 的并集）、已安装、但本次**未**选择，则会被 `claude plugin uninstall` 卸载。新增 `prune_unlisted_plugins()`（bash）/ `Remove-UnlistedPlugins`（PowerShell），在安装后立即运行，且仅在本次选择了插件步骤时触发。
+  - **重装即更新 (reinstall = update)** —— 本次选择且已安装的插件改为「先卸载再重新安装」（而非 `claude plugin update`），以读取刚刷新的目录。
+  - **保留 (preserve)** —— 已安装但**不**属于目录的插件（用户自己安装的第三方插件，如 `code-review@claude-plugins-official`）绝不会被改动。
+- **纯函数、可单测的决策逻辑。** 裁剪决策被抽取为无副作用的 `compute_plugins_to_prune()`（外加 `build_plugin_catalogue()` / `plugin_is_installed()`），无需 `claude` CLI 或文件系统即可测试。
+- **仓库首个测试框架。** 在 `tests/` 下新增纯 bash 测试框架（`tests/run.sh` 运行器 + `tests/test_plugin_resolution.sh`）—— 不依赖 `bats`。`install.sh` 末尾新增 source 守卫（`if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then main "$@"; fi`），使其可被测试 source 而不触发 `main`。
+
+### 设计考量
+- **以「先卸载再重装」作为更新机制**（而非 `claude plugin update`），可确保插件从刷新后的目录重新构建，避免更新不完整／陈旧状态。
+- **目录归属即安全边界。** 仅安装器管理的插件才可能被裁剪；其余一律视为用户有意安装并予以保留。裁剪核心为纯函数，该边界可在测试中证明。
+- **裁剪有双重防护，杜绝误删。** 仅当本次选择了插件步骤才会执行；且 `prune_unlisted_plugins()` / `Remove-UnlistedPlugins` 在 `RESOLVED_PLUGINS` 为空时会提前返回 —— 因为空选择（例如插件步骤运行但用户取消了全部勾选，`install_plugins` 解析出 0 个插件）否则会把所有已安装的目录插件标记为待删除。该「空选择」守卫有专门的测试覆盖。
+
+### 注意事项
+- `update_installed_plugins()` / `Update-InstalledPlugins` 现在会**跳过目录插件**（选中的刚重装、未选中的刚被裁剪），只对保留下来的第三方插件执行 `claude plugin update`，绝不会复活已被裁剪的插件。
+- `prune_unlisted_plugins` 对缺失的 `claude` CLI / `jq` / `installed_plugins.json` 以及非法 JSON 做了防护，遇到则告警跳过而非中断安装。
+- 既有的 `RETIRED_PLUGINS` / `prune_retired_plugins` 自愈行为保持不变。
+- 兼容 bash 3.2（采用 `|entry|` 管道分隔的集合字符串，不使用关联数组）。
+
 ## [2.7.1] - 2026-06-09
 
 ### 新功能

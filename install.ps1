@@ -231,6 +231,60 @@ $MARKETPLACE_LIST = @(
     @{ Name = "karpathy-skills"; Repo = "forrestchang/andrej-karpathy-skills" }
 )
 
+# Plugins selected for THIS run (deduped), set by Install-Plugins so that
+# Remove-UnlistedPlugins / Update-InstalledPlugins can reconcile against it.
+# Mirrors RESOLVED_PLUGINS in install.sh.
+$script:ResolvedPlugins = @()
+
+# --- Plugin reconciliation helpers (mirror install.sh) ---------------------
+
+# Union of every installer-managed plugin group (the "catalogue"). Anything
+# installed that is NOT in this set is a user-owned third-party plugin and must
+# be preserved. Mirrors build_plugin_catalogue() in install.sh.
+function Get-PluginCatalogue {
+    $all = @()
+    $all += $PLUGINS_ESSENTIAL
+    $all += $PLUGINS_OPTIONAL
+    $all += $PLUGINS_CLAUDE_MEM
+    $all += $PLUGINS_AI_RESEARCH
+    $all += $PLUGINS_PUA
+    return ($all | Select-Object -Unique)
+}
+
+# Pure decision logic: given the catalogue, the selected-this-run set, and the
+# installed set, return the installed keys that should be UNINSTALLED — those in
+# the catalogue AND not selected this run (rule 1). Non-catalogue plugins are
+# preserved (rule 4); selected plugins are reinstalled, not pruned (rule 2).
+# Mirrors compute_plugins_to_prune() in install.sh.
+function Get-PluginsToPrune {
+    param(
+        [string[]]$Catalogue = @(),
+        [string[]]$Selected = @(),
+        [string[]]$Installed = @()
+    )
+    $result = @()
+    foreach ($entry in $Installed) {
+        if (-not $entry) { continue }
+        if ($Catalogue -notcontains $entry) { continue }  # rule 4: preserve
+        if ($Selected -contains $entry) { continue }       # rule 2: reinstall
+        $result += $entry                                  # rule 1: prune
+    }
+    return $result
+}
+
+# Read the installed plugin keys from installed_plugins.json (native JSON, no jq).
+function Get-InstalledPluginKeys {
+    $listJson = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
+    if (-not (Test-Path $listJson)) { return @() }
+    try {
+        $parsed = Get-Content $listJson -Raw | ConvertFrom-Json
+        if ($parsed.PSObject.Properties['plugins']) {
+            return @($parsed.plugins.PSObject.Properties.Name)
+        }
+    } catch { }
+    return @()
+}
+
 # --- Interactive menu ------------------------------------------------------
 
 function Show-InteractiveMenu {
@@ -1325,10 +1379,17 @@ function Install-Plugins {
     }
 
     # Deduplicate
-    $plugins = $plugins | Select-Object -Unique
+    $plugins = @($plugins | Select-Object -Unique)
+
+    # Expose this run's selection so Remove-UnlistedPlugins can reconcile.
+    $script:ResolvedPlugins = $plugins
 
     $groupNames = $Groups -join ","
     Write-Info "Installing plugins (groups: $groupNames)..."
+
+    # Snapshot what's already installed so we can reinstall (= update) selected
+    # plugins that are already present instead of a plain install.
+    $installedKeys = Get-InstalledPluginKeys
 
     # Collect needed marketplaces
     $neededMarketplaces = @{}
@@ -1360,14 +1421,25 @@ function Install-Plugins {
         }
     }
 
-    # Step 2: Install plugins
+    # Step 2: Install (or reinstall) plugins.
+    # Update mechanism is uninstall-then-reinstall: if a selected plugin is
+    # already installed (rule 2), uninstall it first so it is reinstalled fresh.
     Write-Info "Installing $($plugins.Count) plugins..."
     foreach ($entry in $plugins) {
         $parts = $entry -split '@'
         $pluginName = $parts[0]
+        $alreadyInstalled = ($installedKeys -contains $entry)
         if ($DryRun) {
-            Write-Info "Would install plugin: $pluginName from $($parts[1])"
+            if ($alreadyInstalled) {
+                Write-Info "Would reinstall plugin (update): $pluginName from $($parts[1])"
+            } else {
+                Write-Info "Would install plugin: $pluginName from $($parts[1])"
+            }
         } else {
+            # Reinstall = update: remove the existing copy before installing.
+            if ($alreadyInstalled) {
+                & claude plugin uninstall "$entry" 2>$null
+            }
             $ok = Invoke-Retry -MaxAttempts 5 -DelaySeconds 3 -Description "Install plugin $pluginName" -Action {
                 & claude plugin install "$entry" 2>$null
             }
@@ -1419,6 +1491,32 @@ function Remove-RetiredPlugins {
     }
 }
 
+# Prune installer-managed plugins that are installed but were NOT selected this
+# run (rule 1). Preserves user-owned third-party plugins (rule 4). Must run
+# AFTER Install-Plugins so $script:ResolvedPlugins reflects the selection.
+# Mirrors prune_unlisted_plugins() in install.sh.
+function Remove-UnlistedPlugins {
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { return }
+    # An empty resolved set must NEVER imply "prune everything" (e.g. the plugin
+    # step ran but the user deselected all plugins). Guard before computing.
+    if ($script:ResolvedPlugins.Count -eq 0) { return }
+
+    $installed = Get-InstalledPluginKeys
+    if ($installed.Count -eq 0) { return }
+    $catalogue = Get-PluginCatalogue
+    $toPrune = Get-PluginsToPrune -Catalogue $catalogue -Selected $script:ResolvedPlugins -Installed $installed
+
+    foreach ($pkg in $toPrune) {
+        if ($DryRun) {
+            Write-Info "Would uninstall unlisted plugin: $pkg"
+        } else {
+            & claude plugin uninstall "$pkg" 2>$null
+            if ($LASTEXITCODE -eq 0) { Write-Ok "Pruned plugin (no longer selected): $pkg" }
+            else { Write-Warn "Could not uninstall plugin: $pkg (may already be gone)" }
+        }
+    }
+}
+
 function Update-InstalledPlugins {
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
         Write-Info "claude CLI not found - skipping plugin updates"
@@ -1427,6 +1525,11 @@ function Update-InstalledPlugins {
 
     $listJson = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
 
+    # Skip installer-managed catalogue plugins here: selected ones were just
+    # reinstalled fresh, unselected ones were already pruned. Only update the
+    # PRESERVED user-owned third-party plugins; never resurrect a pruned plugin.
+    $catalogue = Get-PluginCatalogue
+
     if ($DryRun) {
         Write-Info "Would run: claude plugin marketplace update (all catalogs)"
         if (Test-Path $listJson) {
@@ -1434,6 +1537,7 @@ function Update-InstalledPlugins {
                 $data = Get-Content $listJson -Raw | ConvertFrom-Json
                 if ($data.PSObject.Properties['plugins']) {
                     foreach ($name in $data.plugins.PSObject.Properties.Name) {
+                        if ($catalogue -contains $name) { continue }
                         Write-Info "Would update plugin: $name"
                     }
                 }
@@ -1468,8 +1572,10 @@ function Update-InstalledPlugins {
         return
     }
 
-    Write-Info "Updating installed plugins to latest (restart required to apply)..."
+    Write-Info "Updating preserved third-party plugins to latest (restart required to apply)..."
     foreach ($name in $plugins.PSObject.Properties.Name) {
+        # Skip installer-managed plugins (already reinstalled or pruned above).
+        if ($catalogue -contains $name) { continue }
         $shortName = ($name -split '@')[0]
         $ok = Invoke-Retry -MaxAttempts 3 -DelaySeconds 3 -Description "Update plugin $name" -Action {
             & claude plugin update "$name"
@@ -1801,6 +1907,11 @@ function Main {
     if ($doMcp) { Install-Mcp }
     Remove-RetiredPlugins
     if ($doPlugins) { Install-Plugins -Groups $pluginGroups -SelectedPluginsList $selectedPlugins }
+    # Reconcile installed catalogue plugins against this run's selection: prune
+    # installer-managed plugins that were NOT selected. Gated on $doPlugins so a
+    # run that skips the plugin step never prunes (ResolvedPlugins would be empty
+    # and wrongly mark every installed catalogue plugin for removal).
+    if ($doPlugins) { Remove-UnlistedPlugins }
     # Always refresh marketplaces and update installed plugins, even when no
     # plugins were selected this run — keeps third-party plugins current.
     Update-InstalledPlugins
