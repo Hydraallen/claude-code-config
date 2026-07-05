@@ -121,11 +121,12 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 | [**claude-health**](https://github.com/tw93/claude-health) | claude-health | Claude Code 会话健康检查与状态面板 | 关闭 |
 | [**PUA**](https://github.com/tanweai/pua) | pua-skills | AI Agent 生产力倍增器（中 / 英 / 日） | 关闭 |
 
-**Academic Research (10)** — 训练 / 推理插件 + 论文阅读 skill，默认除 `paper-reading` 外全部关闭。
+**Academic Research (11)** — 训练 / 推理插件 + 论文阅读 & 速查表生成 skill，默认除 `paper-reading` 和 `cheatsheet-creator` 外全部关闭。
 
 | 项目 | 来源 | 功能 | 默认 |
 |------|------|------|------|
 | [**paper-reading**](skills/paper-reading/) | 内置 skill | 论文结构化摘要，支持自动抽图 | 开启 |
+| [**cheatsheet-creator**](skills/cheatsheet-creator/) | 内置 skill | 从讲义 / 作业 / 历年真题生成考试速查表，按考频加权 | 开启 |
 | [**tokenization**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | HuggingFace Tokenizers、SentencePiece | 关闭 |
 | [**fine-tuning**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | Axolotl、LLaMA-Factory、PEFT、Unsloth | 关闭 |
 | [**post-training**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | GRPO、RLHF、DPO、SimPO | 关闭 |

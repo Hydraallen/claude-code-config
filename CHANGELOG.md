@@ -1,6 +1,17 @@
 # Changelog
 
-## [2.9.0] - 2026-06-29
+## [2.10.0] - 2026-07-05
+
+### Features
+- **New bundled skill: `cheatsheet-creator`.** Builds an exam-ready markdown cheatsheet from a student's lecture materials, homework, and past exams. Parses one file at a time and persists intermediate summaries to disk (so large courses don't blow past the context window), then uses past exams and homework as a "what to emphasize" filter — concepts tested on 2+ exams are prioritized. Produces a concise primary cheatsheet plus an expanded version with italic source back-references. Registered in both installers under the Academic Research group, default on. Adapted from [wyc79/cheatsheet-creator-skill](https://github.com/wyc79/cheatsheet-creator-skill) (MIT).
+
+### Design Rationale
+- **Adapted for Claude Code rather than vendored as-is.** The upstream skill targets the claude.ai runtime (`/mnt/user-data/outputs/`, `present_files`, and the `pdf-reading`/`pptx`/`docx` skills). The bundled copy rewrites these to Claude Code equivalents: local relative output paths, the `Read` tool for parsing, and listing file paths in the reply. Attribution and the exact deltas are recorded at the bottom of the `SKILL.md`.
+
+### Notes & Caveats
+- The exam-frequency weighting only works if the user supplies past exams; without them the skill degrades to a plain concept summary (it says so in its output).
+- `.pptx`/`.docx` inputs still rely on an available document-processing skill or a manual export to PDF.
+
 
 ### Features
 - **Plugin catalogue reconciliation: the installer now prunes and reinstalls.** On every run, after computing the plugins selected for this run, both installers reconcile the selection against what is actually installed in `installed_plugins.json`:

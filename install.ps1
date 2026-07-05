@@ -362,6 +362,7 @@ function Show-InteractiveMenu {
         )}
         @{ Label = "Academic Research"; Hint = "training/inference plugins + paper-reading & DeepXiv skills"; Items = @(
             @{ Label = "paper-reading";   Desc = "Research paper summarization (skill)"; Default = $true; Id = "skill-paper-reading" }
+            @{ Label = "cheatsheet-creator"; Desc = "Exam cheatsheet from lectures/homework/past exams (skill)"; Default = $true; Id = "skill-cheatsheet-creator" }
             @{ Label = "tokenization";    Desc = "Tokenizer training & usage";        Default = $false; Id = "plug-tokenization" }
             @{ Label = "fine-tuning";     Desc = "Model fine-tuning";                 Default = $false; Id = "plug-fine-tuning" }
             @{ Label = "post-training";   Desc = "Post-training (RLHF, DPO, GRPO)";  Default = $false; Id = "plug-post-training" }
@@ -635,6 +636,7 @@ function Show-InteractiveMenu {
             "review-adversarial" { $result.ReviewAdversarial = $true; $result.Skills = $true; $result.SelectedSkills += "adversarial-review" }
             "review-codex"       { $result.ReviewCodex = $true; $result.Plugins = $true; $result.SelectedPlugins += "codex@openai-codex" }
             "skill-paper-reading"  { $result.Skills = $true; $result.SelectedSkills += "paper-reading" }
+            "skill-cheatsheet-creator" { $result.Skills = $true; $result.SelectedSkills += "cheatsheet-creator" }
             "skill-humanizer"      { $result.Skills = $true; $result.SelectedSkills += "humanizer" }
             "skill-humanizer-zh"   { $result.Skills = $true; $result.SelectedSkills += "humanizer-zh" }
             "skill-update-config"  { $result.Skills = $true; $result.SelectedSkills += "update-config" }

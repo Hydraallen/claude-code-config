@@ -584,6 +584,7 @@ PUA|AI agent productivity booster (pua, pua-en, pua-ja)|0|plug-pua")
     GROUP_LABELS+=("Academic Research")
     GROUP_HINTS+=("training/inference plugins + paper-reading & DeepXiv skills")
     GROUP_ITEMS+=("paper-reading|Research paper summarization (skill)|1|skill-paper-reading
+cheatsheet-creator|Exam cheatsheet from lectures/homework/past exams (skill)|1|skill-cheatsheet-creator
 tokenization|Tokenizer training & usage|0|plug-tokenization
 fine-tuning|Model fine-tuning|0|plug-fine-tuning
 post-training|Post-training (RLHF, DPO, GRPO)|0|plug-post-training
@@ -999,6 +1000,7 @@ deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-
             review-codex)           REVIEW_CODEX=true; INSTALL_PLUGINS=true; SELECTED_PLUGINS+=("codex@openai-codex") ;;
             # Skills
             skill-paper-reading)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("paper-reading") ;;
+            skill-cheatsheet-creator) INSTALL_SKILLS=true; SELECTED_SKILLS+=("cheatsheet-creator") ;;
             skill-humanizer)        INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer") ;;
             skill-humanizer-zh)     INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer-zh") ;;
             skill-update-config)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("update-config") ;;

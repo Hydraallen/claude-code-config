@@ -121,11 +121,12 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | [**claude-health**](https://github.com/tw93/claude-health) | claude-health | Health check & wellness dashboard for Claude Code sessions | off |
 | [**PUA**](https://github.com/tanweai/pua) | pua-skills | AI agent productivity booster (CN / EN / JA) | off |
 
-**Academic Research (10)** — training / inference plugins + paper-reading skills, off by default except `paper-reading`.
+**Academic Research (11)** — training / inference plugins + paper-reading & cheatsheet-creator skills, off by default except `paper-reading` and `cheatsheet-creator`.
 
 | Item | Source | What It Does | Default |
 |------|--------|--------------|---------|
 | [**paper-reading**](skills/paper-reading/) | bundled skill | Research paper summarization with figure extraction | on |
+| [**cheatsheet-creator**](skills/cheatsheet-creator/) | bundled skill | Exam-ready cheatsheet from lectures / homework / past exams, weighted by exam frequency | on |
 | [**tokenization**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | HuggingFace Tokenizers, SentencePiece | off |
 | [**fine-tuning**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | Axolotl, LLaMA-Factory, PEFT, Unsloth | off |
 | [**post-training**](https://github.com/Orchestra-Research/AI-Research-SKILLs) | ai-research-skills | GRPO, RLHF, DPO, SimPO | off |
