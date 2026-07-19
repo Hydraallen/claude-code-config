@@ -319,6 +319,7 @@ INSTALL_MATTPOCOCK=false
 INSTALL_LESSONS=false
 INSTALL_STATUSLINE=false
 INSTALL_MCP=false
+INSTALL_LARK=false
 INSTALL_PLUGINS=false
 INSTALL_CLAUDE_MD=false
 INSTALL_SETTINGS=false
@@ -596,9 +597,12 @@ deepxiv-trending-digest|Trending paper digest generation|0|deepxiv-trending-dige
 deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-table")
 
     # Group 9: MCP Servers
+    #   Playwright is default-on. Lark/Feishu is opt-in (default off): it needs
+    #   App ID/Secret credentials and each session costs ~1GB RAM.
     GROUP_LABELS+=("MCP Servers")
     GROUP_HINTS+=("")
-    GROUP_ITEMS+=("MCP Servers|Lark + Playwright integration|1|mcp")
+    GROUP_ITEMS+=("Playwright MCP|Browser automation MCP server|1|mcp
+Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/session|0|mcp-lark")
 
     local num_groups=${#GROUP_LABELS[@]}
 
@@ -1012,6 +1016,7 @@ deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-
             deepxiv-baseline-table) INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-baseline-table") ;;
             # MCP
             mcp)                    INSTALL_MCP=true ;;
+            mcp-lark)               INSTALL_LARK=true ;;
             # Plugins (all plug-* ids)
             plug-*)
                 INSTALL_PLUGINS=true
@@ -1853,8 +1858,12 @@ install_mcp() {
         claude mcp list 2>/dev/null | grep -q "^${1}:" 2>/dev/null
     }
 
-    # Lark MCP — prompt for credentials in interactive mode, skip in non-interactive
-    if $DRY_RUN; then
+    # Lark MCP — opt-in only (default off). Prompt for credentials in
+    # interactive mode, skip in non-interactive. Not installed unless the user
+    # explicitly selected the "Lark/Feishu MCP" item (or passed --all).
+    if ! $INSTALL_LARK; then
+        :  # Lark not selected — skip entirely
+    elif $DRY_RUN; then
         info "Would add MCP server: lark-mcp (stdio)"
     else
         if _mcp_exists lark-mcp; then
@@ -1884,7 +1893,9 @@ install_mcp() {
     fi
 
     # Playwright MCP
-    if $DRY_RUN; then
+    if ! $INSTALL_MCP; then
+        :  # Playwright not selected — skip entirely
+    elif $DRY_RUN; then
         info "Would add MCP server: playwright (stdio)"
     else
         if _mcp_exists playwright; then
@@ -2280,7 +2291,7 @@ uninstall() {
     echo "  - $CLAUDE_DIR/lessons.md"
     echo "  - $CLAUDE_DIR/hooks/ (installer-managed only)"
     echo "  - Installed plugins (requires claude CLI)"
-    echo "  - MCP servers: lark-mcp, playwright (requires claude CLI)"
+    echo "  - MCP servers: playwright, lark-mcp (if present; requires claude CLI)"
     [[ -f "$VERSION_STAMP_FILE" ]] && echo "  - $VERSION_STAMP_FILE"
     echo ""
 
@@ -2439,6 +2450,7 @@ main() {
         if $EXPLICIT_ALL; then
             # Explicit --all: install everything including MCP, DeepXiv, and all plugin groups
             INSTALL_MCP=true
+            INSTALL_LARK=true   # --all means everything; lark still self-skips without credentials
             INSTALL_DEEPXIV=true
             SELECTED_DEEPXIV_SKILLS=("${DEEPXIV_KNOWN_SKILLS[@]}")
             PLUGIN_GROUPS=("all")
@@ -2459,7 +2471,7 @@ main() {
     # Check if anything was selected
     if ! $INSTALL_CLAUDE_MD && ! $INSTALL_SETTINGS && ! $INSTALL_RULES && \
        ! $INSTALL_SKILLS && ! $INSTALL_AGENTS && ! $INSTALL_MATTPOCOCK && ! $INSTALL_LESSONS && ! $INSTALL_STATUSLINE && \
-       ! $INSTALL_SHELL_WRAPPER && ! $INSTALL_PLUGINS && ! $INSTALL_MCP && ! $INSTALL_DEEPXIV; then
+       ! $INSTALL_SHELL_WRAPPER && ! $INSTALL_PLUGINS && ! $INSTALL_MCP && ! $INSTALL_LARK && ! $INSTALL_DEEPXIV; then
         warn "Nothing selected to install."
         exit 0
     fi
@@ -2493,7 +2505,7 @@ main() {
     $INSTALL_MATTPOCOCK && install_mattpocock_skills
     $INSTALL_LESSONS && install_lessons
     $INSTALL_STATUSLINE && install_statusline
-    $INSTALL_MCP && install_mcp
+    { $INSTALL_MCP || $INSTALL_LARK; } && install_mcp
     prune_retired_plugins
     $INSTALL_PLUGINS && install_plugins
     # Reconcile installed catalogue plugins against this run's selection: prune
@@ -2531,8 +2543,8 @@ main() {
     info "Next steps:"
     echo "  1. Restart Claude Code for changes to take effect"
     echo "  2. Customize CLAUDE.md for your specific projects"
-    if $INSTALL_MCP; then
-        echo "  3. To add Lark MCP later: claude mcp add --scope user --transport stdio lark-mcp -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET>"
+    if ! $INSTALL_LARK; then
+        echo "  3. Lark/Feishu MCP is off by default. To add it: claude mcp add --scope user --transport stdio lark-mcp -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET>"
     fi
     echo ""
 }

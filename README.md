@@ -41,7 +41,7 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
     [0/2] Slides                  frontend-slides, ppt-master
     [0/3] Memory & Lifestyle      claude-mem, claude-health, PUA
     [1/10] Academic Research      paper-reading, deepxiv-cli...
-    [0/1] MCP Servers             Lark/Feishu
+    [1/2] MCP Servers             Playwright, Lark/Feishu (opt-in)
 ```
 
 - **Main menu**: ↑↓ navigate groups, **Enter or →** open a group's sub-menu, **q** quit. Arrow to *Submit* and press Enter to install.
@@ -137,11 +137,12 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | [**deepxiv-trending-digest**](https://github.com/DeepXiv/deepxiv_sdk) | DeepXiv (GitHub) | Markdown digests of trending papers (last 7 days) | off |
 | [**deepxiv-baseline-table**](https://github.com/DeepXiv/deepxiv_sdk) | DeepXiv (GitHub) | Build baseline comparison tables from research papers | off |
 
-**MCP Servers (1)** — non-plugin MCP integrations, off by default.
+**MCP Servers (2)** — non-plugin MCP integrations.
 
 | Item | Source | What It Does | Default |
 |------|--------|--------------|---------|
-| [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | Feishu / Lark integration (replace `YOUR_APP_ID`/`YOUR_APP_SECRET` after install) | off |
+| **Playwright MCP** | `mcp/` | Browser automation via `@playwright/mcp` | on |
+| [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | Feishu / Lark integration — opt-in; needs Feishu App ID/Secret and uses ~1 GB RAM/session | **off** |
 
 ## Directory Structure
 
@@ -152,7 +153,7 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 ├── lessons.md             # Self-correction log template (auto-loaded via hook)
 ├── rules/                 # Coding standards (common + python/typescript/golang)
 ├── hooks/                 # Statusline with gradient progress bars
-├── mcp/                   # MCP server config (Lark-MCP)
+├── mcp/                   # MCP server config (Playwright; Lark-MCP opt-in)
 ├── plugins/               # Plugin catalogue & install guide
 ├── skills/                # Bundled custom skills
 ├── docs/                  # Paper summaries, showcases

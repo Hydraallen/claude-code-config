@@ -374,7 +374,8 @@ function Show-InteractiveMenu {
             @{ Label = "deepxiv-baseline-table"; Desc = "Baseline comparison table from papers"; Default = $false; Id = "deepxiv-baseline-table" }
         )}
         @{ Label = "MCP Servers"; Hint = ""; Items = @(
-            @{ Label = "MCP Servers"; Desc = "Lark + Playwright integration";        Default = $true; Id = "mcp" }
+            @{ Label = "Playwright MCP"; Desc = "Browser automation MCP server";        Default = $true;  Id = "mcp" }
+            @{ Label = "Lark/Feishu MCP"; Desc = "Feishu/Lark integration -- needs App ID/Secret, ~1GB RAM/session"; Default = $false; Id = "mcp-lark" }
         )}
     )
 
@@ -611,6 +612,7 @@ function Show-InteractiveMenu {
         SelectedPlugins    = @()
         PluginGroups       = @()
         Mcp                = $false
+        Lark               = $false
         DeepXiv            = $false
         DeepXivSkills      = @()
         ReviewAdversarial  = $false
@@ -646,6 +648,7 @@ function Show-InteractiveMenu {
             "deepxiv-trending-digest" { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-trending-digest" }
             "deepxiv-baseline-table"  { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-baseline-table" }
             "mcp"                { $result.Mcp = $true }
+            "mcp-lark"           { $result.Lark = $true }
             "plug-*"             {
                 $result.Plugins = $true
                 if ($pluginMap.ContainsKey($id)) { $result.SelectedPlugins += $pluginMap[$id] }
@@ -1377,6 +1380,10 @@ function Install-NerdFont {
 }
 
 function Install-Mcp {
+    param(
+        [bool]$InstallPlaywright = $true,
+        [bool]$InstallLark = $false
+    )
     Write-Info "Installing MCP servers..."
     $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
     if (-not $claudeCmd) {
@@ -1391,8 +1398,12 @@ function Install-Mcp {
         return $false
     }
 
-    # Lark MCP -- prompt for credentials in interactive mode, skip in non-interactive
-    if ($DryRun) {
+    # Lark MCP -- opt-in only (default off). Prompt for credentials in
+    # interactive mode, skip in non-interactive. Not installed unless the user
+    # explicitly selected "Lark/Feishu MCP" (or passed -All).
+    if (-not $InstallLark) {
+        # Lark not selected -- skip entirely
+    } elseif ($DryRun) {
         Write-Info "Would add MCP server: lark-mcp (stdio)"
     } else {
         if (Test-McpExists "lark-mcp") {
@@ -1422,7 +1433,9 @@ function Install-Mcp {
     }
 
     # Playwright MCP
-    if ($DryRun) {
+    if (-not $InstallPlaywright) {
+        # Playwright not selected -- skip entirely
+    } elseif ($DryRun) {
         Write-Info "Would add MCP server: playwright (stdio)"
     } else {
         if (Test-McpExists "playwright") {
@@ -1684,7 +1697,7 @@ function Invoke-Uninstall {
     Write-Host "  - $CLAUDE_DIR\lessons.md"
     Write-Host "  - $CLAUDE_DIR\hooks\ (installer-managed only)"
     Write-Host "  - Installed plugins (requires claude CLI)"
-    Write-Host "  - MCP servers: lark-mcp, playwright (requires claude CLI)"
+    Write-Host "  - MCP servers: playwright, lark-mcp (if present; requires claude CLI)"
     if (Test-Path $VERSION_STAMP_FILE) {
         Write-Host "  - $VERSION_STAMP_FILE"
     }
@@ -1872,6 +1885,7 @@ function Main {
     $doHooks = $false
     $doPlugins = $false
     $doMcp = $false
+    $doLark = $false
     $doDeepXiv = $false
     $doMattpocock = $false
     $deepXivSkills = @()
@@ -1896,6 +1910,7 @@ function Main {
         $doHooks = $true
         $doPlugins = $true
         $doMcp = $true
+        $doLark = $true   # -All means everything; lark still self-skips without credentials
         $doDeepXiv = $true
         $deepXivSkills = @("deepxiv-cli", "deepxiv-trending-digest", "deepxiv-baseline-table")
         $pluginGroups = @("all")
@@ -1923,6 +1938,7 @@ function Main {
             $doHooks = $menuResult.Hooks
             $doPlugins = $menuResult.Plugins
             $doMcp = $menuResult.Mcp
+            $doLark = $menuResult.Lark
             $doDeepXiv = $menuResult.DeepXiv
             $deepXivSkills = $menuResult.DeepXivSkills
             $ruleLangs = $menuResult.RuleLangs
@@ -1973,7 +1989,7 @@ function Main {
     # Check if anything was selected
     if (-not $doClaudeMd -and -not $doSettings -and -not $doRules -and
         -not $doSkills -and -not $doAgents -and -not $doMattpocock -and -not $doLessons -and -not $doHooks -and
-        -not $doPlugins -and -not $doMcp -and -not $doDeepXiv) {
+        -not $doPlugins -and -not $doMcp -and -not $doLark -and -not $doDeepXiv) {
         Write-Warn "Nothing selected to install."
         return
     }
@@ -2009,7 +2025,7 @@ function Main {
     if ($doMattpocock) { Install-MattpocockSkills }
     if ($doLessons) { Install-Lessons }
     if ($doHooks) { Install-Hooks }
-    if ($doMcp) { Install-Mcp }
+    if ($doMcp -or $doLark) { Install-Mcp -InstallPlaywright $doMcp -InstallLark $doLark }
     Remove-RetiredPlugins
     if ($doPlugins) { Install-Plugins -Groups $pluginGroups -SelectedPluginsList $selectedPlugins }
     # Reconcile installed catalogue plugins against this run's selection: prune
@@ -2045,8 +2061,8 @@ function Main {
     Write-Info "Next steps:"
     Write-Host "  1. Restart Claude Code for changes to take effect"
     Write-Host "  2. Customize CLAUDE.md for your specific projects"
-    if ($doMcp) {
-        Write-Host "  3. To add Lark MCP later: claude mcp add --scope user --transport stdio lark-mcp -- npx -y `"@larksuiteoapi/lark-mcp`" mcp -a <APP_ID> -s <APP_SECRET>"
+    if (-not $doLark) {
+        Write-Host "  3. Lark/Feishu MCP is off by default. To add it: claude mcp add --scope user --transport stdio lark-mcp -- npx -y `"@larksuiteoapi/lark-mcp`" mcp -a <APP_ID> -s <APP_SECRET>"
     }
     Write-Host ""
 }

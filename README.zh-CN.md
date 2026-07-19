@@ -41,7 +41,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
     [0/2] Slides                  frontend-slides、ppt-master
     [0/3] Memory & Lifestyle      claude-mem、claude-health、PUA
     [1/10] Academic Research      paper-reading、deepxiv-cli...
-    [0/1] MCP Servers             Lark/飞书
+    [1/2] MCP Servers             Playwright、Lark/飞书（可选）
 ```
 
 - **主菜单**：↑↓ 切换分组，**Enter 或 →** 打开分组的子菜单，**q** 退出。光标移到 *Submit* 按 Enter 开始安装。
@@ -137,11 +137,12 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 | [**deepxiv-trending-digest**](https://github.com/DeepXiv/deepxiv_sdk) | DeepXiv (GitHub) | 近 7 天热门论文 Markdown 摘要 | 关闭 |
 | [**deepxiv-baseline-table**](https://github.com/DeepXiv/deepxiv_sdk) | DeepXiv (GitHub) | 从论文构建 Baseline 对比表 | 关闭 |
 
-**MCP Servers (1)** — 非插件的 MCP 集成，默认关闭。
+**MCP Servers (2)** — 非插件的 MCP 集成。
 
 | 项目 | 来源 | 功能 | 默认 |
 |------|------|------|------|
-| [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | 飞书 / Lark 集成（安装后替换 `YOUR_APP_ID`/`YOUR_APP_SECRET`） | 关闭 |
+| **Playwright MCP** | `mcp/` | 浏览器自动化（`@playwright/mcp`） | 开启 |
+| [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | 飞书 / Lark 集成 — 可选；需 Feishu App ID/Secret，每会话约占用 1 GB 内存 | **关闭** |
 
 ## 目录结构
 
@@ -152,7 +153,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 ├── lessons.md             # 自我纠正日志模板（通过 hook 自动加载）
 ├── rules/                 # 编码规范（common + python/typescript/golang）
 ├── hooks/                 # 带渐变进度条的状态栏
-├── mcp/                   # MCP 服务器配置（Lark-MCP）
+├── mcp/                   # MCP 服务器配置（Playwright；Lark-MCP 可选）
 ├── plugins/               # 插件目录与安装指南
 ├── skills/                # 内置自定义 skill
 ├── docs/                  # 论文摘要、实战示例
