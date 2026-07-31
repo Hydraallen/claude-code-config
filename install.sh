@@ -2153,8 +2153,8 @@ backend_setup_hints() {
     [[ -f "$CLAUDE_DIR/default-profile" ]] && default_profile=$(cat "$CLAUDE_DIR/default-profile")
 
     echo "  $step. Finish setting up the backend(s) you installed:"
-    echo "      完成已安装后端的配置（每个后端按 1/2/3 三步走）:"
-    local bin cand hint fields k
+    echo "      完成已安装后端的配置（按下面的编号顺序走完即可）:"
+    local bin cand hint fields k n
     for name in "${pending[@]}"; do
         f="$dst_dir/$name.json"
         echo ""
@@ -2167,26 +2167,38 @@ backend_setup_hints() {
             [[ -z "$cand" ]] && continue
             if command -v "$cand" &>/dev/null; then bin="$cand"; break; fi
         done < <(jq -r '.service.bins[]? // empty' "$f" 2>/dev/null)
+
+        # Number sub-steps dynamically so they stay contiguous (1,2,3,...) even
+        # when 'install' is skipped because the binary is already on PATH.
+        n=0
         if [[ -z "$bin" ]]; then
             hint=$(jq -r '.service.installHint // empty' "$f" 2>/dev/null)
-            [[ -n "$hint" ]] && echo "       1. install / 安装:  $hint"
+            if [[ -n "$hint" ]]; then
+                n=$((n + 1))
+                echo "       $n. install / 安装:  $hint"
+            fi
             bin="<binary>"
         fi
 
         hint=$(jq -r '.service.loginHint // empty' "$f" 2>/dev/null)
-        [[ -n "$hint" ]] && echo "       2. login   / 登录:  ${hint//\{bin\}/$bin}"
+        if [[ -n "$hint" ]]; then
+            n=$((n + 1))
+            echo "       $n. login   / 登录:  ${hint//\{bin\}/$bin}"
+        fi
 
         fields=""
         while IFS= read -r k; do
             [[ -z "$k" ]] && continue
             fields="${fields:+$fields, }.env.$k"
         done < <(profile_placeholder_keys "$f")
-        echo "       3. key     / 密钥:  edit ${f/#$HOME/~}  ->  $fields"
+        n=$((n + 1))
+        echo "       $n. key     / 密钥:  edit ${f/#$HOME/~}  ->  $fields"
         echo "                           把上一步拿到的凭证填进这个文件的对应字段"
 
         # No #anchor: GitHub slugifies "### `ccr` — one /model list…" into
         # #ccr--one-model-list-across-providers, so a bare #$name would 404.
-        echo "       4. guide   / 详细步骤:  docs/BACKENDS.md  (中文: docs/BACKENDS.zh-CN.md)"
+        n=$((n + 1))
+        echo "       $n. guide   / 详细步骤:  docs/BACKENDS.md  (中文: docs/BACKENDS.zh-CN.md)"
     done
 
     if [[ -n "$default_profile" ]]; then
@@ -2197,8 +2209,8 @@ backend_setup_hints() {
         esac
     fi
     echo ""
-    echo "     Nothing here is optional — a backend stays unusable until all three are done."
-    echo "     三步缺一不可，任何一步没做，对应的 cl_<backend> 都不能用。"
+    echo "     Nothing here is optional — a backend stays unusable until every step above is done."
+    echo "     任何一步没做，对应的 cl_<backend> 都不能用。"
     return 0
 }
 
@@ -3084,9 +3096,9 @@ main() {
     echo "  $((step++)). Restart Claude Code for changes to take effect"
     echo "  $((step++)). Customize CLAUDE.md for your specific projects"
     shell_wrapper_source_hint "$step" && step=$((step + 1))
-    if ! $INSTALL_LARK; then
-        echo "  $((step++)). Lark/Feishu MCP is off by default (needs a Feishu app you create yourself)."
-        echo "      飞书 MCP 默认关闭（需要你自己在开放平台建一个应用）。"
+    if $INSTALL_LARK; then
+        echo "  $((step++)). Lark/Feishu MCP is installed but needs a Feishu app you create yourself."
+        echo "      飞书 MCP 已安装，但还需要你自己在开放平台建一个应用并填入凭证。"
         echo "       1. app / 建应用:  https://open.feishu.cn/  ->  开发者后台  ->  创建企业自建应用"
         echo "       2. key / 取凭证:  应用左栏「凭证与基础信息」里的 App ID (cli_...) 和 App Secret"
         echo "       3. 权限 / scopes: 「权限管理 -> 开通权限」。免审权限即时生效；"
