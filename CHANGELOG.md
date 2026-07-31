@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.12.0] - 2026-07-31
+
+### Features
+- **glm-5.2's 1M context is actually usable now.** `profiles/glm.json` gains `CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000` and `CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000`. Until now the profile advertised "1M" in its model description while Claude Code silently ran the session at 200K and capped output at 32K.
+- **A user-supplied `--model` is no longer overridden.** `claude.zsh` hardcoded `--model opus` into `extra_args` and appended it *after* `"$@"`, so `cl_glm --model glm-5-turbo` launched glm-5.2 anyway. The launcher now scans the caller's arguments for `--model` / `--model=X` and only injects a default when there is none.
+- **Model selection without editing JSON.** `cl_<backend> --model <alias|exact-id>` for one launch, or `CL_MODEL=<alias> cl_<backend>` to change the default alias. This is also how the vision model is reached: `cl_glm --model glm-5v-turbo`.
+- **Every launch prints the backend and the model it resolved to**, including the native `claude` path, which was previously silent, and profiles that inject no variables. Slot aliases are printed resolved (`model opus -> glm-5.2`) by reading the profile's own `ANTHROPIC_DEFAULT_*_MODEL` values.
+- **The installer re-checks the `.zshrc` source line on every run.** A second install that still finds no `source ~/.claude/claude.zsh` now warns loudly that no `cl*` command has ever existed in the user's shell, instead of repeating the same low-key first-run tip. The installer still never edits a shell rc file.
+
+### Design Rationale
+- **`CLAUDE_CODE_MAX_CONTEXT_TOKENS` is the intended escape hatch, and the only one.** Claude Code's context resolver returns a hardcoded 200000 for any model id that is not `claude-*`, does not match `/\[1m\]/i`, and is not in its built-in registry — which is every `glm-*` id. The env var is honoured precisely because the id is not `claude-*`. The `[1m]` suffix route was rejected: `glm-5.2[1m]` is not a Z.ai model code and would be sent on the wire.
+- **Both context vars are required.** The auto-compact window is `min(contextLimit, CLAUDE_CODE_AUTO_COMPACT_WINDOW)`, so raising either one alone changes nothing.
+- **Output is `128000`, not `131072`.** Z.ai documents 128K max output for glm-5.2, but the client clamps `CLAUDE_CODE_MAX_OUTPUT_TOKENS` to at most 128000, so the literal 131072 would be silently reduced. 128000 is the largest value that survives.
+- **One profile with a documented caveat, not two profiles.** See below — a second `glm-200k` profile would double the surface (installer entry, baseline, migration, docs) to guard a limit that only bites past 200K on a non-default slot.
+- **`--model` is parsed, not positional.** `claude` accepts a bare prompt as its first positional argument, so consuming `cl_glm <name>` as a model would break `cl_glm "write a haiku"`. Honouring claude's own flag costs the user nothing new to learn, and `CL_MODEL` covers the "change my default" case.
+
+### Notes & Caveats
+- **One context limit, three models.** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is client-wide, not per-slot. It is set to glm-5.2's 1M because glm-5.2 is the opus slot *and* the launcher default. The sonnet (`glm-5-turbo`) and haiku (`glm-4.7`) slots are 200K, so routing to them lets the client grow the context past what the server accepts, with auto-compact disarmed. This is stated in the profile's `note`, in all three `..._MODEL_DESCRIPTION` strings, and in `docs/BACKENDS.md`. In practice the haiku slot is only used for short background tasks.
+- **No new slot for `glm-5v-turbo`.** Claude Code exposes exactly three model slots (haiku/sonnet/opus) and all three are taken by Coding Plan models. The vision model is reachable through `--model glm-5v-turbo` instead of displacing one.
+- **Existing installs pick the new env keys up automatically.** `install_profiles` takes the template wholesale and re-applies only `credentialKeys`, so the three new variables arrive on the next run with the API key preserved. A hand-edited `glm.json` is backed up and the reset fields are listed, as before.
+- **Windows parity unchanged.** `install.ps1` ships no shell wrapper and no profiles — grepping it for `glm` returns nothing — so there is no PowerShell surface to mirror these fixes into.
+
 ## [2.11.0] - 2026-07-31
 
 ### Features

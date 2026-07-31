@@ -16,6 +16,14 @@
 #   cl_switch NAME  change the default
 #   cl_stop [NAME]  stop a backend service this launcher started (--all for every one)
 #   cl_profiles     list backends and their status
+#
+# Model selection without editing any JSON — every command above accepts
+# claude's own flag, and it now wins over the launcher's default:
+#
+#   cl_glm --model glm-5v-turbo     one launch, exact model id
+#   CL_MODEL=sonnet cl_glm          change the default alias for a launch
+#
+# With neither, the default is `--model opus`, i.e. the profile's opus slot.
 
 _CL_PROFILE_DIR="$HOME/.claude/profiles"
 _CL_LEGACY_GLM="$HOME/.claude/glm-env.json"
@@ -412,10 +420,43 @@ _cl_run() {
 
   setopt local_options null_glob
 
-  local -a extra_args=(--model opus)
+  # Model selection, in precedence order:
+  #   1. --model / --model=X in the caller's own args  (e.g. cl_glm --model glm-5v-turbo)
+  #   2. $CL_MODEL
+  #   3. opus
+  # A user-supplied --model must win, so scan for one and only inject a default
+  # when there is none — extra_args is appended after "$@", and a second --model
+  # would otherwise override whatever the user asked for.
+  local model="" _pending=0 _a
+  for _a in "$@"; do
+    if (( _pending )); then model="$_a"; _pending=0; continue; fi
+    case "$_a" in
+      --model=*) model="${_a#--model=}" ;;
+      # Bare `--model` with no value: leave it alone and let claude report it,
+      # rather than appending a default that turns into `--model --model opus`.
+      --model)   model="(missing value)"; _pending=1 ;;
+    esac
+  done
+
+  local -a extra_args=()
+  if [[ -z "$model" ]]; then
+    model="${CL_MODEL:-opus}"
+    extra_args+=(--model "$model")
+  fi
   if [[ "$skip_permissions" == "true" ]]; then
     extra_args+=(--dangerously-skip-permissions)
   fi
+
+  # Report what the alias actually resolves to. The profile's env is already
+  # exported by the time we get here; on the native path these are unset and the
+  # alias is printed as-is.
+  local shown="$model"
+  case "$model" in
+    opus)   [[ -n "${ANTHROPIC_DEFAULT_OPUS_MODEL:-}"   ]] && shown="$model -> $ANTHROPIC_DEFAULT_OPUS_MODEL" ;;
+    sonnet) [[ -n "${ANTHROPIC_DEFAULT_SONNET_MODEL:-}" ]] && shown="$model -> $ANTHROPIC_DEFAULT_SONNET_MODEL" ;;
+    haiku)  [[ -n "${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}"  ]] && shown="$model -> $ANTHROPIC_DEFAULT_HAIKU_MODEL" ;;
+  esac
+  print -u2 "$tag: model $shown"
 
   # Build system prompt from system-prompt.txt
   local system_prompt=""
@@ -524,6 +565,7 @@ _cl_profile_run() {
   # "claude" with no profile file on disk is the plain native path.
   if [[ -z "$file" ]]; then
     if [[ "$name" == "claude" ]]; then
+      print -u2 "$tag: backend 'claude' (native Anthropic)"
       _cl_run "$tag" "$skip_permissions" "$@"
       return $?
     fi
@@ -569,11 +611,11 @@ _cl_profile_run() {
     (( injected++ ))
   done <<< "$pairs"
 
-  if (( injected > 0 )); then
-    local endpoint
-    endpoint=$(jq -r '(.env // .).ANTHROPIC_BASE_URL // "native"' "$file" 2>/dev/null)
-    print -u2 "$tag: backend '$name' ($endpoint)"
-  fi
+  # Printed unconditionally: which backend a launch resolved to is the one thing
+  # worth knowing on every run, including a profile that injects nothing.
+  local endpoint
+  endpoint=$(jq -r '(.env // .).ANTHROPIC_BASE_URL // "native"' "$file" 2>/dev/null)
+  print -u2 "$tag: backend '$name' ($endpoint, $injected vars)"
 
   # `always` covers every normal and failing return path; the traps cover a
   # signal arriving while claude runs, which would otherwise leave the backend's

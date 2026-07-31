@@ -29,6 +29,22 @@ there as a **profile**: one JSON file in `~/.claude/profiles/`, loaded by
 `cl_<name>` is generated at source time from whatever is in the profiles
 directory — adding a backend never requires editing `claude.zsh`.
 
+Every launch prints the backend and the model it resolved to, e.g.
+`cl_glm: backend 'glm' (https://open.bigmodel.cn/api/anthropic, 20 vars)` then
+`cl_glm: model opus -> glm-5.2`.
+
+### Picking a model without editing JSON
+
+The profile's `opus` slot is the default. Override it per launch:
+
+```bash
+cl_glm --model glm-5v-turbo     # any exact model id the backend accepts
+cl_glm --model sonnet           # or an alias, resolved by the profile's slots
+CL_MODEL=sonnet cl_glm          # change the default alias for one launch
+```
+
+A `--model` in your own arguments always wins over the launcher's default.
+
 Env vars are injected only for the duration of one launch and restored exactly
 afterwards, including vars that were previously unset. Nothing is written to
 `settings.json`.
@@ -50,9 +66,35 @@ Paste your BigModel API key into `.env.ANTHROPIC_AUTH_TOKEN` of
 cl_glm
 ```
 
-Coding Plan covers **`glm-5.2` (1M), `glm-5-turbo` (200K), `glm-4.7` (200K)**
-only — those are the three mapped to opus/sonnet/haiku. `glm-5` and `glm-5.1`
-are auto-routed to `glm-5.2` upstream, so don't pin them.
+Coding Plan covers **`glm-5.2` (1M in / 128K out), `glm-5-turbo` (200K),
+`glm-4.7` (200K)** only — those are the three mapped to opus/sonnet/haiku.
+`glm-5` and `glm-5.1` are auto-routed to `glm-5.2` upstream, so don't pin them.
+The vision model **`glm-5v-turbo` (200K)** has no slot of its own; reach it with
+`cl_glm --model glm-5v-turbo`.
+
+#### Unlocking glm-5.2's 1M context
+
+Claude Code hardcodes a 200K context limit for any model id it does not
+recognise, and no `glm-*` id is in its registry — so without help the client
+compacts at 200K and caps output at its 32K default, wasting four fifths of what
+glm-5.2 actually accepts. The profile therefore sets:
+
+| Var | Value | Why |
+|---|---|---|
+| `CLAUDE_CODE_MAX_CONTEXT_TOKENS` | `1000000` | The client honours this only for non-`claude-*` model ids; it is the intended escape hatch |
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | `1000000` | The compact window is `min(contextLimit, thisVar)`, so setting it alone is a no-op — both are needed |
+| `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | `128000` | glm-5.2 tops out at 128K output; `131072` would be clamped by the client, which accepts at most `128000` |
+
+Nothing extra is needed server-side — no header, no `[1m]` suffix on the model
+id. Do **not** rename the model to `glm-5.2[1m]`: that is not a Z.ai model code
+and it would go out on the wire.
+
+> **Caveat — one limit, three models.** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is a
+> single client-wide value, not per-slot. It matches glm-5.2, which is the opus
+> slot and the launcher default. If you route to **sonnet (`glm-5-turbo`)** or
+> **haiku (`glm-4.7`)**, both 200K, the client will let the context grow past
+> what the server accepts and auto-compact will not save you. Keep those
+> sessions under 200K, or `cl_switch` to a backend sized for them.
 
 Docs: <https://docs.bigmodel.cn/cn/coding-plan/tool/claude>
 

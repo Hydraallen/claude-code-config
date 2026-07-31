@@ -1,5 +1,27 @@
 # 更新日志
 
+## [2.12.0] - 2026-07-31
+
+### 新功能
+- **glm-5.2 的 1M 上下文这次是真的能用了。** `profiles/glm.json` 新增 `CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000`、`CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000`、`CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000`。此前 profile 的模型描述里写着 "1M"，而 Claude Code 实际按 200K 跑，输出还被压在 32K。
+- **用户自己传的 `--model` 不再被覆盖。** `claude.zsh` 把 `--model opus` 硬编码进 `extra_args`，并且拼在 `"$@"` **之后**，导致 `cl_glm --model glm-5-turbo` 仍然启动 glm-5.2。现在启动器会扫描调用方参数里的 `--model` / `--model=X`，只有在没有时才注入默认值。
+- **不改 JSON 也能选模型。** 单次启动用 `cl_<backend> --model <别名|精确 id>`，或用 `CL_MODEL=<别名> cl_<backend>` 改这一次的默认别名。视觉模型也走这条路：`cl_glm --model glm-5v-turbo`。
+- **每次启动都打印后端与解析后的模型**，包括此前完全静默的原生 `claude` 路径，以及不注入任何变量的 profile。别名会打印成解析后的形式（`model opus -> glm-5.2`），取值来自 profile 自己的 `ANTHROPIC_DEFAULT_*_MODEL`。
+- **安装器每次运行都会重新检查 `.zshrc` 的 source 行。** 如果不是首次安装却依然找不到 `source ~/.claude/claude.zsh`，现在会**显著告警**：说明用户 shell 里从来就没有过任何 `cl*` 命令，而不是把同一条首次运行的温和提示再念一遍。安装器仍然从不修改任何 shell rc 文件。
+
+### 设计理由
+- **`CLAUDE_CODE_MAX_CONTEXT_TOKENS` 是官方留的唯一逃生口。** Claude Code 的 context resolver 对任何非 `claude-*`、不匹配 `/\[1m\]/i`、又不在内置注册表里的 model id 一律返回硬编码的 200000 —— 所有 `glm-*` 都是这种情况。而这个环境变量恰恰只在 model id 不以 `claude-` 开头时生效。`[1m]` 后缀方案被否决：`glm-5.2[1m]` 不是智谱的模型代号，会被原样发到线上。
+- **两个上下文变量缺一不可。** 自动压缩窗口是 `min(contextLimit, CLAUDE_CODE_AUTO_COMPACT_WINDOW)`，只改其中一个等于没改。
+- **输出取 `128000` 而不是 `131072`。** 智谱文档写 glm-5.2 最大输出 128K，但客户端会把 `CLAUDE_CODE_MAX_OUTPUT_TOKENS` 钳到 128000，字面量 131072 会被静默削掉。128000 是能存活的最大值。
+- **一个 profile 加一条明确警示，而不是拆成两个 profile。** 见下 —— 多加一个 `glm-200k` profile 意味着安装器条目、baseline、迁移、文档全部翻倍，只为防一个仅在非默认 slot 上超过 200K 才会触发的问题。
+- **`--model` 是解析出来的，不是位置参数。** `claude` 的第一个位置参数可以是 prompt，把 `cl_glm <name>` 当成模型名会直接破坏 `cl_glm "写首俳句"`。沿用 claude 自己的参数不需要用户学新东西，"改默认" 的需求由 `CL_MODEL` 覆盖。
+
+### 注意事项
+- **一个上下文上限，三个模型。** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 是客户端全局值，不分 slot。设成 glm-5.2 的 1M，是因为 glm-5.2 既是 opus slot 也是启动器默认。sonnet（`glm-5-turbo`）和 haiku（`glm-4.7`）都是 200K，路由到它们时客户端会让上下文涨过服务端能接受的长度，而自动压缩已被解除武装。这一点写在 profile 的 `note`、三条 `..._MODEL_DESCRIPTION` 以及 `docs/BACKENDS.md` 里。实际使用中 haiku slot 只承担很短的后台任务。
+- **没有给 `glm-5v-turbo` 新增 slot。** Claude Code 只暴露 haiku/sonnet/opus 三个 slot，且已全被 Coding Plan 的三个模型占满。视觉模型通过 `--model glm-5v-turbo` 触达，而不是挤掉其中一个。
+- **已有安装会自动获得新的环境变量。** `install_profiles` 整体采用模板、只回填 `credentialKeys`，所以下次运行时三个新变量会带着原有 API key 一起到位。手工改过的 `glm.json` 仍会被备份并列出被重置的字段。
+- **Windows 侧无对应改动。** `install.ps1` 从未包含 shell wrapper 和 profiles —— grep `glm` 零命中 —— 因此没有需要同步的 PowerShell 面。
+
 ## [2.11.0] - 2026-07-31
 
 ### 新功能

@@ -324,6 +324,12 @@ INSTALL_PLUGINS=false
 INSTALL_CLAUDE_MD=false
 INSTALL_SETTINGS=false
 INSTALL_SHELL_WRAPPER=false
+# True when ~/.claude/claude.zsh already existed when install_shell_wrapper ran,
+# i.e. this is a re-install. Used to escalate the ".zshrc is not sourcing it"
+# reminder from a first-run tip to a warning: a second install that still finds
+# no source line means the one-time hint was missed, and every cl* command has
+# been silently unavailable since the first run.
+WRAPPER_PREEXISTED=false
 CO_AUTHOR=false
 INSTALL_DEEPXIV=false
 UNINSTALL=false
@@ -1627,6 +1633,7 @@ run_cleanup() {
 install_shell_wrapper() {
     info "Installing shell wrapper (claude.zsh)..."
     local target="$CLAUDE_DIR/claude.zsh"
+    [[ -f "$target" ]] && WRAPPER_PREEXISTED=true
     if $DRY_RUN; then
         info "Would copy: claude.zsh -> $target"
         info "Would copy: system-prompt.txt -> $CLAUDE_DIR/system-prompt.txt"
@@ -1654,7 +1661,11 @@ install_shell_wrapper() {
         # Choose default profile
         choose_default_profile
 
-        info "Add to your .zshrc: source ~/.claude/claude.zsh"
+        if shell_wrapper_is_sourced; then
+            ok "Shell wrapper is sourced from ~/.zshrc"
+        else
+            info "Add to your .zshrc: source ~/.claude/claude.zsh"
+        fi
         info "Commands: cl, cl_auto, cl_switch <name>, cl_profiles, and cl_<backend>/cl_<backend>_auto per profile"
     fi
 }
@@ -1880,11 +1891,25 @@ profile_placeholder_keys() {
         | $k' "$1" 2>/dev/null || true
 }
 
+# True when ~/.zshrc already sources the wrapper. Matches
+# `source ~/.claude/claude.zsh` and `. $HOME/.claude/claude.zsh` alike, ignoring
+# commented-out lines. A missing .zshrc simply means "not set up yet".
+shell_wrapper_is_sourced() {
+    local rc="$HOME/.zshrc"
+    [[ -f "$rc" ]] || return 1
+    grep -qE '^[[:space:]]*(source|\.)[[:space:]]+[^#]*claude\.zsh' "$rc" 2>/dev/null
+}
+
 # None of the cl* commands exist until the user sources the wrapper themselves —
 # the installer never edits a shell rc file. The mid-install info line scrolls past
 # during a long run, so repeat it in the closing summary. $1 is the step number;
-# returns 1 without printing when the wrapper wasn't installed or the rc file
-# already sources it, so the caller keeps its numbering contiguous.
+# returns 1 without printing when the wrapper wasn't installed, so the caller
+# keeps its numbering contiguous.
+#
+# A re-install that still finds no source line is a different situation from a
+# first install: the one-time hint was already shown once and missed, so every
+# cl* command has been unavailable the whole time. That case warns loudly instead
+# of reading as a routine next step.
 shell_wrapper_source_hint() {
     local step="$1"
     $INSTALL_SHELL_WRAPPER || return 1
@@ -1897,12 +1922,18 @@ shell_wrapper_source_hint() {
         return 0
     fi
 
-    # Matches `source ~/.claude/claude.zsh` and `. $HOME/.claude/claude.zsh` alike,
-    # ignoring commented-out lines. A missing .zshrc simply means "not set up yet".
-    local rc="$HOME/.zshrc"
-    if [[ -f "$rc" ]] && grep -qE '^[[:space:]]*(source|\.)[[:space:]]+[^#]*claude\.zsh' "$rc" 2>/dev/null; then
+    if shell_wrapper_is_sourced; then
         echo "  $step. Shell wrapper already sourced from ~/.zshrc — nothing to do"
         return 0
+    fi
+
+    if $WRAPPER_PREEXISTED; then
+        echo ""
+        warn "STILL NOT SET UP: ~/.zshrc does not source the wrapper."
+        warn "  This is not your first install, so cl, cl_auto, cl_switch, cl_profiles and"
+        warn "  every cl_<backend> have never existed in your shell. Nothing you configured"
+        warn "  through this installer's backends is reachable until you add the line below."
+        echo ""
     fi
 
     echo "  $step. IMPORTANT: the cl* commands do nothing until you source the wrapper."

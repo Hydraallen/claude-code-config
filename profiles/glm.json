@@ -1,6 +1,6 @@
 {
   "label": "GLM Coding Plan (Zhipu BigModel, Anthropic-compatible)",
-  "note": "Official Anthropic-compatible endpoint. Set ANTHROPIC_AUTH_TOKEN to your BigModel API key. Coding Plan covers glm-5.2 / glm-5-turbo / glm-4.7 only; glm-5 and glm-5.1 are auto-routed to glm-5.2 upstream. Docs: https://docs.bigmodel.cn/cn/coding-plan/tool/claude",
+  "note": "Official Anthropic-compatible endpoint. Set ANTHROPIC_AUTH_TOKEN to your BigModel API key. Coding Plan covers glm-5.2 / glm-5-turbo / glm-4.7 only; glm-5 and glm-5.1 are auto-routed to glm-5.2 upstream. CAVEAT: CLAUDE_CODE_MAX_CONTEXT_TOKENS is one client-wide value, not per-slot. It is set to 1000000 to match glm-5.2 (the opus slot and the launcher default). glm-5-turbo and glm-4.7 only accept 200K, so if you route to sonnet/haiku the client will happily grow the context past what the server takes and auto-compact will not rescue you — keep those sessions under 200K. Vision: glm-5v-turbo (200K) is reachable with `cl_glm --model glm-5v-turbo`. Docs: https://docs.bigmodel.cn/cn/coding-plan/tool/claude",
   "credentialKeys": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"],
   "service": null,
   "unset": [],
@@ -9,16 +9,19 @@
     "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.7",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": "GLM-4.7",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION": "智谱 GLM-4.7 快速模型 (200K)",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION": "智谱 GLM-4.7 快速模型 (服务端 200K；客户端上限按 glm-5.2 设为 1M，勿超过 200K)",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES": "effort,thinking,adaptive_thinking,interleaved_thinking",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5-turbo",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "GLM-5-Turbo",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION": "智谱 GLM-5-Turbo 通用模型 (200K)",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION": "智谱 GLM-5-Turbo 通用模型 (服务端 200K；客户端上限按 glm-5.2 设为 1M，勿超过 200K)",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2",
     "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "GLM-5.2",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION": "智谱 GLM-5.2 旗舰推理模型 (1M)",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION": "智谱 GLM-5.2 旗舰推理模型 (1M 上下文 / 128K 输出)",
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES": "effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1000000",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "128000",
     "API_TIMEOUT_MS": "3000000"
   }
 }
