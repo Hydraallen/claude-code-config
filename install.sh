@@ -589,7 +589,7 @@ ppt-master|Editable PPTX from PDF/DOCX/URL/Markdown; needs pip install (hugohe3)
     # Group 7: Memory & Lifestyle
     GROUP_LABELS+=("Memory & Lifestyle")
     GROUP_HINTS+=("session memory and personal productivity")
-    GROUP_ITEMS+=("claude-mem|Cross-session memory (~3k tokens/session)|1|plug-claude-mem
+    GROUP_ITEMS+=("claude-mem|Cross-session memory (~3k tokens/session)|0|plug-claude-mem
 PUA|AI agent productivity booster (pua, pua-en, pua-ja)|0|plug-pua")
 
     # Group 8: Academic Research (AI Research plugins + DeepXiv skills + paper-reading)
@@ -1837,19 +1837,27 @@ choose_default_profile() {
     if can_interact && [[ ${#avail[@]} -gt 1 ]]; then
         echo ""
         info "Which backend should a bare 'cl' use by default?"
+        # The bracketed default must be the entry Enter actually selects, i.e. the
+        # position of the fallback profile in the list — not a hardcoded 1.
+        local default_index=""
         local i=1 n
         for n in "${avail[@]}"; do
             local label=""
             command -v jq &>/dev/null && label=$(jq -r '.label // empty' "$CLAUDE_DIR/profiles/$n.json" 2>/dev/null)
             printf '  %d) %-8s %s\n' "$i" "$n" "$label"
+            [[ "$n" == "$default_profile" ]] && default_index="$i"
             i=$((i + 1))
         done
+        # Fallback profile absent from the list (should not happen): show no number
+        # rather than one that points at some other backend.
+        local prompt="  Choose [$default_index]: "
+        [[ -z "$default_index" ]] && prompt="  Choose (Enter = $default_profile): "
         local choice=""
         if [[ -t 0 ]]; then
-            echo -n "  Choose [1]: "
+            echo -n "$prompt"
             read -r choice
         else
-            echo -n "  Choose [1]: " > /dev/tty
+            echo -n "$prompt" > /dev/tty
             read -r choice </dev/tty
         fi
         if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#avail[@]} )); then
@@ -2753,10 +2761,11 @@ main() {
             # Implicit (non-TTY fallback): essential plugins plus the
             # default-selected third-party plugins and MCP servers, so a
             # `curl | bash` install without --all still brings them along.
+            # claude-mem is default OFF and only ships with explicit --all.
             # (lark-mcp is skipped non-interactively as it needs credentials;
             # playwright MCP installs fine.)
             PLUGIN_GROUPS=("essential")
-            SELECTED_PLUGINS+=("${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}")
+            SELECTED_PLUGINS+=("${PLUGINS_OPTIONAL[@]+"${PLUGINS_OPTIONAL[@]}"}")
             INSTALL_MCP=true
         fi
     fi

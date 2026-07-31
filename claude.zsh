@@ -221,7 +221,7 @@ cl_stop() {
 
 # Show every backend, its label, and whether it looks ready to use.
 cl_profiles() {
-  local current name file label token svc
+  local current name file label token svc hint
   current=$(_cl_get_profile)
   for name in $(_cl_list_profiles); do
     file=$(_cl_profile_file "$name")
@@ -241,8 +241,18 @@ cl_profiles() {
         if [[ -n "$svc" ]]; then
           if _cl_service_healthy "$svc"; then
             state="ready (service up)"
-          else
+          elif _cl_service_bin "$file" >/dev/null; then
             state="ready (service starts on first use)"
+          else
+            # Credentials can be perfect and the profile still unusable: the
+            # proxy binary was never installed. Say so here rather than at the
+            # first cl_<name>.
+            hint=$(jq -r '.service.installHint // empty' "$file" 2>/dev/null)
+            if [[ -n "$hint" ]]; then
+              state="not installed — $hint"
+            else
+              state="not installed"
+            fi
           fi
         fi
       fi

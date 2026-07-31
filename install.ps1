@@ -357,7 +357,7 @@ function Show-InteractiveMenu {
             @{ Label = "ppt-master";      Desc = "Editable PPTX from PDF/DOCX/URL/Markdown; needs pip install (hugohe3)"; Default = $false; Id = "plug-ppt-master" }
         )}
         @{ Label = "Memory & Lifestyle"; Hint = "session memory and personal productivity"; Items = @(
-            @{ Label = "claude-mem";      Desc = "Cross-session memory (~3k tokens/session)"; Default = $true; Id = "plug-claude-mem" }
+            @{ Label = "claude-mem";      Desc = "Cross-session memory (~3k tokens/session)"; Default = $false; Id = "plug-claude-mem" }
             @{ Label = "PUA";             Desc = "AI agent productivity booster (pua, pua-en, pua-ja)"; Default = $false; Id = "plug-pua" }
         )}
         @{ Label = "Academic Research"; Hint = "training/inference plugins + paper-reading & DeepXiv skills"; Items = @(
@@ -1950,6 +1950,7 @@ function Main {
             $reviewCodex = $menuResult.ReviewCodex
         } else {
             # Fallback when interactive menu failed
+            # claude-mem is default OFF and only ships with explicit -All.
             $doClaudeMd = $true
             $doSettings = $true
             $doRules = $true
@@ -1959,13 +1960,14 @@ function Main {
             $doHooks = $true
             $doPlugins = $true
             $pluginGroups = @("essential")
-            $selectedPlugins = $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM
+            $selectedPlugins = $PLUGINS_OPTIONAL
             $doMcp = $true
         }
     } else {
         # Non-interactive fallback: essential plugins plus the default-selected
         # third-party plugins and MCP servers, so a `irm | iex` install without
-        # -All still brings them along. (lark-mcp is skipped non-interactively
+        # -All still brings them along. claude-mem is default OFF and only ships
+        # with explicit -All. (lark-mcp is skipped non-interactively
         # as it needs credentials; playwright MCP installs fine.)
         $doClaudeMd = $true
         $doSettings = $true
@@ -1976,7 +1978,7 @@ function Main {
         $doHooks = $true
         $doPlugins = $true
         $pluginGroups = @("essential")
-        $selectedPlugins = $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM
+        $selectedPlugins = $PLUGINS_OPTIONAL
         $doMcp = $true
     }
 
