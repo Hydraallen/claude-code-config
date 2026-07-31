@@ -318,9 +318,15 @@ cl_ccr
 
 #### 可选：Agent Profiles 与路由
 
-**Agent Profiles 是可选的。** 只有在你要用 `ccr <profile>` 启动，或者想让 CCR 帮你
-写某个 agent 的 settings 文件时才需要它。我们的启动器两个都不用 —— 它自己设置
-`ANTHROPIC_BASE_URL`。
+**Agent Profiles 是可选的 —— 而对 Claude Code，别去动它。** 只有在你要用
+`ccr <profile>` 启动，或者想让 CCR 帮你写某个 agent 的 settings 文件时才需要它。
+我们的启动器两个都不用 —— 它自己设置 `ANTHROPIC_BASE_URL`。
+
+> **不要在 CCR 的 Agent Profiles 里绑定 / 注册 Claude Code。** 一旦绑定，CCR 就会去写
+> 并接管那些本应由 `~/.claude/profiles/ccr.json` 和 `cl_ccr` 启动器控制的设置
+> （`ANTHROPIC_BASE_URL`、模型槽位、`CLAUDE_CODE_MAX_CONTEXT_TOKENS`）。两边互相打架，
+> 结果就是配置被重复或覆盖、`/model` 发现失效、或者上下文窗口不对。让 Claude Code 接入
+> 网关只用我们文档里的方式 —— 用 `cl_ccr` 启动 —— CCR 的 Agent Profiles 留空。
 
 v3 的路由**不再是**老 v1 那套 `default` / `background` / `think` / `longContext`
 配置块；那东西已经没了。v3 有按 profile 的内置路由（**Use enhanced route**，启用增强

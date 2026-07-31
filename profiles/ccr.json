@@ -16,7 +16,7 @@
     "timeoutSec": 30,
     "logName": "ccr.log",
     "installHint": "npm install -g @musistudio/claude-code-router    # requires Node.js >= 22",
-    "loginHint": "ccr ui    # admin UI on :3458 — add providers, then copy the 'Local Gateway' key (sk-ccr-...), NOT a 'Profile: ...' key"
+    "loginHint": "ccr ui    # admin UI on :3458 — add providers, then copy the 'Local Gateway' key (sk-ccr-...), NOT a 'Profile: ...' key. Do NOT bind Claude Code as a client in CCR (Agent Profiles) — it overwrites the same settings our cl_ccr launcher manages and breaks this config; always launch via cl_ccr."
   },
   "unset": [],
   "env": {

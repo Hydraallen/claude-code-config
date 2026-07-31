@@ -347,9 +347,18 @@ never heard of.
 
 #### Optional: Agent Profiles and routing
 
-**Agent Profiles is optional.** You only need it for `ccr <profile>` launches or
-to have CCR write an agent's settings file for you. Our launcher uses neither —
-it sets `ANTHROPIC_BASE_URL` itself.
+**Agent Profiles is optional — and for Claude Code, leave it alone.** You only
+need it for `ccr <profile>` launches or to have CCR write an agent's settings
+file for you. Our launcher uses neither — it sets `ANTHROPIC_BASE_URL` itself.
+
+> **Do not bind/register Claude Code as a client in CCR's Agent Profiles.** Doing
+> so makes CCR write and manage the very settings (`ANTHROPIC_BASE_URL`, the
+> model slots, `CLAUDE_CODE_MAX_CONTEXT_TOKENS`) that
+> `~/.claude/profiles/ccr.json` and the `cl_ccr` launcher already control. The
+> two fight, and you end up with duplicated or overwritten config, broken
+> `/model` discovery, or the wrong context window. Point Claude Code at the
+> gateway the documented way — launch with `cl_ccr` — and keep CCR's Agent
+> Profiles empty.
 
 Routing in v3 is **not** the old v1 `default` / `background` / `think` /
 `longContext` block; that is gone. v3 has per-profile built-in routes (**Use
