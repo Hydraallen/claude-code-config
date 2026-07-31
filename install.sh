@@ -1882,18 +1882,21 @@ configure_ccr_profile() {
     echo ""
     info "Backend 'ccr': model slots"
 
-    # Idempotent: a slot filled by an earlier run or by hand is never re-prompted.
-    local have
-    have=$(jq -r '.env.ANTHROPIC_DEFAULT_OPUS_MODEL // empty' "$f" 2>/dev/null)
-    if [[ -n "$have" ]]; then
-        ok "  already set (opus -> $have) — leaving them alone"
-        return 0
-    fi
-
+    # No idempotent skip: a configured key means the user may have added/changed
+    # providers in 'ccr ui', so re-map the slots on every install run.
     if [[ -z "$token" || "$token" == YOUR_* ]]; then
         warn "  ANTHROPIC_AUTH_TOKEN is still a placeholder — cannot query the gateway yet"
         ccr_manual_slot_hint "$f" "$base"
         return 0
+    fi
+
+    # Show what's currently mapped so the user has context when re-filling.
+    local cur_o cur_s cur_h
+    cur_o=$(jq -r '.env.ANTHROPIC_DEFAULT_OPUS_MODEL // empty' "$f" 2>/dev/null)
+    cur_s=$(jq -r '.env.ANTHROPIC_DEFAULT_SONNET_MODEL // empty' "$f" 2>/dev/null)
+    cur_h=$(jq -r '.env.ANTHROPIC_DEFAULT_HAIKU_MODEL // empty' "$f" 2>/dev/null)
+    if [[ -n "$cur_o$cur_s$cur_h" ]]; then
+        info "  current: opus=${cur_o:-<empty>} sonnet=${cur_s:-<empty>} haiku=${cur_h:-<empty>}"
     fi
 
     if ! command -v curl &>/dev/null; then
