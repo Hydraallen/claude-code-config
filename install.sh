@@ -330,6 +330,11 @@ INSTALL_SHELL_WRAPPER=false
 # no source line means the one-time hint was missed, and every cl* command has
 # been silently unavailable since the first run.
 WRAPPER_PREEXISTED=false
+# Which lark-mcp tool preset to register. Without -t the package defaults to
+# preset.default, and upstream's own FAQ lists "token limit exceeded after
+# starting the MCP service" as a known problem whose documented fix is this very
+# flag. preset.light is the smallest set; widen it in ~/.claude.json later.
+LARK_MCP_PRESET="preset.light"
 CO_AUTHOR=false
 INSTALL_DEEPXIV=false
 UNINSTALL=false
@@ -1658,6 +1663,9 @@ install_shell_wrapper() {
         fi
         install_profiles
 
+        # Model slots for gateway backends, which only the live gateway can supply.
+        configure_ccr_profile
+
         # Choose default profile
         choose_default_profile
 
@@ -1825,6 +1833,167 @@ install_profiles() {
     done
 }
 
+# The manual fallback for ccr model slots, printed whenever auto-detection cannot
+# run. Deliberately spells out the same end state the interactive picker would have
+# written, so following it by hand produces an identical profile.
+ccr_manual_slot_hint() {
+    local f="$1" base="$2"
+    echo "     Fill the model slots later — or just re-run this installer once the gateway is up:"
+    echo "     稍后补上模型槽位，或等网关起来后重跑本安装脚本:"
+    echo "       1. ccr start                    # gateway on :3456"
+    echo "       2. ccr ui                       # :3458 — add providers, then copy the 'Local Gateway' key"
+    echo "                                       #   NOT a 'Profile: ...' key — those 401 on /v1/models"
+    echo "       3. edit ${f/#$HOME/~}  ->  .env.ANTHROPIC_AUTH_TOKEN"
+    echo "       4. curl -s -H 'Authorization: Bearer <that key>' $base/v1/models | jq -r '.data[].id'"
+    echo "       5. put one of those ids into .env.ANTHROPIC_DEFAULT_OPUS_MODEL"
+    echo "     Until then cl_ccr simply starts without --model and you pick with /model — also fine."
+    echo "     在此之前 cl_ccr 不传 --model，进去用 /model 选即可，同样能用。"
+}
+
+# Fill the ccr profile's model slots from the live gateway.
+#
+# CCR model ids embed the provider display name the user typed into the web UI —
+# "Zhipu AI (China) - Coding Plan/glm-5.2" is a real one — so no template can ship
+# them and no installer can guess them. GET /v1/models on the running gateway is the
+# only source of truth, which is why this step exists at all rather than being more
+# static keys in profiles/ccr.json.
+#
+# Every failure path here is non-fatal and leaves a working profile: claude.zsh
+# passes no --model when the slots are empty, so the user picks from the discovered
+# list with /model. The slots live in the profile's credentialKeys, so whatever is
+# written here survives later template refreshes untouched.
+configure_ccr_profile() {
+    local f="$CLAUDE_DIR/profiles/ccr.json"
+    [[ -f "$f" ]] || return 0
+
+    if $DRY_RUN; then
+        info "Would offer to fill ccr model slots from GET /v1/models on the running gateway"
+        info "Would print manual steps instead when the gateway is down, curl/jq are missing, or the key is still a placeholder"
+        return 0
+    fi
+
+    command -v jq &>/dev/null || { warn "jq not found — skipping ccr model-slot setup"; return 0; }
+
+    local base token
+    base=$(jq -r '.env.ANTHROPIC_BASE_URL // empty' "$f" 2>/dev/null)
+    token=$(jq -r '.env.ANTHROPIC_AUTH_TOKEN // empty' "$f" 2>/dev/null)
+    [[ -n "$base" ]] || return 0
+
+    echo ""
+    info "Backend 'ccr': model slots"
+
+    # Idempotent: a slot filled by an earlier run or by hand is never re-prompted.
+    local have
+    have=$(jq -r '.env.ANTHROPIC_DEFAULT_OPUS_MODEL // empty' "$f" 2>/dev/null)
+    if [[ -n "$have" ]]; then
+        ok "  already set (opus -> $have) — leaving them alone"
+        return 0
+    fi
+
+    if [[ -z "$token" || "$token" == YOUR_* ]]; then
+        warn "  ANTHROPIC_AUTH_TOKEN is still a placeholder — cannot query the gateway yet"
+        ccr_manual_slot_hint "$f" "$base"
+        return 0
+    fi
+
+    if ! command -v curl &>/dev/null; then
+        warn "  curl not found — cannot query the gateway"
+        ccr_manual_slot_hint "$f" "$base"
+        return 0
+    fi
+
+    # Both header styles: CCR has accepted either depending on version.
+    local body=""
+    body=$(curl -fsS --max-time 5 \
+        -H "Authorization: Bearer $token" \
+        -H "x-api-key: $token" \
+        "$base/v1/models" 2>/dev/null) || body=""
+
+    if [[ -z "$body" ]]; then
+        warn "  $base/v1/models did not answer (gateway down, or the key is a 'Profile: ...' key, which 401s here)"
+        ccr_manual_slot_hint "$f" "$base"
+        return 0
+    fi
+
+    local -a ids=()
+    local id
+    while IFS= read -r id; do
+        [[ -n "$id" ]] && ids+=("$id")
+    done < <(printf '%s' "$body" | jq -r '.data[]?.id // empty' 2>/dev/null)
+
+    if [[ ${#ids[@]} -eq 0 ]]; then
+        warn "  the gateway answered but published no models — add a provider in 'ccr ui' first"
+        ccr_manual_slot_hint "$f" "$base"
+        return 0
+    fi
+
+    ok "  gateway published ${#ids[@]} model(s)"
+
+    if $FORCE || ! can_interact; then
+        # Guessing which of a dozen ids should be "opus" is not the installer's call.
+        info "  non-interactive run — not guessing which model belongs in which slot"
+        ccr_manual_slot_hint "$f" "$base"
+        return 0
+    fi
+
+    local i=1
+    for id in "${ids[@]}"; do
+        printf '     %2d) %s\n' "$i" "$id"
+        i=$((i + 1))
+    done
+    echo "     Map claude's aliases onto these ids. Enter = leave that slot empty."
+    echo "     把 claude 的模型别名映射到上面的 id。直接回车 = 该槽位留空。"
+
+    # Slot names spelled out in both cases rather than via ${s,,}: that expansion
+    # is bash 4 only and macOS still ships 3.2.
+    local -a slots=(opus sonnet haiku)
+    local -a picked=("" "" "")
+    local s idx choice
+    idx=0
+    for s in "${slots[@]}"; do
+        choice=""
+        if [[ -t 0 ]]; then
+            echo -n "     $s [1-${#ids[@]}, Enter=skip]: "
+            read -r choice
+        else
+            echo -n "     $s [1-${#ids[@]}, Enter=skip]: " > /dev/tty
+            read -r choice </dev/tty
+        fi
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ids[@]} )); then
+            picked[$idx]="${ids[$((choice - 1))]}"
+        elif [[ -n "$choice" ]]; then
+            warn "     not a number in range — leaving $s empty"
+        fi
+        idx=$((idx + 1))
+    done
+
+    if [[ -z "${picked[0]}${picked[1]}${picked[2]}" ]]; then
+        info "  all slots left empty — cl_ccr will start without --model (pick with /model)"
+        return 0
+    fi
+
+    local updated
+    updated=$(jq \
+        --arg o "${picked[0]}" --arg s "${picked[1]}" --arg h "${picked[2]}" '
+        .env |= (.
+            + (if $o != "" then {ANTHROPIC_DEFAULT_OPUS_MODEL:   $o} else {} end)
+            + (if $s != "" then {ANTHROPIC_DEFAULT_SONNET_MODEL: $s} else {} end)
+            + (if $h != "" then {ANTHROPIC_DEFAULT_HAIKU_MODEL:  $h} else {} end))
+        ' "$f" 2>/dev/null)
+
+    if [[ -z "$updated" ]]; then
+        warn "  jq failed to write the slots — profile left untouched"
+        ccr_manual_slot_hint "$f" "$base"
+        return 0
+    fi
+
+    printf '%s\n' "$updated" > "$f"
+    [[ -n "${picked[0]}" ]] && ok "  opus   -> ${picked[0]}"
+    [[ -n "${picked[1]}" ]] && ok "  sonnet -> ${picked[1]}"
+    [[ -n "${picked[2]}" ]] && ok "  haiku  -> ${picked[2]}"
+    return 0
+}
+
 # Pick which backend bare `cl` uses. Offers exactly the profiles that are now on
 # disk, so the list can never point at a backend the user did not install.
 choose_default_profile() {
@@ -1964,6 +2133,7 @@ backend_setup_hints() {
 
     if ! command -v jq &>/dev/null; then
         echo "  $step. Backends other than 'claude' need a login and an API key before 'cl' works — see docs/BACKENDS.md"
+        echo "      除 'claude' 外的后端都需要先登录并填入 API key，'cl' 才能用 —— 见 docs/BACKENDS.zh-CN.md"
         return 0
     fi
 
@@ -1980,10 +2150,12 @@ backend_setup_hints() {
     [[ -f "$CLAUDE_DIR/default-profile" ]] && default_profile=$(cat "$CLAUDE_DIR/default-profile")
 
     echo "  $step. Finish setting up the backend(s) you installed:"
+    echo "      完成已安装后端的配置（每个后端按 1/2/3 三步走）:"
     local bin cand hint fields k
     for name in "${pending[@]}"; do
         f="$dst_dir/$name.json"
-        echo "     $name — $(jq -r '.label // empty' "$f" 2>/dev/null)"
+        echo ""
+        echo "     [$name] $(jq -r '.label // empty' "$f" 2>/dev/null)"
 
         # Same resolution as claude.zsh: first candidate on PATH wins; when none
         # is installed, show how to get it and leave {bin} as <binary>.
@@ -1994,19 +2166,24 @@ backend_setup_hints() {
         done < <(jq -r '.service.bins[]? // empty' "$f" 2>/dev/null)
         if [[ -z "$bin" ]]; then
             hint=$(jq -r '.service.installHint // empty' "$f" 2>/dev/null)
-            [[ -n "$hint" ]] && echo "       install: $hint"
+            [[ -n "$hint" ]] && echo "       1. install / 安装:  $hint"
             bin="<binary>"
         fi
 
         hint=$(jq -r '.service.loginHint // empty' "$f" 2>/dev/null)
-        [[ -n "$hint" ]] && echo "       login:   ${hint//\{bin\}/$bin}"
+        [[ -n "$hint" ]] && echo "       2. login   / 登录:  ${hint//\{bin\}/$bin}"
 
         fields=""
         while IFS= read -r k; do
             [[ -z "$k" ]] && continue
             fields="${fields:+$fields, }.env.$k"
         done < <(profile_placeholder_keys "$f")
-        echo "       key:     paste into ${f/#$HOME/~}  ->  $fields"
+        echo "       3. key     / 密钥:  edit ${f/#$HOME/~}  ->  $fields"
+        echo "                           把上一步拿到的凭证填进这个文件的对应字段"
+
+        # No #anchor: GitHub slugifies "### `ccr` — one /model list…" into
+        # #ccr--one-model-list-across-providers, so a bare #$name would 404.
+        echo "       4. guide   / 详细步骤:  docs/BACKENDS.md  (中文: docs/BACKENDS.zh-CN.md)"
     done
 
     if [[ -n "$default_profile" ]]; then
@@ -2016,7 +2193,31 @@ backend_setup_hints() {
                 ;;
         esac
     fi
-    echo "     Full details: docs/BACKENDS.md"
+    echo ""
+    echo "     Nothing here is optional — a backend stays unusable until all three are done."
+    echo "     三步缺一不可，任何一步没做，对应的 cl_<backend> 都不能用。"
+    return 0
+}
+
+# Lists every cl_* launcher the config exposes, so users know what they can run
+# right after install. Static by design — command names track the fixed profile
+# set (ccr/glm/gpt/claude); models reflect what each backend injects today.
+# Readers are pointed at docs/BACKENDS.md for the authoritative model list.
+cl_commands_hint() {
+    local step="$1"
+    echo "  $step. Launchers — every 'cl_*' starts Claude Code against one backend:"
+    echo "      启动器——每个 cl_* 命令对应一个后端，直接进入 Claude Code："
+    echo "       cl_claude / cl_claude_auto   官方 Claude 订阅             -> Opus / Sonnet / Haiku"
+    echo "       cl_glm    / cl_glm_auto      智谱 GLM (BigModel)         -> glm-5.2 / glm-5-turbo / glm-4.7"
+    echo "       cl_gpt    / cl_gpt_auto      ChatGPT 订阅 (CLIProxyAPI)  -> GPT/Codex (由代理暴露的模型决定)"
+    echo "       cl_ccr    / cl_ccr_auto      CCR gateway                 -> GLM + GPT 合并成一个 /model 列表"
+    echo "       cl / cl_auto                 走默认 profile (= cl_switch 设的那个，初始为 claude)"
+    echo "       cl_switch [name]             切换 / 查看默认 profile"
+    echo "       cl_profiles                  列出全部 profile"
+    echo "       cl_stop [--all]              停掉本启动器拉起的 service"
+    echo "      '_auto' 后缀 = 自动带 --dangerously-skip-permissions（免确认，仅信任环境用）。"
+    echo "      The '_auto' suffix auto-adds --dangerously-skip-permissions (no prompts; trusted envs only)."
+    echo "      Models shown in /model depend on each backend — see docs/BACKENDS.md  (中文: docs/BACKENDS.zh-CN.md)"
     return 0
 }
 
@@ -2878,10 +3079,25 @@ main() {
     echo "  $((step++)). Restart Claude Code for changes to take effect"
     echo "  $((step++)). Customize CLAUDE.md for your specific projects"
     shell_wrapper_source_hint "$step" && step=$((step + 1))
-    backend_setup_hints "$step" && step=$((step + 1))
     if ! $INSTALL_LARK; then
-        echo "  $((step++)). Lark/Feishu MCP is off by default. To add it: claude mcp add --scope user --transport stdio lark-mcp -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET>"
+        echo "  $((step++)). Lark/Feishu MCP is off by default (needs a Feishu app you create yourself)."
+        echo "      飞书 MCP 默认关闭（需要你自己在开放平台建一个应用）。"
+        echo "       1. app / 建应用:  https://open.feishu.cn/  ->  开发者后台  ->  创建企业自建应用"
+        echo "       2. key / 取凭证:  应用左栏「凭证与基础信息」里的 App ID (cli_...) 和 App Secret"
+        echo "       3. 权限 / scopes: 「权限管理 -> 开通权限」。免审权限即时生效；"
+        echo "                          需审核权限还要「版本管理与发布 -> 创建版本 -> 申请线上发布」+ 管理员审批"
+        echo "       4. add / 添加:"
+        echo "            claude mcp add lark-mcp --scope user -- \\"
+        echo "              npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET> -t $LARK_MCP_PRESET"
+        echo "          The '--' is required: 'claude mcp add' also uses -s (for --scope) and would eat your secret."
+        echo "          '--' 不能省：claude mcp add 自己也用 -s（表示 --scope），会把你的 secret 吃掉。"
+        echo "          '-t $LARK_MCP_PRESET' keeps the tool list small; the default preset can blow the context window."
+        echo "          '-t $LARK_MCP_PRESET' 限制暴露的工具数量；默认预设会撑爆上下文。"
+        echo "       5. check / 验证:  claude mcp list      # expect 'Connected' / 期待显示已连接"
+        echo "       Full guide / 完整指引: docs/LARK-MCP.md  (中文: docs/LARK-MCP.zh-CN.md)"
     fi
+    backend_setup_hints "$step" && step=$((step + 1))
+    cl_commands_hint "$step"
     echo ""
 }
 

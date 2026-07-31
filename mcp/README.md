@@ -21,10 +21,21 @@ roughly 1 GB of RAM. Add it explicitly only if you use it.
 ./install.sh --mcp
 
 # Lark/Feishu is opt-in — pick it in the interactive selector, or add manually:
-claude mcp add --scope user --transport stdio lark-mcp -- npx -y @larksuiteoapi/lark-mcp mcp -a YOUR_APP_ID -s YOUR_APP_SECRET
+claude mcp add lark-mcp --scope user -- npx -y @larksuiteoapi/lark-mcp mcp -a YOUR_APP_ID -s YOUR_APP_SECRET -t preset.light
 ```
 
 Replace `YOUR_APP_ID` and `YOUR_APP_SECRET` with your Feishu app credentials ([open.feishu.cn](https://open.feishu.cn/)).
+
+Two details that bite people: the `--` is required, because `claude mcp add` also
+uses `-s` (for `--scope`) and would otherwise swallow your app secret; and
+`-t preset.light` keeps the exposed tool list small, since the package's default
+preset is large enough that upstream's own FAQ lists "token limit exceeded" as a
+known symptom.
+
+**Getting credentials, granting permissions, app vs user identity, and the
+common failure modes are covered step by step in
+[docs/LARK-MCP.md](../docs/LARK-MCP.md) — 中文版见
+[docs/LARK-MCP.zh-CN.md](../docs/LARK-MCP.zh-CN.md).**
 
 To enable Lark via the always-on shell wrapper instead, add a `lark-mcp` entry to
 `~/.claude/mcp/mcp-servers.json` with your real credentials.

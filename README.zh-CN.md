@@ -142,7 +142,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 | 项目 | 来源 | 功能 | 默认 |
 |------|------|------|------|
 | **Playwright MCP** | `mcp/` | 浏览器自动化（`@playwright/mcp`） | 开启 |
-| [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | 飞书 / Lark 集成 — 可选；需 Feishu App ID/Secret，每会话约占用 1 GB 内存 | **关闭** |
+| [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | 飞书 / Lark 集成 — 可选；需 Feishu App ID/Secret，每会话约占用 1 GB 内存。分步指引：[docs/LARK-MCP.zh-CN.md](docs/LARK-MCP.zh-CN.md) | **关闭** |
 
 ## 模型后端 —— 首次使用前的配置
 

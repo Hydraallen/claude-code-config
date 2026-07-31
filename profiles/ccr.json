@@ -1,7 +1,13 @@
 {
   "label": "CCR gateway (GLM + GPT merged into one /model list)",
-  "note": "claude-code-router v3 aggregates every configured provider behind one gateway, and CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY makes Claude Code list them all under /model as provider/model. CCR v3 stores its config in ~/.claude-code-router/config.sqlite, so providers, the client key, and the agent profile MUST be created once by hand in the web UI (ccr ui, http://127.0.0.1:3458) — an installer cannot write them. Paste the generated client key into ANTHROPIC_AUTH_TOKEN below.",
-  "credentialKeys": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"],
+  "note": "claude-code-router v3 aggregates every configured provider behind one gateway, and CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY makes Claude Code list them all under /model as 'provider/model'. CCR v3 stores its config in ~/.claude-code-router/config.sqlite, so providers and the client key MUST be created once by hand in the web UI (ccr ui, http://127.0.0.1:3458) — an installer cannot write them. TWO THINGS BITE HERE. (1) KEY: use the key named 'Local Gateway' (sk-ccr-...), NOT a 'Profile: <agent>' key. Profile keys are scoped to CCR's own launch path and return 401 on GET /v1/models — which is exactly the request gateway model discovery makes at startup, and a 401 there leaves Claude Code with no model metadata at all. (2) CONTEXT: CCR reports every model with context_length: null, so discovery never supplies a context window and Claude Code falls back to a small default — with a large startup context that is an immediate 'Context limit reached'. CLAUDE_CODE_MAX_CONTEXT_TOKENS below is therefore mandatory, not a tuning knob. It is one client-wide value, not per-slot, and it is set to 1000000 to match glm-5.2. CAVEAT: the Codex models (gpt-5.6-*, gpt-5.x, ~272K) and glm-4.7 / glm-5-turbo (200K) are far smaller, so a session routed to those will grow the context past what the server accepts and fail mid-run — auto-compact will not rescue you. Lower this to 200000 if you route to them often. Model slots are deliberately left unset: CCR ids embed your own provider display name (e.g. 'Zhipu AI (China) - Coding Plan/glm-5.2'), so they cannot be shipped in a template — install.sh fills them by querying the live gateway, and until they are set the launcher passes no --model and you pick per session with /model.",
+  "credentialKeys": [
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+  ],
   "service": {
     "label": "claude-code-router",
     "health": "http://127.0.0.1:3456/health",
@@ -10,13 +16,15 @@
     "timeoutSec": 30,
     "logName": "ccr.log",
     "installHint": "npm install -g @musistudio/claude-code-router    # requires Node.js >= 22",
-    "loginHint": "ccr ui    # admin UI on :3458 — add providers, create a client API key, then set that key here"
+    "loginHint": "ccr ui    # admin UI on :3458 — add providers, then copy the 'Local Gateway' key (sk-ccr-...), NOT a 'Profile: ...' key"
   },
   "unset": [],
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:3456",
-    "ANTHROPIC_AUTH_TOKEN": "YOUR_CCR_CLIENT_KEY",
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_CCR_LOCAL_GATEWAY_KEY",
     "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1000000",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000",
     "API_TIMEOUT_MS": "3000000"
   }
 }

@@ -1,5 +1,25 @@
 # 更新日志
 
+## [2.13.0] - 2026-07-31
+
+### 新功能
+- **安装器最难懂的两个「下一步」现在是分步 + 中英对照的。** 第 4 步（完成后端配置）对每个待配置 profile 打印带编号的 `install / 登录 / 密钥 / 详细步骤` 区块，取代原来三行没有标号的提示；第 5 步（飞书 MCP）把从建应用到验证连接的整条路径全部列出，每一行中英各一句。
+- **新增 `docs/LARK-MCP.md` 与 `docs/LARK-MCP.zh-CN.md`** —— 覆盖开发者后台导航、权限模型、应用身份 vs 用户身份、工具预设，以及各种失败模式。
+- **新增 `docs/BACKENDS.zh-CN.md`** —— `docs/BACKENDS.md` 的完整中文镜像；后者本身也把 `ccr` 和 `gpt` 两节重写成了带真实 UI 标签、端口和路径的分步教程。
+- **飞书 MCP 现在带 `-t preset.light` 注册。** 不写 `-t` 时包会暴露 `preset.default`，而上游 FAQ 自己就把「启动 MCP 服务后提示 token limit exceeded」列为已知问题，给出的解法正是这个参数。预设值集中在 `LARK_MCP_PRESET` 一个全局变量里。
+- **`scripts/check-readme-sync.sh` 的链接检查现在是真的在跑。** 它原本用 `grep -oP`，而 BSD grep 没有 `-P`，所以在 macOS 上该命令直接报错，`wc -l` 数到空输出，`0 == 0` 无条件通过。改写成 ERE 后，现在真实比对两侧各 51 条链接。
+
+### 设计理由
+- **选择把 `--config` 写进文档，而不是删掉它。** `profiles/gpt.json` 传的是 `--config "$HOME/.cli-proxy-api/config.yaml"`，配上 `brew install` 的安装提示看着像个 bug —— 因为 Homebrew 通过 ldflag 把默认配置烤成了 `$(brew --prefix)/etc/cliproxyapi.conf`。读完配置解析链才定论：省掉 `--config` 对 Homebrew 安全，对源码编译不安全（会退化成 `$CWD/config.yaml`），对 AUR 无法验证。显式传参在四种情况下都正确，所以参数保留，改由文档告诉你去创建那个确切的文件。
+- **修正了旧 `ccr` 文档的两处错误。** v3 既没有 `ccr status` 也没有 `ccr restart`；v1 那套 `default` / `background` / `think` / `longContext` 路由块已经不存在。文档现在也改为让你直接选内置预设 `Zhipu AI (China) - Coding Plan`，而不是手敲 endpoint，并标明 Agent Profiles 是可选的 —— 我们的启动器自己设置 `ANTHROPIC_BASE_URL`，根本不用它。
+- **安装器的文档指引不带 `#anchor`。** GitHub 会把 ``### `ccr` — one /model list…`` 转成 `#ccr--one-model-list-across-providers`，所以拼出来的 `#ccr` 会 404。指引只给文件名。
+
+### 注意事项
+- **CLIProxyAPI 是 fail open 的，文档现在用粗体写明了这一点。** 如果 `api-keys` 为空或缺失，它会直接注销鉴权 provider，此后每个 `/v1/*` 路由接受任何请求 —— 任意 token，或者干脆没有 token。再叠加默认的 `host: ""` 绑定全部网卡，按旧那三行说明配置、又跳过填 key 那步的用户，等于在局域网上挂了一个不需要鉴权、直通自己 ChatGPT 订阅的代理。现在文档给出的配置把这两项都显式设死。
+- **`/healthz` 是存活探针，不是就绪探针。** 它确实存在且无需鉴权，但只要监听端口起来就返回 200，与凭证是否加载无关。健康检查通过而请求全失败，说明登录那步没生效。
+- **`@larksuiteoapi/lark-mcp` 已经一年没更新**（`0.5.1`，2025 年 8 月），且自己仍标注为 beta。文档锁定版本号正是因为这个。
+- **Windows 侧无对应改动。** `install.ps1` 不含 shell wrapper、不含 profiles、也不注册 MCP，因此这批改动没有需要同步的 PowerShell 面。
+
 ## [2.12.0] - 2026-07-31
 
 ### 新功能

@@ -438,10 +438,31 @@ _cl_run() {
     esac
   done
 
+  # A gateway-discovery backend (CCR and friends) publishes its models as
+  # "provider/model", so claude's own aliases resolve to nothing unless the profile
+  # maps them via ANTHROPIC_DEFAULT_<SLOT>_MODEL. Injecting `--model opus` there
+  # sends a model id the gateway has never heard of. When the slot we were about to
+  # default to is empty, pass no --model at all and let the user pick from the
+  # discovered list with /model.
+  #
+  # Only the *default* is suppressed: an explicit `cl_ccr --model 'Codex API/gpt-5.6-sol'`
+  # never reaches this branch, and a profile with no discovery flag is unaffected,
+  # so `--model opus` still means opus on the native and GLM backends.
   local -a extra_args=()
   if [[ -z "$model" ]]; then
     model="${CL_MODEL:-opus}"
-    extra_args+=(--model "$model")
+    local slot_var=""
+    case "$model" in
+      opus)   slot_var=ANTHROPIC_DEFAULT_OPUS_MODEL ;;
+      sonnet) slot_var=ANTHROPIC_DEFAULT_SONNET_MODEL ;;
+      haiku)  slot_var=ANTHROPIC_DEFAULT_HAIKU_MODEL ;;
+    esac
+    if [[ -n "${CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY:-}" && -n "$slot_var" && -z "${(P)slot_var:-}" ]]; then
+      print -u2 "$tag: gateway backend has no $slot_var — starting without --model; pick one with /model"
+      model=""
+    else
+      extra_args+=(--model "$model")
+    fi
   fi
   if [[ "$skip_permissions" == "true" ]]; then
     extra_args+=(--dangerously-skip-permissions)
@@ -452,6 +473,8 @@ _cl_run() {
   # alias is printed as-is.
   local shown="$model"
   case "$model" in
+    # The suppressed-default case above; claude picks, so there is nothing to report.
+    "")     shown="(claude's own default — choose with /model)" ;;
     opus)   [[ -n "${ANTHROPIC_DEFAULT_OPUS_MODEL:-}"   ]] && shown="$model -> $ANTHROPIC_DEFAULT_OPUS_MODEL" ;;
     sonnet) [[ -n "${ANTHROPIC_DEFAULT_SONNET_MODEL:-}" ]] && shown="$model -> $ANTHROPIC_DEFAULT_SONNET_MODEL" ;;
     haiku)  [[ -n "${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}"  ]] && shown="$model -> $ANTHROPIC_DEFAULT_HAIKU_MODEL" ;;

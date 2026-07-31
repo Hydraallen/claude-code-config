@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.13.0] - 2026-07-31
+
+### Features
+- **The installer's two hardest "next steps" are now step-by-step and bilingual.** Step 4 (finish setting up a backend) prints a numbered `install / 登录 / 密钥 / 详细步骤` block per pending profile instead of three unlabelled lines; step 5 (Lark MCP) prints the whole path from creating the Feishu app to verifying the connection, every line in English and Chinese.
+- **`docs/LARK-MCP.md` and `docs/LARK-MCP.zh-CN.md`** — new walkthroughs covering console navigation, the permission model, app vs user identity, tool presets, and the failure modes.
+- **`docs/BACKENDS.zh-CN.md`** — full Chinese mirror of `docs/BACKENDS.md`, which itself gained real step-by-step `ccr` and `gpt` sections with actual UI labels, ports, and paths.
+- **Lark MCP is now registered with `-t preset.light`.** Without `-t` the package exposes `preset.default`, and upstream's own FAQ lists "token limit exceeded after starting the MCP service" as a known symptom whose documented fix is exactly this flag. The preset is a single `LARK_MCP_PRESET` global.
+- **`scripts/check-readme-sync.sh` actually checks links now.** It used `grep -oP`; BSD grep has no `-P`, so on macOS the command errored, `wc -l` counted the empty output, and `0 == 0` passed unconditionally. Rewritten as ERE — it now compares 51 links per side.
+
+### Design Rationale
+- **Documented `--config` rather than removing it.** `profiles/gpt.json` passes `--config "$HOME/.cli-proxy-api/config.yaml"`, which looked wrong next to a `brew install` hint, since Homebrew bakes its default to `$(brew --prefix)/etc/cliproxyapi.conf` via an ldflag. Reading the config-resolution ladder settled it: omitting `--config` is safe for Homebrew, unsafe for a source build (falls back to `$CWD/config.yaml`), and unverifiable for AUR. Passing it explicitly is correct in every case, so the flag stays and the docs now tell you to create that exact file.
+- **Corrected two things the old `ccr` docs got wrong.** v3 has no `ccr status` and no `ccr restart`, and the v1 `default` / `background` / `think` / `longContext` routing block no longer exists. The docs also now name the built-in `Zhipu AI (China) - Coding Plan` preset rather than having you hand-type an endpoint, and mark Agent Profiles as optional — our launcher sets `ANTHROPIC_BASE_URL` itself and never uses them.
+- **No `#anchor` in the installer's doc pointers.** GitHub slugifies ``### `ccr` — one /model list…`` into `#ccr--one-model-list-across-providers`, so a generated `#ccr` would 404. The pointer names the file only.
+
+### Notes & Caveats
+- **CLIProxyAPI fails open, and the docs now say so in bold.** If `api-keys` is empty or absent it unregisters its auth provider entirely, and every `/v1/*` route then accepts any request with any token or none. Combined with the default `host: ""` binding all interfaces, following the old three-line setup and skipping the key step left an unauthenticated proxy onto a ChatGPT subscription reachable from the LAN. The documented config now sets both explicitly.
+- **`/healthz` is a liveness probe, not a readiness probe.** It is real and unauthenticated, and returns 200 as soon as the listener binds — regardless of whether credentials loaded. A green health check with failing requests means the login step didn't take.
+- **`@larksuiteoapi/lark-mcp` is a year stale** (`0.5.1`, August 2025) and still self-describes as beta. The docs pin the version for that reason.
+- **Windows parity unchanged.** `install.ps1` ships no shell wrapper, no profiles, and no MCP registration, so none of this has a PowerShell surface to mirror into.
+
 ## [2.12.0] - 2026-07-31
 
 ### Features

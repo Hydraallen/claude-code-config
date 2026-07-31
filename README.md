@@ -142,7 +142,7 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | Item | Source | What It Does | Default |
 |------|--------|--------------|---------|
 | **Playwright MCP** | `mcp/` | Browser automation via `@playwright/mcp` | on |
-| [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | Feishu / Lark integration — opt-in; needs Feishu App ID/Secret and uses ~1 GB RAM/session | **off** |
+| [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | Feishu / Lark integration — opt-in; needs Feishu App ID/Secret and uses ~1 GB RAM/session. Walkthrough: [docs/LARK-MCP.md](docs/LARK-MCP.md) | **off** |
 
 ## Model Backends — First-Run Setup
 

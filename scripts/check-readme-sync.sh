@@ -20,6 +20,9 @@ compare() {
 compare "Headings"    "$(grep -c '^#' "$EN")" "$(grep -c '^#' "$ZH")"
 compare "Code blocks" "$(grep -c '^\`\`\`' "$EN")" "$(grep -c '^\`\`\`' "$ZH")"
 compare "Table rows"  "$(grep -c '^|' "$EN")" "$(grep -c '^|' "$ZH")"
-compare "Links"       "$(grep -oP '\[.*?\]\(.*?\)' "$EN" | wc -l)" "$(grep -oP '\[.*?\]\(.*?\)' "$ZH" | wc -l)"
+# ERE, not -oP: BSD grep on macOS has no -P, so the old PCRE version errored out
+# and `wc -l` counted the empty output as 0 for both files — meaning this check
+# passed unconditionally on every Mac. [^]]+ / [^)]+ stand in for the lazy quantifiers.
+compare "Links"       "$(grep -oE '\[[^]]+\]\([^)]+\)' "$EN" | wc -l)" "$(grep -oE '\[[^]]+\]\([^)]+\)' "$ZH" | wc -l)"
 
 $ok && echo "All checks passed." || { echo "Structural differences found."; exit 1; }
