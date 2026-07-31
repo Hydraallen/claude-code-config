@@ -144,6 +144,22 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 | **Playwright MCP** | `mcp/` | 浏览器自动化（`@playwright/mcp`） | 开启 |
 | [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | 飞书 / Lark 集成 — 可选；需 Feishu App ID/Secret，每会话约占用 1 GB 内存 | **关闭** |
 
+## 模型后端 —— 首次使用前的配置
+
+安装器会写入 `~/.claude/profiles/*.json`，但除 `claude` 之外的每个后端都需要先登录、或粘贴一份凭证，`cl_<backend>` 才能用。完整说明见 [docs/BACKENDS.md](docs/BACKENDS.md)。
+
+| 后端 | 安装 | 登录 | 凭证填到哪里 |
+|------|------|------|--------------|
+| `claude` | — | 原生 OAuth | 无需配置 |
+| `glm` | —（厂商托管的 endpoint） | — | 你的 BigModel API key → `~/.claude/profiles/glm.json` 的 `.env.ANTHROPIC_AUTH_TOKEN` |
+| `gpt` | `brew install cliproxyapi` | `cli-proxy-api --codex-login`（一次性浏览器授权） | `~/.cli-proxy-api/config.yaml` 中的一条 `api-keys` → `~/.claude/profiles/gpt.json` 的 `.env.ANTHROPIC_AUTH_TOKEN` |
+| `ccr` | `npm install -g @musistudio/claude-code-router`（需要 Node.js >= 22） | `ccr ui` —— 管理界面在 `http://127.0.0.1:3458` | 在 UI 中生成的 CCR client key → `~/.claude/profiles/ccr.json` 的 `.env.ANTHROPIC_AUTH_TOKEN` |
+
+- **`gpt` 有真实的封号风险。** 它通过逆向出来的 OAuth 流程复用消费级 ChatGPT 订阅；使用前请先读 [docs/BACKENDS.md](docs/BACKENDS.md#gpt--chatgpt-pluspro-subscription) 里的完整警告。
+- **`ccr` 无法自动化。** CCR v3 把配置存在 SQLite 里，因此 providers、client key、agent profile 都必须在 web UI 里手工创建一次。
+
+配好之后，`cl_glm` / `cl_gpt` / `cl_ccr` 直接以对应后端启动，`cl_switch <name>` 则把它设为裸 `cl` 的默认后端。
+
 ## 目录结构
 
 ```
@@ -200,8 +216,8 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 
 本 Fork 在上游基础上新增了以下自定义功能：
 
-- **Shell Wrapper**（`claude.zsh`）：`cl`/`cl_auto`/`cl_switch` 命令，支持双后端路由（Claude API + GLM API）
-- **GLM 后端**（`glm-env.json`）：GLM API 凭证模板（智谱大模型）
+- **Shell Wrapper**（`claude.zsh`）：`cl`/`cl_auto`/`cl_switch`/`cl_profiles`，并为每个 profile 自动生成 `cl_<backend>`
+- **模型后端**（`profiles/*.json`）：每个后端一个 JSON —— `claude`（原生 OAuth）、`glm`（智谱 Coding Plan）、`gpt`（ChatGPT 订阅经 CLIProxyAPI）、`ccr`（claude-code-router 网关，把多家模型合并进同一个 `/model` 列表）。往 `~/.claude/profiles/` 丢一个新 JSON 即可新增后端，无需改代码；声明了本地代理的 profile 会按需拉起代理，已在运行则直接复用。详见 [docs/BACKENDS.md](docs/BACKENDS.md)
 - **搜索 Agent**（`agents/search.md`）：Jeff，只读网络搜索专家
 - **系统提示**（`system-prompt.txt`）：自定义行为准则
 - **MCP Playwright**：保留 Playwright MCP 服务器配置

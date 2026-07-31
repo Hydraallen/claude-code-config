@@ -338,6 +338,7 @@ REVIEW_CODEX=false
 SELECTED_SKILLS=()
 SELECTED_PLUGINS=()
 SELECTED_DEEPXIV_SKILLS=()
+SELECTED_PROFILES=()
 DEEPXIV_KNOWN_SKILLS=("deepxiv-cli" "deepxiv-trending-digest" "deepxiv-baseline-table")
 
 # Plugin reconciliation state (populated at runtime; also set by tests as
@@ -525,7 +526,17 @@ Search agent|Jeff read-only web search agent|1|agents
 Shell wrapper|cl/cl_auto zsh functions + system prompt|1|shell-wrapper
 Co-authored-by|Add Claude as co-author in commits|0|co-author")
 
-    # Group 1: Language Rules
+    # Group 1: Model Backends
+    # Each backend is a profile JSON consumed by claude.zsh. Installing a profile
+    # is free — it only writes a template. The proxy binaries a profile needs are
+    # fetched lazily by the launcher on first use, not here.
+    GROUP_LABELS+=("Model Backends")
+    GROUP_HINTS+=("cl_<name> per backend; credentials are never overwritten on upgrade")
+    GROUP_ITEMS+=("GLM Coding Plan|Zhipu BigModel, Anthropic-compatible endpoint|1|backend-glm
+ChatGPT via CLIProxyAPI|Reuse a ChatGPT Plus/Pro subscription (Codex OAuth)|1|backend-gpt
+CCR gateway|claude-code-router: GLM + GPT merged into one /model list|1|backend-ccr")
+
+    # Group 2: Language Rules
     GROUP_LABELS+=("Language Rules")
     GROUP_HINTS+=("only install what your projects need")
     GROUP_ITEMS+=("Python rules|PEP 8, pytest, type hints, bandit|0|rules-python
@@ -994,6 +1005,10 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
             agents)                 INSTALL_AGENTS=true ;;
             shell-wrapper)          INSTALL_SHELL_WRAPPER=true ;;
             co-author)              CO_AUTHOR=true ;;
+            # Model backends (profile JSON consumed by claude.zsh)
+            backend-glm)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("glm") ;;
+            backend-gpt)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("gpt") ;;
+            backend-ccr)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("ccr") ;;
             # Language rules
             rules-python)           INSTALL_RULES=true; RULE_LANGS+=("python") ;;
             rules-ts)               INSTALL_RULES=true; RULE_LANGS+=("typescript") ;;
@@ -1615,8 +1630,8 @@ install_shell_wrapper() {
     if $DRY_RUN; then
         info "Would copy: claude.zsh -> $target"
         info "Would copy: system-prompt.txt -> $CLAUDE_DIR/system-prompt.txt"
-        info "Would install glm-env.json (if absent) or merge model defaults into existing (credentials preserved)"
-        info "Would prompt for default API backend (claude or glm)"
+        info "Would install profiles/*.json (credentials preserved on upgrade)"
+        info "Would prompt for the default backend among the installed profiles"
     else
         cp "$SCRIPT_DIR/claude.zsh" "$target"
         ok "Shell wrapper installed to $target"
@@ -1634,66 +1649,336 @@ install_shell_wrapper() {
                 ok "system-prompt.txt installed"
             fi
         fi
-        # Install glm-env.json template, or merge updated model defaults into an
-        # existing file while preserving the user's credentials.
-        if [[ -f "$SCRIPT_DIR/glm-env.json" ]]; then
-            if [[ ! -f "$CLAUDE_DIR/glm-env.json" ]]; then
-                cp "$SCRIPT_DIR/glm-env.json" "$CLAUDE_DIR/glm-env.json"
-                ok "glm-env.json template installed (edit with your GLM credentials)"
-            elif command -v jq &>/dev/null; then
-                # Take all model fields from the template; keep local token/base URL.
-                local merged
-                merged=$(jq -n \
-                    --slurpfile ex "$CLAUDE_DIR/glm-env.json" \
-                    --slurpfile tpl "$SCRIPT_DIR/glm-env.json" \
-                    '$tpl[0] * {
-                        ANTHROPIC_AUTH_TOKEN: ($ex[0].ANTHROPIC_AUTH_TOKEN // $tpl[0].ANTHROPIC_AUTH_TOKEN),
-                        ANTHROPIC_BASE_URL:   ($ex[0].ANTHROPIC_BASE_URL   // $tpl[0].ANTHROPIC_BASE_URL)
-                    }' 2>/dev/null)
-                if [[ -z "$merged" ]]; then
-                    warn "glm-env.json could not be parsed by jq — leaving it untouched"
-                elif [[ "$(printf '%s' "$merged" | jq -S .)" == "$(jq -S . "$CLAUDE_DIR/glm-env.json")" ]]; then
-                    ok "glm-env.json model defaults already up to date"
-                else
-                    cp "$CLAUDE_DIR/glm-env.json" "$CLAUDE_DIR/glm-env.json.bak"
-                    printf '%s\n' "$merged" > "$CLAUDE_DIR/glm-env.json"
-                    ok "glm-env.json model defaults updated (credentials preserved, backup: glm-env.json.bak)"
-                fi
-            else
-                warn "glm-env.json exists but jq not found — cannot merge model updates. Install jq to enable auto-update."
-            fi
-        fi
+        install_profiles
 
         # Choose default profile
-        local default_profile="claude"
-        if [[ ! -f "$CLAUDE_DIR/default-profile" ]]; then
-            if can_interact; then
-                echo ""
-                info "Which API backend should 'cl' use by default?"
-                echo "  1) Claude API (requires Claude subscription)"
-                echo "  2) GLM API   (requires GLM API key)"
-                local choice=""
-                if [[ -t 0 ]]; then
-                    echo -n "  Choose [1]: "
-                    read -r choice
-                else
-                    echo -n "  Choose [1]: " > /dev/tty
-                    read -r choice </dev/tty
-                fi
-                case "$choice" in
-                    2) default_profile="glm" ;;
-                    *) default_profile="claude" ;;
-                esac
-            fi
-            echo "$default_profile" > "$CLAUDE_DIR/default-profile"
-            ok "Default profile set to: $default_profile"
-        else
-            ok "default-profile already exists ($(cat "$CLAUDE_DIR/default-profile")), keeping"
-        fi
+        choose_default_profile
 
         info "Add to your .zshrc: source ~/.claude/claude.zsh"
-        info "Available commands: cl, cl_auto, cl_claude, cl_claude_auto, cl_glm, cl_glm_auto, cl_switch"
+        info "Commands: cl, cl_auto, cl_switch <name>, cl_profiles, and cl_<backend>/cl_<backend>_auto per profile"
     fi
+}
+
+# Fields in the user's copy ($2) that diverge from the template it was installed
+# from ($1), excluding everything the template lists in credentialKeys (those are
+# carried over, never reset). env entries are reported as "env.KEY", top-level
+# fields by their own name. Prints one field per line; empty output means the
+# file is a pristine template plus credentials.
+profile_user_edits() {
+    local base="$1" cur="$2"
+    jq -r -n --slurpfile b "$base" --slurpfile c "$cur" '
+        ($b[0].credentialKeys // []) as $cred
+        | def strip: (.env // {}) | with_entries(select(.key as $k | $cred | index($k) | not));
+          def top: del(.env);
+          ($b[0] | strip) as $be | ($c[0] | strip) as $ce
+        | ($b[0] | top) as $bt | ($c[0] | top) as $ct
+        | (($be + $ce) | keys_unsorted | map(select($be[.] != $ce[.])) | map("env." + .))
+          + (($bt + $ct) | keys_unsorted | map(select($bt[.] != $ct[.])))
+        | .[]' 2>/dev/null || true
+}
+
+# Install ~/.claude/profiles/*.json. "claude" is always installed — it is the
+# zero-config native backend and the fallback for an unknown default-profile.
+# On upgrade the template supplies fresh model/service defaults while every key
+# listed in the profile's own credentialKeys is carried over from the user's
+# copy, so an API key survives any number of re-installs. A copy of the template
+# each profile was installed from is kept in profiles/.baseline/ so a re-install
+# can tell a hand-edit apart from an upstream template change and warn about the
+# fields it is about to reset.
+install_profiles() {
+    local src_dir="$SCRIPT_DIR/profiles"
+    local dst_dir="$CLAUDE_DIR/profiles"
+    [[ -d "$src_dir" ]] || return 0
+
+    # `${a[@]+...}` guards the empty-array expansion, which is fatal under set -u
+    # on the bash 3.2 that ships with macOS.
+    local -a wanted=()
+    local p
+    for p in claude ${SELECTED_PROFILES[@]+"${SELECTED_PROFILES[@]}"}; do
+        case " ${wanted[*]-} " in *" $p "*) continue ;; esac
+        wanted+=("$p")
+    done
+
+    if $DRY_RUN; then
+        info "Would install profiles: ${wanted[*]} -> $dst_dir (credentials preserved on upgrade)"
+        info "Would back up and warn about any hand-edited non-credential field a template refresh resets"
+        if [[ -f "$CLAUDE_DIR/glm-env.json" && ! -f "$dst_dir/glm.json" ]]; then
+            if command -v jq &>/dev/null; then
+                info "Would migrate legacy glm-env.json -> $dst_dir/glm.json"
+            else
+                info "Would skip profile 'glm' (jq missing, cannot migrate glm-env.json without shadowing it)"
+            fi
+        fi
+        return 0
+    fi
+
+    mkdir -p "$dst_dir"
+    local base_dir="$dst_dir/.baseline"
+    mkdir -p "$base_dir"
+
+    # One-time migration of the pre-2.11 single-backend layout. The old flat file
+    # is kept (renamed) rather than deleted so a downgrade can still find it.
+    # Without jq the token cannot be carried over, and writing the placeholder
+    # template would permanently shadow the legacy file in claude.zsh's lookup
+    # order — so glm is skipped entirely instead, leaving the working legacy
+    # file reachable.
+    local legacy="$CLAUDE_DIR/glm-env.json"
+    local skip_glm=false
+    if [[ -f "$legacy" && ! -f "$dst_dir/glm.json" ]]; then
+        if command -v jq &>/dev/null; then
+            local migrated
+            migrated=$(jq -n \
+                --slurpfile ex "$legacy" \
+                --slurpfile tpl "$src_dir/glm.json" \
+                '$tpl[0] | .env = (.env + (
+                    reduce ($tpl[0].credentialKeys // [])[] as $k ({};
+                        if ($ex[0][$k] // null) != null then . + {($k): $ex[0][$k]} else . end)
+                ))' 2>/dev/null)
+            if [[ -n "$migrated" ]]; then
+                printf '%s\n' "$migrated" > "$dst_dir/glm.json"
+                cp "$src_dir/glm.json" "$base_dir/glm.json"
+                mv "$legacy" "$legacy.migrated"
+                ok "Migrated glm-env.json -> profiles/glm.json (credentials preserved; old file kept as glm-env.json.migrated)"
+            else
+                skip_glm=true
+                warn "Could not migrate glm-env.json (jq failed to parse it) — skipping profile 'glm'"
+                warn "  $legacy is untouched and 'cl_glm' keeps reading it"
+                warn "  To finish by hand: cp $src_dir/glm.json $dst_dir/glm.json, then copy ANTHROPIC_AUTH_TOKEN from $legacy into its .env"
+            fi
+        else
+            skip_glm=true
+            warn "jq not found — cannot migrate $legacy to profiles/glm.json; skipping profile 'glm'"
+            warn "  $legacy is untouched and 'cl_glm' keeps reading it"
+            warn "  To finish: install jq and re-run this installer, or cp $src_dir/glm.json $dst_dir/glm.json and copy ANTHROPIC_AUTH_TOKEN from $legacy into its .env"
+        fi
+    fi
+
+    local name src dst merged edits backup
+    for name in "${wanted[@]}"; do
+        src="$src_dir/$name.json"
+        dst="$dst_dir/$name.json"
+        [[ -f "$src" ]] || { warn "No profile template named '$name' — skipping"; continue; }
+        [[ "$name" == "glm" ]] && $skip_glm && continue
+
+        if [[ ! -f "$dst" ]]; then
+            cp "$src" "$dst"
+            cp "$src" "$base_dir/$name.json"
+            ok "profile '$name' installed"
+            continue
+        fi
+
+        if ! command -v jq &>/dev/null; then
+            warn "profile '$name' exists but jq not found — leaving it untouched"
+            continue
+        fi
+
+        merged=$(jq -n \
+            --slurpfile ex "$dst" \
+            --slurpfile tpl "$src" \
+            '$tpl[0] | .env = (.env + (
+                reduce ($tpl[0].credentialKeys // [])[] as $k ({};
+                    ((($ex[0].env // $ex[0])[$k]) // null) as $v
+                    | if $v != null then . + {($k): $v} else . end)
+            ))' 2>/dev/null)
+
+        if [[ -z "$merged" ]]; then
+            warn "profile '$name' could not be parsed by jq — leaving it untouched"
+            continue
+        fi
+
+        if [[ "$(printf '%s' "$merged" | jq -S .)" == "$(jq -S . "$dst")" ]]; then
+            cp "$src" "$base_dir/$name.json"
+            ok "profile '$name' already up to date"
+            continue
+        fi
+
+        # Compare against the template this copy was installed from. Profiles
+        # installed before baselines existed fall back to the new template,
+        # which can attribute an upstream change to the user — an extra backup
+        # and warning, never a lost edit.
+        if [[ -f "$base_dir/$name.json" ]]; then
+            edits=$(profile_user_edits "$base_dir/$name.json" "$dst")
+        else
+            edits=$(profile_user_edits "$src" "$dst")
+        fi
+
+        if [[ -n "$edits" ]]; then
+            backup="$dst.$(date +%Y%m%d%H%M%S).bak"
+            cp "$dst" "$backup"
+            warn "profile '$name' had hand-edited fields, now reset to the repo template: $(printf '%s' "$edits" | tr '\n' ' ')"
+            warn "  previous file saved as ${backup##*/} — re-apply your changes from it"
+        fi
+        printf '%s\n' "$merged" > "$dst"
+        cp "$src" "$base_dir/$name.json"
+        ok "profile '$name' updated (credentials preserved)"
+    done
+}
+
+# Pick which backend bare `cl` uses. Offers exactly the profiles that are now on
+# disk, so the list can never point at a backend the user did not install.
+choose_default_profile() {
+    local profile_file="$CLAUDE_DIR/default-profile"
+
+    if [[ -f "$profile_file" ]]; then
+        ok "default-profile already exists ($(cat "$profile_file")), keeping"
+        return 0
+    fi
+
+    local -a avail=()
+    local f
+    for f in "$CLAUDE_DIR/profiles"/*.json; do
+        [[ -e "$f" ]] || continue
+        local base="${f##*/}"
+        avail+=("${base%.json}")
+    done
+    [[ ${#avail[@]} -eq 0 ]] && avail=("claude")
+
+    local default_profile="claude"
+    if can_interact && [[ ${#avail[@]} -gt 1 ]]; then
+        echo ""
+        info "Which backend should a bare 'cl' use by default?"
+        local i=1 n
+        for n in "${avail[@]}"; do
+            local label=""
+            command -v jq &>/dev/null && label=$(jq -r '.label // empty' "$CLAUDE_DIR/profiles/$n.json" 2>/dev/null)
+            printf '  %d) %-8s %s\n' "$i" "$n" "$label"
+            i=$((i + 1))
+        done
+        local choice=""
+        if [[ -t 0 ]]; then
+            echo -n "  Choose [1]: "
+            read -r choice
+        else
+            echo -n "  Choose [1]: " > /dev/tty
+            read -r choice </dev/tty
+        fi
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#avail[@]} )); then
+            default_profile="${avail[$((choice - 1))]}"
+        fi
+    fi
+
+    echo "$default_profile" > "$profile_file"
+    ok "Default profile set to: $default_profile"
+}
+
+# Credential keys of $1 whose value is still a YOUR_* placeholder. Keys that ship
+# with a real value (ANTHROPIC_BASE_URL) are therefore not reported, and a profile
+# with no credentialKeys at all (native "claude") yields nothing.
+profile_placeholder_keys() {
+    jq -r '. as $p
+        | (($p.credentialKeys // [])[]) as $k
+        | (($p.env // {})[$k] // "")
+        | select(type == "string" and startswith("YOUR_"))
+        | $k' "$1" 2>/dev/null || true
+}
+
+# None of the cl* commands exist until the user sources the wrapper themselves —
+# the installer never edits a shell rc file. The mid-install info line scrolls past
+# during a long run, so repeat it in the closing summary. $1 is the step number;
+# returns 1 without printing when the wrapper wasn't installed or the rc file
+# already sources it, so the caller keeps its numbering contiguous.
+shell_wrapper_source_hint() {
+    local step="$1"
+    $INSTALL_SHELL_WRAPPER || return 1
+
+    local wrapper="$CLAUDE_DIR/claude.zsh"
+    local line="source ${wrapper/#$HOME/~}"
+
+    if $DRY_RUN; then
+        echo "  $step. Would remind you to add '$line' to your ~/.zshrc (the installer never edits it)"
+        return 0
+    fi
+
+    # Matches `source ~/.claude/claude.zsh` and `. $HOME/.claude/claude.zsh` alike,
+    # ignoring commented-out lines. A missing .zshrc simply means "not set up yet".
+    local rc="$HOME/.zshrc"
+    if [[ -f "$rc" ]] && grep -qE '^[[:space:]]*(source|\.)[[:space:]]+[^#]*claude\.zsh' "$rc" 2>/dev/null; then
+        echo "  $step. Shell wrapper already sourced from ~/.zshrc — nothing to do"
+        return 0
+    fi
+
+    echo "  $step. IMPORTANT: the cl* commands do nothing until you source the wrapper."
+    echo "     The installer does not touch your shell config — add this line yourself:"
+    echo ""
+    echo "         echo '$line' >> ~/.zshrc"
+    echo ""
+    echo "     Then open a new terminal (or run: source ~/.zshrc)."
+    echo "     Not on zsh? Source the same file from your shell's rc; it is written for zsh."
+    return 0
+}
+
+# Every backend except native "claude" needs a login and/or a pasted credential
+# before it works, and a curl|bash user reads this output, not the README. Prints
+# one short block per installed profile that is still on placeholders. $1 is the
+# step number in the "Next steps" list; returns 1 without printing when there is
+# nothing left to do, so the caller keeps its numbering contiguous.
+backend_setup_hints() {
+    local step="$1"
+    local dst_dir="$CLAUDE_DIR/profiles"
+
+    if $DRY_RUN; then
+        echo "  $step. Would list any backend still needing a login or an API key (docs/BACKENDS.md)"
+        return 0
+    fi
+
+    [[ -d "$dst_dir" ]] || return 1
+
+    if ! command -v jq &>/dev/null; then
+        echo "  $step. Backends other than 'claude' need a login and an API key before 'cl' works — see docs/BACKENDS.md"
+        return 0
+    fi
+
+    local -a pending=()
+    local f name
+    for f in "$dst_dir"/*.json; do
+        [[ -e "$f" ]] || continue
+        name="${f##*/}"; name="${name%.json}"
+        [[ -n "$(profile_placeholder_keys "$f")" ]] && pending+=("$name")
+    done
+    [[ ${#pending[@]} -eq 0 ]] && return 1
+
+    local default_profile=""
+    [[ -f "$CLAUDE_DIR/default-profile" ]] && default_profile=$(cat "$CLAUDE_DIR/default-profile")
+
+    echo "  $step. Finish setting up the backend(s) you installed:"
+    local bin cand hint fields k
+    for name in "${pending[@]}"; do
+        f="$dst_dir/$name.json"
+        echo "     $name — $(jq -r '.label // empty' "$f" 2>/dev/null)"
+
+        # Same resolution as claude.zsh: first candidate on PATH wins; when none
+        # is installed, show how to get it and leave {bin} as <binary>.
+        bin=""
+        while IFS= read -r cand; do
+            [[ -z "$cand" ]] && continue
+            if command -v "$cand" &>/dev/null; then bin="$cand"; break; fi
+        done < <(jq -r '.service.bins[]? // empty' "$f" 2>/dev/null)
+        if [[ -z "$bin" ]]; then
+            hint=$(jq -r '.service.installHint // empty' "$f" 2>/dev/null)
+            [[ -n "$hint" ]] && echo "       install: $hint"
+            bin="<binary>"
+        fi
+
+        hint=$(jq -r '.service.loginHint // empty' "$f" 2>/dev/null)
+        [[ -n "$hint" ]] && echo "       login:   ${hint//\{bin\}/$bin}"
+
+        fields=""
+        while IFS= read -r k; do
+            [[ -z "$k" ]] && continue
+            fields="${fields:+$fields, }.env.$k"
+        done < <(profile_placeholder_keys "$f")
+        echo "       key:     paste into ${f/#$HOME/~}  ->  $fields"
+    done
+
+    if [[ -n "$default_profile" ]]; then
+        case " ${pending[*]} " in
+            *" $default_profile "*)
+                warn "Default profile '$default_profile' is not configured yet — a bare 'cl' will fail until the step above is done (use 'cl_claude' meanwhile)"
+                ;;
+        esac
+    fi
+    echo "     Full details: docs/BACKENDS.md"
+    return 0
 }
 
 # The exact `skills add` invocation. Scoped to the MATTPOCOCK_SKILLS names (the 17
@@ -2347,6 +2632,12 @@ uninstall() {
 
     rm -f "$CLAUDE_DIR/claude.zsh" && ok "Removed claude.zsh"
     rm -f "$CLAUDE_DIR/system-prompt.txt" && ok "Removed system-prompt.txt"
+    # profiles/ and default-profile are deliberately left in place: the profile
+    # files hold API keys the user pasted in, and silently deleting credentials
+    # on uninstall is not recoverable.
+    if [[ -d "$CLAUDE_DIR/profiles" ]]; then
+        warn "Kept $CLAUDE_DIR/profiles (contains your API keys) — delete it manually if you want them gone"
+    fi
 
     # Remove DeepXiv skills (glob to catch any installed by --all)
     for deepxiv_skill in "$CLAUDE_DIR"/skills/deepxiv-*/; do
@@ -2443,6 +2734,8 @@ main() {
         INSTALL_STATUSLINE=true
         INSTALL_SHELL_WRAPPER=true
         INSTALL_PLUGINS=true
+        # All backend profiles; each is just a template until credentials are added
+        SELECTED_PROFILES=("glm" "gpt" "ccr")
         # Review defaults for --all: adversarial ON, codex OFF
         REVIEW_ADVERSARIAL=true
         # mattpocock/skills is installed by default (replaces the former handoff/teach skills)
@@ -2541,10 +2834,13 @@ main() {
     fi
     echo ""
     info "Next steps:"
-    echo "  1. Restart Claude Code for changes to take effect"
-    echo "  2. Customize CLAUDE.md for your specific projects"
+    local step=1
+    echo "  $((step++)). Restart Claude Code for changes to take effect"
+    echo "  $((step++)). Customize CLAUDE.md for your specific projects"
+    shell_wrapper_source_hint "$step" && step=$((step + 1))
+    backend_setup_hints "$step" && step=$((step + 1))
     if ! $INSTALL_LARK; then
-        echo "  3. Lark/Feishu MCP is off by default. To add it: claude mcp add --scope user --transport stdio lark-mcp -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET>"
+        echo "  $((step++)). Lark/Feishu MCP is off by default. To add it: claude mcp add --scope user --transport stdio lark-mcp -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET>"
     fi
     echo ""
 }

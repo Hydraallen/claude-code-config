@@ -1,0 +1,21 @@
+{
+  "label": "ChatGPT subscription (Codex OAuth via CLIProxyAPI)",
+  "note": "Reuses your ChatGPT Plus/Pro subscription through a local CLIProxyAPI instance, which exposes an Anthropic-compatible /v1/messages endpoint. Run the login step once; tokens land in ~/.cli-proxy-api and hot-reload. Anthropic does not support routing Claude Code to non-Claude models through a gateway, and this path relies on a reverse-engineered OAuth flow — it may break without notice.",
+  "credentialKeys": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"],
+  "service": {
+    "label": "CLIProxyAPI",
+    "health": "http://127.0.0.1:8317/healthz",
+    "bins": ["cli-proxy-api", "cliproxyapi", "CLIProxyAPI"],
+    "start": "{bin} --config \"$HOME/.cli-proxy-api/config.yaml\"",
+    "timeoutSec": 25,
+    "logName": "cli-proxy-api.log",
+    "installHint": "brew install cliproxyapi",
+    "loginHint": "{bin} --codex-login    # one-time browser authorization of your ChatGPT account"
+  },
+  "unset": [],
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8317",
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_CLIPROXYAPI_KEY",
+    "API_TIMEOUT_MS": "3000000"
+  }
+}

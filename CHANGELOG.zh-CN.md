@@ -1,5 +1,27 @@
 # 更新日志
 
+## [2.11.0] - 2026-07-31
+
+### 新功能
+- **后端变成数据，不再是代码。** `glm-env.json` 由 `~/.claude/profiles/*.json` 取代 —— 每个后端一个文件，声明 `{label, credentialKeys[], service, unset[], env{}}`。`claude.zsh` 在 source 时扫描该目录，为找到的每个 profile 生成 `cl_<name>` / `cl_<name>_auto`，因此新增后端 = 丢一个 JSON 文件。新增 `cl_profiles`（列出后端及就绪状态），`cl_switch` 改为只提供实际已安装的 profile。
+- **内置四档后端。** `claude`（原生 OAuth）、`glm`（智谱 Coding Plan）、`gpt`（ChatGPT 订阅经本地 CLIProxyAPI :8317）、`ccr`（claude-code-router 网关 :3456，通过 `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY` 把所有已配置 provider 合并进同一个 `/model` 列表）。
+- **按需的代理进程生命周期。** profile 可声明 `service`；启动器先做健康检查，仅在未运行时后台拉起，等待就绪，日志写入 `~/.claude/logs/`，已健康则直接复用。二进制缺失时拒绝启动并打印安装与登录命令，而不是让请求在 Claude Code 内部失败。
+- **安装器新增菜单组「Model Backends」**（`backend-glm` / `backend-gpt` / `backend-ccr`，默认全开）及 `docs/BACKENDS.md`。
+- **修正 GLM 模型映射。** 原为 `glm-4.7-flash`/`glm-5`/`glm-5.2`，现为 `glm-4.7`/`glm-5-turbo`/`glm-5.2`。`glm-4.7-flash` 属免费线、不在 Coding Plan 套餐内；`glm-5` 在上游会自动路由到 `glm-5.2`，硬编码无意义。
+
+### 设计考量
+- **原有的 GLM 机制本来就是通用的，只是输入被写死了。** `_cl_glm_run` 做的事就是把一个 JSON 的所有 key 导出为环境变量、跑完精确还原。把它泛化成 `_cl_profile_run <name>` 代价很小，并消除了那三处让第三个后端无法存在的两态硬编码校验。
+- **每次启动才注入 env，绝不写 `settings.json`。** 后端对机器上其他程序完全不可见，多个终端可同时跑不同后端，中断的会话也不会遗留网关 URL。`claude` 档额外*清除*网关变量，避免 `.zshrc` 里残留的 `ANTHROPIC_BASE_URL` 悄悄把 Claude 订阅会话改道。
+- **`credentialKeys` 把合并方向反过来了。** 升级时以模板为准整体覆盖，只把 profile 自己声明为凭据的那几个 key 重新贴回去，于是模型默认值跟随仓库更新，而 API key 经得起任意次重装。
+- **CCR 是第四档，而不是唯一入口。** CLIProxyAPI 自身已暴露 `/v1/messages`，所以 `gpt` 档直连即可、路径上不需要 CCR —— 常见场景少一个活动部件。CCR 只在真正需要它的地方出场：把多家 provider 合并成一个 `/model` 列表。
+
+### 注意事项
+- **`ccr` 档无法完全自动化。** CCR v3 的配置存在 `~/.claude-code-router/config.sqlite`，旧的 `config.json` 只在尚无 SQLite 配置的机器上被读取一次。provider、客户端 key、agent 配置档案必须在 `ccr ui`（`:3458`）里手动建一次。安装器能准备好这一步之外的所有事情，但代替不了这一步。
+- **`gpt` 档是厂商不支持的路径。** 它通过逆向的 OAuth 流程复用消费级订阅；OpenAI 条款禁止把账号凭据交给第三方客户端，且 CLIProxyAPI 带有伪装 header、冒充官方 Codex CLI 的 "cloaking" 机制 —— 这强烈暗示 OpenAI 在校验客户端指纹。另外 Anthropic 官方文档明载：不支持通过任何网关把 Claude Code 路由到非 Claude 模型。`claude` 与 `glm` 两档不涉及这些风险。
+- **迁移是自动且非破坏性的。** `~/.claude/glm-env.json` 会变成 `profiles/glm.json` 并保留凭据；旧文件改名为 `.migrated` 而非删除。若 profiles 目录整个不存在，`claude.zsh` 仍会回落读取旧的扁平文件。
+- `--uninstall` 刻意保留 `~/.claude/profiles/` —— 里面是用户自己贴进去的 API key。
+- Windows 侧未变：`install.ps1` 从来就没有 shell wrapper 和 GLM 后端，本次仍然没有。
+
 ## [2.9.0] - 2026-06-29
 
 ### 新功能

@@ -144,6 +144,22 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | **Playwright MCP** | `mcp/` | Browser automation via `@playwright/mcp` | on |
 | [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | Feishu / Lark integration — opt-in; needs Feishu App ID/Secret and uses ~1 GB RAM/session | **off** |
 
+## Model Backends — First-Run Setup
+
+The installer writes `~/.claude/profiles/*.json`, but every backend except `claude` needs a login and/or a pasted credential before `cl_<backend>` will work. Full detail: [docs/BACKENDS.md](docs/BACKENDS.md).
+
+| Backend | Install | Login | Where the credential goes |
+|---------|---------|-------|---------------------------|
+| `claude` | — | native OAuth | Nothing to configure |
+| `glm` | — (vendor-hosted endpoint) | — | Your BigModel API key → `.env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/profiles/glm.json` |
+| `gpt` | `brew install cliproxyapi` | `cli-proxy-api --codex-login` (one-time browser authorization) | An `api-keys` entry from `~/.cli-proxy-api/config.yaml` → `.env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/profiles/gpt.json` |
+| `ccr` | `npm install -g @musistudio/claude-code-router` (needs Node.js >= 22) | `ccr ui` — admin UI on `http://127.0.0.1:3458` | The CCR client key minted in the UI → `.env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/profiles/ccr.json` |
+
+- **`gpt` carries a real account-ban risk.** It reuses a consumer ChatGPT subscription through a reverse-engineered OAuth flow; read the full warning in [docs/BACKENDS.md](docs/BACKENDS.md#gpt--chatgpt-pluspro-subscription) before using it.
+- **`ccr` cannot be automated.** CCR v3 keeps its configuration in SQLite, so the providers, the client key, and the agent profile have to be created by hand in the web UI — once.
+
+Then `cl_glm` / `cl_gpt` / `cl_ccr` launches that backend, and `cl_switch <name>` makes it the default for a bare `cl`.
+
 ## Directory Structure
 
 ```
@@ -200,8 +216,8 @@ Smart merge on re-install preserves your overrides for `env`, `permissions.allow
 
 This fork adds the following custom features on top of upstream:
 
-- **Shell Wrapper** (`claude.zsh`): `cl`/`cl_auto`/`cl_switch` commands with dual-backend routing (Claude API + GLM API)
-- **GLM Backend** (`glm-env.json`): Template for GLM API credentials (BigModel/智谱)
+- **Shell Wrapper** (`claude.zsh`): `cl`/`cl_auto`/`cl_switch`/`cl_profiles` plus a generated `cl_<backend>` per profile
+- **Model Backends** (`profiles/*.json`): One JSON per backend — `claude` (native OAuth), `glm` (Zhipu Coding Plan), `gpt` (ChatGPT subscription via CLIProxyAPI), `ccr` (claude-code-router gateway that merges providers into a single `/model` list). Dropping a new JSON in `~/.claude/profiles/` adds a backend with no code changes; profiles that declare a local proxy start it on demand and reuse it if already healthy. See [docs/BACKENDS.md](docs/BACKENDS.md)
 - **Search Agent** (`agents/search.md`): Jeff, a read-only web research specialist
 - **System Prompt** (`system-prompt.txt`): Custom behavioral guidelines
 - **MCP Playwright**: Playwright MCP server config preserved

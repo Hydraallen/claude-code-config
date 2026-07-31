@@ -1,0 +1,15 @@
+{
+  "label": "Claude (official subscription, native OAuth)",
+  "note": "Native Claude Code login. Injects nothing; explicitly clears any inherited gateway vars so a stray ANTHROPIC_BASE_URL in your shell cannot hijack this profile.",
+  "credentialKeys": [],
+  "service": null,
+  "unset": [
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_API_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_AGENT_API_BASE_URL",
+    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
+  ],
+  "env": {}
+}

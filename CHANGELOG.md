@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.11.0] - 2026-07-31
+
+### Features
+- **Backends are now data, not code.** `glm-env.json` is replaced by `~/.claude/profiles/*.json` — one file per backend, each declaring `{label, credentialKeys[], service, unset[], env{}}`. `claude.zsh` enumerates that directory at source time and generates `cl_<name>` / `cl_<name>_auto` for whatever it finds, so adding a backend is dropping a JSON file. New: `cl_profiles` (list backends and readiness) and a `cl_switch` that offers the profiles actually installed.
+- **Four bundled backends.** `claude` (native OAuth), `glm` (Zhipu Coding Plan), `gpt` (ChatGPT subscription via a local CLIProxyAPI on :8317), `ccr` (claude-code-router gateway on :3456, which merges every configured provider into a single `/model` list via `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`).
+- **On-demand proxy lifecycle.** A profile may declare a `service`; the launcher health-checks it, starts it in the background only if down, waits for readiness, logs to `~/.claude/logs/`, and reuses an already-healthy instance. When the binary is absent it refuses to launch and prints the install and login commands instead of failing inside Claude Code.
+- **New installer menu group "Model Backends"** (`backend-glm` / `backend-gpt` / `backend-ccr`, all default on) and `docs/BACKENDS.md`.
+- **Corrected GLM model mapping.** Was `glm-4.7-flash`/`glm-5`/`glm-5.2`; now `glm-4.7`/`glm-5-turbo`/`glm-5.2`. `glm-4.7-flash` is the free tier and is not in the Coding Plan; `glm-5` is auto-routed to `glm-5.2` upstream, so pinning it was meaningless.
+
+### Design Rationale
+- **The existing GLM mechanism was already generic; only its inputs were hardcoded.** `_cl_glm_run` exported every key of one JSON file and restored the previous environment afterwards. Generalizing it to `_cl_profile_run <name>` cost little and removed the three hardcoded two-state validations that made a third backend impossible.
+- **Per-launch env injection, never `settings.json`.** Backends stay invisible to anything else on the machine, several backends can run in different terminals at once, and an interrupted run cannot leave a gateway URL behind. The `claude` profile additionally *unsets* gateway variables so a stray `ANTHROPIC_BASE_URL` in `.zshrc` cannot silently redirect a Claude subscription session.
+- **`credentialKeys` inverts the merge.** Upgrades take the template wholesale and re-apply only the keys a profile declares as credentials, so model defaults track the repo while API keys survive any number of re-installs.
+- **CCR is a fourth profile rather than the single front door.** CLIProxyAPI already exposes `/v1/messages`, so the `gpt` profile reaches ChatGPT without CCR in the path — one less moving part for the common case. CCR earns its place only where it is actually needed: merging providers into one `/model` list.
+
+### Notes & Caveats
+- **The `ccr` profile cannot be fully automated.** CCR v3 stores configuration in `~/.claude-code-router/config.sqlite` and reads the legacy `config.json` only once on a machine with no SQLite config. Providers, the client key, and the agent profile must be created by hand in `ccr ui` (`:3458`). The installer sets up everything around that step, not the step itself.
+- **The `gpt` profile is a vendor-unsupported path.** It reuses a ChatGPT subscription through a reverse-engineered OAuth flow; OpenAI's terms prohibit sharing account credentials with third-party clients, and CLIProxyAPI ships header "cloaking" that impersonates the official Codex CLI — strong evidence OpenAI fingerprints clients. Anthropic separately documents that it does not support routing Claude Code to non-Claude models through any gateway. `claude` and `glm` carry none of this.
+- **Migration is automatic and non-destructive.** `~/.claude/glm-env.json` becomes `profiles/glm.json` with credentials preserved; the old file is renamed to `.migrated`, not deleted. `claude.zsh` still falls back to the flat legacy file when the profiles directory is absent.
+- `--uninstall` intentionally leaves `~/.claude/profiles/` behind — those files hold user-pasted API keys.
+- Windows parity is unchanged: `install.ps1` has never shipped the shell wrapper or GLM backend, and still doesn't.
+
 ## [2.10.0] - 2026-07-05
 
 ### Features

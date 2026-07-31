@@ -1,0 +1,22 @@
+{
+  "label": "CCR gateway (GLM + GPT merged into one /model list)",
+  "note": "claude-code-router v3 aggregates every configured provider behind one gateway, and CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY makes Claude Code list them all under /model as provider/model. CCR v3 stores its config in ~/.claude-code-router/config.sqlite, so providers, the client key, and the agent profile MUST be created once by hand in the web UI (ccr ui, http://127.0.0.1:3458) — an installer cannot write them. Paste the generated client key into ANTHROPIC_AUTH_TOKEN below.",
+  "credentialKeys": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"],
+  "service": {
+    "label": "claude-code-router",
+    "health": "http://127.0.0.1:3456/health",
+    "bins": ["ccr"],
+    "start": "{bin} start",
+    "timeoutSec": 30,
+    "logName": "ccr.log",
+    "installHint": "npm install -g @musistudio/claude-code-router    # requires Node.js >= 22",
+    "loginHint": "ccr ui    # admin UI on :3458 — add providers, create a client API key, then set that key here"
+  },
+  "unset": [],
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:3456",
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_CCR_CLIENT_KEY",
+    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+    "API_TIMEOUT_MS": "3000000"
+  }
+}
