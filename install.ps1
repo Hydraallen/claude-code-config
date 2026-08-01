@@ -2067,6 +2067,7 @@ function Main {
         Write-Host "  3. Lark/Feishu MCP is off by default. To add it: claude mcp add --scope user --transport stdio lark-mcp -- npx -y `"@larksuiteoapi/lark-mcp`" mcp -a <APP_ID> -s <APP_SECRET>"
     }
     Write-Host ""
+    Write-Info "GPT backend auto-configuration and the cl_gpt launcher are macOS/Linux only (bash/zsh). Windows has no cl_gpt runtime yet — see docs/BACKENDS.md."
 }
 
 Main

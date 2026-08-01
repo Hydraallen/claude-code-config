@@ -112,61 +112,75 @@ profile 在 `service.bins` 里两个都列了，会用 `PATH` 上先找到的那
 但上游文档是按 `cli-proxy-api` 写的，如果你是 brew 安装的，它给出的每条命令都要
 把名字换成 `cliproxyapi`。
 
-#### 第 2 步 —— 写配置文件
+#### 第 2 步 —— 在安装器里选 `gpt`（key 会被自动协调）
 
-**这一步要在登录之前做。** 我们的启动器总是用
-`--config "$HOME/.cli-proxy-api/config.yaml"` 启动代理，所以不管你怎么安装，这个确切
-路径都必须存在 —— Homebrew 自己的默认路径
-（`$(brew --prefix)/etc/cliproxyapi.conf`）*不是*启动器使用的那个。配置文件缺失或
-不可读会**直接退出**，而不是回退到默认值。
+选中 `gpt` 之后，安装器的 `configure_gpt_backend` 会替你协调 CLIProxyAPI 的 key
+并归一化配置 —— **你不再需要自己编造或粘贴 key。** 它按下面的严格优先级解析 key
+（配置优先）：
 
-```bash
-mkdir -p ~/.cli-proxy-api
-cat > ~/.cli-proxy-api/config.yaml <<'YAML'
+1. **配置中的 key。** `~/.cli-proxy-api/config.yaml` 里 `api-keys:` 的第一个条目
+   在它是真实值（残留的占位符会被拒绝、不会被复用）时具有最高优先级，是权威来源。
+2. **profile token。** 配置里没有可用的 key 时，复用
+   `~/.claude/profiles/gpt.json` 里 `.env.ANTHROPIC_AUTH_TOKEN` 的值。
+3. **生成。** 两者都解析不出来时，生成一个新的 32 字节（64 个小写十六进制字符）key。
+
+解析出的 key 会同时写进 `config.yaml` 和 `gpt.json`，保持两者同步一致。任何已存在的
+`config.yaml` 都会先被复制成带时间戳的 `config.yaml.YYYYMMDDHHMMSS.bak`（模式 `600`），
+然后被**归一化**成下面这个仅监听环回地址的形态；如果文件已经归一化，就不会产生备份。
+`~/.cli-proxy-api` 目录以模式 `700` 创建；`config.yaml` 和 `gpt.json` 都保持模式 `600`。
+
+归一化后的配置恰好是：
+
+```yaml
 host: "127.0.0.1"
 port: 8317
 auth-dir: "~/.cli-proxy-api"
 api-keys:
-  - "pick-any-long-random-string"
-YAML
+  - "<解析出的 key>"
 ```
 
-其中两个非默认值都是关键：
+其中三个值是关键：
 
 - **`api-keys` 必须非空。** 如果这个列表为空或者根本没写，CLIProxyAPI 会直接把它的
   鉴权 provider 整个注销掉，**此后每一条 `/v1/*` 路由都会接受任何请求，带任何 token
-  或者干脆不带 token。** 它是 fail open，不是 fail closed。
+  或者干脆不带 token** —— 它是 fail open，不是 fail closed。
+  别把 `api-keys` 和 `remote-management.secret-key` 搞混了，后者守的是另一套 API，
+  两者故意是分开的。
 - **`host: "127.0.0.1"`** —— 默认值是 `""`，也就是绑定*所有*网络接口。再叠加上面那个
   fail-open 行为，默认配置等于把一个不需要鉴权、直通你 ChatGPT 订阅的代理挂到了局域网上。
+- **`port: 8317`** 与启动器和 profile 对齐。
 
-`api-keys` 的值由你自己编，没有任何东西会替你生成。别把它和
-`remote-management.secret-key` 搞混了，后者守的是另一套 API。
+启动器总是用 `--config "$HOME/.cli-proxy-api/config.yaml"` 启动代理，所以不管你怎么
+安装，这个确切路径都必须存在 —— Homebrew 自己的默认路径
+（`$(brew --prefix)/etc/cliproxyapi.conf`）*不是*启动器使用的那个。配置缺失/不可读，
+或者代理在启动过程中退出，都会**直接退出**，而不是回退到默认值。
 
-#### 第 3 步 —— 登录一次
+#### 第 3 步 —— 登录一次（手动）
 
 ```bash
 cliproxyapi --codex-login            # or ./cli-proxy-api --codex-login
 ```
 
-浏览器会打开；登录你的 ChatGPT 账号并授权。OAuth 回调落在
-**`http://localhost:1455/auth/callback`**，所以 1455 端口必须空着 —— 如果被别的程序
-占了，用 `--oauth-callback-port <n>` 改掉。无图形界面的机器上用 `--no-browser`
-（会打印 URL）或者 `--codex-device-login`。
+这一步**仍然是手动** —— 安装器无法替你完成 OAuth。浏览器会打开；登录你的 ChatGPT
+账号并授权。OAuth 回调落在 **`http://localhost:1455/auth/callback`**，所以 1455 端口
+必须空着 —— 如果被别的程序占了，用 `--oauth-callback-port <n>` 改掉。无图形界面的
+机器上用 `--no-browser`（会打印 URL）或者 `--codex-device-login`。
 
 凭证会以 `codex-<hash>-<email>-<plan>.json` 的形式写进 `auth-dir`。多个账号会产生
 多个文件，并以 round-robin 方式做负载均衡。
 
-#### 第 4 步 —— 接上 key 并启动
-
-把你写进 `api-keys` 的那串字符串，原样粘贴到 `~/.claude/profiles/gpt.json` 的
-`.env.ANTHROPIC_AUTH_TOKEN`，然后：
+#### 第 4 步 —— 启动
 
 ```bash
-cl_gpt
+cl_gpt            # 或 cl_gpt_auto
 ```
 
 `cl_gpt` 会先对 `http://127.0.0.1:8317/healthz` 做健康检查，只在需要时才在后台拉起
 代理，等它起来，日志写到 `~/.claude/logs/cli-proxy-api.log`。
+
+> **Windows 限制。** GPT 自动配置以及 `cl_gpt` / `cl_gpt_auto` 启动器仅支持
+> Bash/Zsh。`install.ps1` 会报告这一点并指回 `docs/BACKENDS.md`；它**不会**创建或
+> 写入 `~/.cli-proxy-api/config.yaml`。
 
 注意 `/healthz` 只要 HTTP 监听器起来了就返回 200 —— 它完全不能说明你的凭证是否加载
 成功、上游是否可达。健康检查是绿的但请求全失败，说明第 3 步没生效。

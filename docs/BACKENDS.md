@@ -122,64 +122,87 @@ finds on `PATH`, so either works — but the upstream docs are written for
 `cli-proxy-api`, and on a brew install you must substitute `cliproxyapi` in
 every command they show.
 
-#### Step 2 — write the config file
+#### Step 2 — select `gpt` in the installer (the key is reconciled automatically)
 
-**Do this before logging in.** Our launcher always starts the proxy with
-`--config "$HOME/.cli-proxy-api/config.yaml"`, so that exact path must exist
-regardless of install method — Homebrew's own default
-(`$(brew --prefix)/etc/cliproxyapi.conf`) is *not* what the launcher uses. A
-missing or unreadable config is a **hard exit**, not a fall-back to defaults.
+Once you select `gpt`, the installer's `configure_gpt_backend` reconciles the
+CLIProxyAPI key and normalizes the config for you — **you no longer invent or
+paste a key.** It resolves the key by this strict precedence (config-first):
 
-```bash
-mkdir -p ~/.cli-proxy-api
-cat > ~/.cli-proxy-api/config.yaml <<'YAML'
+1. **Config key.** The first entry of `api-keys:` in
+   `~/.cli-proxy-api/config.yaml` is authoritative when it is a real value
+   (a leftover placeholder is rejected, not reused).
+2. **Profile token.** If the config has no usable key, the value of
+   `.env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/profiles/gpt.json` is reused.
+3. **Generated.** If neither resolves, a fresh 32-byte key (64 lowercase hex
+   characters) is generated.
+
+The resolved key is written to **both** `config.yaml` and `gpt.json`, keeping
+them in sync. Any existing `config.yaml` is first copied to a timestamped
+`config.yaml.YYYYMMDDHHMMSS.bak` (mode `600`) and then **normalized** to the
+loopback-only shape below; if the file is already normalized, no backup is
+written. `~/.cli-proxy-api` is created with mode `700`; `config.yaml` and
+`gpt.json` are both kept at mode `600`.
+
+The normalized config is exactly:
+
+```yaml
 host: "127.0.0.1"
 port: 8317
 auth-dir: "~/.cli-proxy-api"
 api-keys:
-  - "pick-any-long-random-string"
-YAML
+  - "<the resolved key>"
 ```
 
-Both non-default values there are load-bearing:
+Three of those values are load-bearing:
 
 - **`api-keys` must be non-empty.** If the list is empty or absent, CLIProxyAPI
   unregisters its auth provider entirely and **every `/v1/*` route then accepts
   any request, with any token or none at all.** It fails open, not closed.
-- **`host: "127.0.0.1"`** — the default is `""`, which binds *all* interfaces.
-  Combined with the fail-open behaviour above, the default config would put an
-  unauthenticated proxy onto your ChatGPT subscription on your LAN.
+  Don't confuse `api-keys` with `remote-management.secret-key`, which guards a
+  different API; they are intentionally separate.
+- **`host: "127.0.0.1"`** — the upstream default is `""`, which binds *all*
+  interfaces. Combined with the fail-open behaviour above, the default config
+  would put an unauthenticated proxy onto your ChatGPT subscription on your LAN.
+- **`port: 8317`** matches the launcher and the profile.
 
-You invent the `api-keys` value yourself; nothing generates it for you. Don't
-confuse it with `remote-management.secret-key`, which guards a different API.
+The launcher always starts the proxy with
+`--config "$HOME/.cli-proxy-api/config.yaml"`, so that exact path must exist
+regardless of install method — Homebrew's own default
+(`$(brew --prefix)/etc/cliproxyapi.conf`) is *not* what the launcher uses. A
+missing or unreadable config, or a proxy that exits during start-up, is a
+**hard exit**, not a fall-back to defaults.
 
-#### Step 3 — log in once
+#### Step 3 — log in once (manual)
 
 ```bash
 cliproxyapi --codex-login            # or ./cli-proxy-api --codex-login
 ```
 
-A browser opens; log in to your ChatGPT account and approve. The OAuth callback
-lands on **`http://localhost:1455/auth/callback`**, so port 1455 must be free —
-override it with `--oauth-callback-port <n>` if something else holds it. On a
-headless box use `--no-browser` (prints the URL) or `--codex-device-login`.
+This step is **still manual** — the installer cannot perform OAuth on your
+behalf. A browser opens; log in to your ChatGPT account and approve. The OAuth
+callback lands on **`http://localhost:1455/auth/callback`**, so port 1455 must
+be free — override it with `--oauth-callback-port <n>` if something else holds
+it. On a headless box use `--no-browser` (prints the URL) or
+`--codex-device-login`.
 
 Credentials are written into `auth-dir` as
 `codex-<hash>-<email>-<plan>.json`. Multiple accounts produce multiple files and
 are load-balanced round-robin.
 
-#### Step 4 — wire up the key and launch
-
-Paste the same string you put in `api-keys` into `.env.ANTHROPIC_AUTH_TOKEN` of
-`~/.claude/profiles/gpt.json`, then:
+#### Step 4 — launch
 
 ```bash
-cl_gpt
+cl_gpt            # or cl_gpt_auto
 ```
 
 `cl_gpt` health-checks `http://127.0.0.1:8317/healthz` first, starts the proxy
 in the background only if needed, waits for it to come up, and logs to
 `~/.claude/logs/cli-proxy-api.log`.
+
+> **Windows limitation.** GPT auto-configuration and the `cl_gpt` /
+> `cl_gpt_auto` launchers are Bash/Zsh-only. `install.ps1` reports this and
+> points back at `docs/BACKENDS.md`; it does **not** create or write
+> `~/.cli-proxy-api/config.yaml`.
 
 Note that `/healthz` returns 200 as soon as the HTTP listener is up — it says
 nothing about whether your credentials loaded or the upstream is reachable. A

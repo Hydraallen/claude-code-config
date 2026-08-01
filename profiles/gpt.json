@@ -7,6 +7,7 @@
     "health": "http://127.0.0.1:8317/healthz",
     "bins": ["cli-proxy-api", "cliproxyapi", "CLIProxyAPI"],
     "start": "{bin} --config \"$HOME/.cli-proxy-api/config.yaml\"",
+    "configFile": "$HOME/.cli-proxy-api/config.yaml",
     "timeoutSec": 25,
     "logName": "cli-proxy-api.log",
     "installHint": "brew install cliproxyapi",

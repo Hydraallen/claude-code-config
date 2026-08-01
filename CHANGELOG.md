@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.15.0] - 2026-08-02
+
+### Features
+- **Automatically reuse or generate the CLIProxyAPI key, normalize its loopback-only config, and synchronize the GPT profile.** Selecting `gpt` in the installer now runs `configure_gpt_backend`, which resolves the key by strict precedence — existing `~/.cli-proxy-api/config.yaml` key, then `~/.claude/profiles/gpt.json` `.env.ANTHROPIC_AUTH_TOKEN`, then a freshly generated 32-byte (64 lowercase hex) value — and writes it to both files so they never drift. Existing config is backed up to a timestamped `config.yaml.YYYYMMDDHHMMSS.bak` (mode `600`) before being normalized to `host: 127.0.0.1`, `port: 8317`, non-empty `api-keys`; `~/.cli-proxy-api` is `700`, secret files `600`. The launcher fails immediately on missing config or early proxy exit.
+- **OAuth guidance is shown only for authorization failures.** `backend_setup_hints` advertises the one-time `cliproxyapi --codex-login` and never asks the user to invent or paste a key.
+
+### Design Rationale
+- Treat the CLIProxyAPI config as authoritative and back up existing YAML before normalization, preventing both key drift and the fail-open/LAN-exposure combo that an empty `api-keys` plus the upstream default `host: ""` would produce. The installer renders the YAML itself (no `yq` dependency), and re-syncs the profile token whenever the resolved key changes.
+- The Windows path (`install.ps1`) intentionally does **not** create or write `~/.cli-proxy-api/config.yaml`; GPT auto-configuration and `cl_gpt` / `cl_gpt_auto` are Bash/Zsh-only, so PowerShell reports the limitation and points users back at `docs/BACKENDS.md`.
+- **Config filename alignment.** The coordinator writes `~/.cli-proxy-api/config.yaml` — exactly the path baked into `profiles/gpt.json` `.service.configFile` / `.service.start`, which `claude.zsh` passes via `--config`. An earlier draft wrote `config.yml`, which the launcher never read (hard exit on a fresh install); the extension is now `config.yaml` consistently across `install.sh`, the profile, the launcher, and both guides.
+
+### Notes & Caveats
+- OAuth remains manual through `cliproxyapi --codex-login`; the installer cannot perform browser authorization for you.
+- GPT auto-configuration and `cl_gpt` remain Bash/Zsh-only; `install.ps1` reports this limitation.
+- `api-keys` and `remote-management.secret-key` are different secrets guarding different APIs; the docs call this out explicitly.
+
 ## [2.14.0] - 2026-08-01
 
 ### Features

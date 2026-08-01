@@ -1663,6 +1663,11 @@ install_shell_wrapper() {
         fi
         install_profiles
 
+        # Reconcile the GPT CLIProxyAPI backend (idempotent, atomic, safe to
+        # skip if no gpt profile is installed). Runs after profile/template
+        # copies and before configure_ccr_profile.
+        configure_gpt_backend || true   # coordinator records INSTALL_CRITICAL
+
         # Model slots for gateway backends, which only the live gateway can supply.
         configure_ccr_profile
 
@@ -2140,13 +2145,47 @@ backend_setup_hints() {
         return 0
     fi
 
+    # GPT (CLIProxyAPI) is special-cased: its key is reconciled by the
+    # configure_gpt_backend coordinator, so the user never invents or pastes
+    # one. Binary install + OAuth (`cliproxyapi --codex-login`) are still
+    # required even when the key is already in place, so gpt is always surfaced
+    # here when its profile exists. Other backends stay pending-only.
+    local gpt_prof="$dst_dir/gpt.json"
+    local gpt_cfg_dir="${GPT_CONFIG_DIR:-$HOME/.cli-proxy-api}"
+    local gpt_cfg="$gpt_cfg_dir/config.yaml"
+    local gpt_configured=false gpt_cfg_key="" gpt_prof_token=""
+    if [[ -f "$gpt_prof" ]]; then
+        if [[ -f "$gpt_cfg" ]]; then
+            gpt_cfg_key=$(gpt_extract_config_key "$gpt_cfg" 2>/dev/null) || gpt_cfg_key=""
+        fi
+        if [[ -n "$gpt_cfg_key" ]]; then
+            gpt_prof_token=$(jq -r '.env.ANTHROPIC_AUTH_TOKEN // ""' "$gpt_prof" 2>/dev/null) || gpt_prof_token=""
+            # Configured == a readable config key that matches the profile
+            # token. Compared by value; neither is ever printed.
+            if [[ -n "$gpt_prof_token" && "$gpt_cfg_key" == "$gpt_prof_token" ]]; then
+                gpt_configured=true
+            fi
+        fi
+    fi
+
     local -a pending=()
     local f name
+    local gpt_present=false
+    [[ -f "$gpt_prof" ]] && gpt_present=true
     for f in "$dst_dir"/*.json; do
         [[ -e "$f" ]] || continue
         name="${f##*/}"; name="${name%.json}"
+        # gpt is surfaced unconditionally below regardless of placeholder state.
+        [[ "$name" == "gpt" ]] && continue
         [[ -n "$(profile_placeholder_keys "$f")" ]] && pending+=("$name")
     done
+    if $gpt_present; then
+        if [[ ${#pending[@]} -eq 0 ]]; then
+            pending=("gpt")
+        else
+            pending=("gpt" "${pending[@]}")
+        fi
+    fi
     [[ ${#pending[@]} -eq 0 ]] && return 1
 
     local default_profile=""
@@ -2186,14 +2225,31 @@ backend_setup_hints() {
             echo "       $n. login   / 登录:  ${hint//\{bin\}/$bin}"
         fi
 
-        fields=""
-        while IFS= read -r k; do
-            [[ -z "$k" ]] && continue
-            fields="${fields:+$fields, }.env.$k"
-        done < <(profile_placeholder_keys "$f")
-        n=$((n + 1))
-        echo "       $n. key     / 密钥:  edit ${f/#$HOME/~}  ->  $fields"
-        echo "                           把上一步拿到的凭证填进这个文件的对应字段"
+        if [[ "$name" == "gpt" ]]; then
+            # CLIProxyAPI key is reconciled by configure_gpt_backend; the user
+            # never pastes one. Surface completion state without exposing any
+            # credential value. When reconciliation did not finish, print the
+            # exact config/profile paths and a rerun instruction (no values).
+            n=$((n + 1))
+            if $gpt_configured; then
+                echo "       $n. status / 状态:  GPT key auto-config complete (config ↔ profile synced). No paste needed."
+                echo "                       GPT 密钥已自动写入 config.yaml 与 gpt.json，无需手动粘贴。"
+            else
+                echo "       $n. status / 状态:  GPT key auto-config did not finish — re-run this installer (do NOT paste a key)."
+                echo "                       GPT 密钥未自动同步，请重新运行本安装器；不要手动粘贴密钥。"
+                echo "          config  / 配置路径:   ${gpt_cfg/#$HOME/~}"
+                echo "          profile / Profile:    ${gpt_prof/#$HOME/~}"
+            fi
+        else
+            fields=""
+            while IFS= read -r k; do
+                [[ -z "$k" ]] && continue
+                fields="${fields:+$fields, }.env.$k"
+            done < <(profile_placeholder_keys "$f")
+            n=$((n + 1))
+            echo "       $n. key     / 密钥:  edit ${f/#$HOME/~}  ->  $fields"
+            echo "                           把上一步拿到的凭证填进这个文件的对应字段"
+        fi
 
         # No #anchor: GitHub slugifies "### `ccr` — one /model list…" into
         # #ccr--one-model-list-across-providers, so a bare #$name would 404.
@@ -2951,6 +3007,462 @@ uninstall() {
     rm -f "$VERSION_STAMP_FILE"
     echo ""
     ok "Uninstall complete."
+}
+
+# ============================================================
+# GPT CLIProxyAPI auto-configuration: pure key-resolution helpers.
+#
+# These functions are side-effect-free (no writes to HOME, no network, no
+# logging) so they can be unit-tested by sourcing this script. The atomic
+# coordinator (install step) will call gpt_resolve_key and gpt_render_config
+# to assemble ~/.cli-proxy-api/config.yaml.
+#
+# Key resolution order: existing config > active profile token > generated.
+# gpt_resolve_key sets the global GPT_KEY_SOURCE to one of
+# "config" | "profile" | "generated" so the coordinator can report the
+# provenance. Note: when invoked through command substitution the source
+# assignment is lost (subshell), so the coordinator must call it directly
+# and capture stdout via a redirect, not $(...).
+# ============================================================
+
+# Print a fresh 32-byte CSPRNG key as 64 lowercase hex chars to stdout.
+# Returns 1 if neither openssl nor /dev/urandom yields a valid key. No logging.
+gpt_generate_key() {
+    local key=""
+    if command -v openssl >/dev/null 2>&1; then
+        key=$(openssl rand -hex 32 2>/dev/null) || key=""
+    fi
+    if [[ -z "$key" && -r /dev/urandom ]]; then
+        key=$(od -An -tx1 -N32 /dev/urandom 2>/dev/null | tr -d ' \n') || key=""
+    fi
+    [[ "$key" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s' "$key"
+}
+
+# Validate a candidate key scalar from either reuse source. Restrict reused
+# values to an unambiguous portable token alphabet so quotes, backslashes,
+# whitespace/control characters, comments, mappings and flow syntax can never
+# alter the normalized YAML document.
+_gpt_valid_key_value() {
+    local v="$1"
+    [[ -n "$v" && "$v" != YOUR_* ]] || return 1
+    [[ "$v" =~ ^[A-Za-z0-9._~-]+$ ]]
+}
+
+# Extract the first valid top-level key from a CLIProxyAPI config.yaml.
+# Constrained awk/shell parser: only a column-0 `api-keys:` block or inline
+# sequence is considered; nested keys, mappings, anchors/aliases, flow
+# mappings, placeholders and empty values are rejected. Quotes and inline
+# whitespace are stripped. Prints the key and returns 0, else returns 1.
+gpt_extract_config_key() {
+    local path="$1" cand
+    [[ -r "$path" ]] || return 1
+    while IFS= read -r cand; do
+        [[ -n "$cand" ]] || continue
+        # Strip matching surrounding quotes (single or double).
+        if [[ "$cand" =~ ^\"(.*)\"$ ]]; then
+            cand="${BASH_REMATCH[1]}"
+        elif [[ "$cand" =~ ^\'(.*)\'$ ]]; then
+            cand="${BASH_REMATCH[1]}"
+        fi
+        # Trim leading/trailing inline whitespace.
+        cand="${cand#"${cand%%[![:space:]]*}"}"
+        cand="${cand%"${cand##*[![:space:]]}"}"
+        if _gpt_valid_key_value "$cand"; then
+            printf '%s' "$cand"
+            return 0
+        fi
+    done < <(
+        awk '
+            BEGIN { in_block = 0 }
+            {
+                # A column-0, non-blank, non-comment line ends any block.
+                if (in_block && $0 ~ /^[^ \t#]/) in_block = 0
+                if (in_block) {
+                    line = $0
+                    sub(/[ \t]+#.*/, "", line)
+                    if (line ~ /^[ \t]+-[ \t]/ || line ~ /^[ \t]+-[ \t]*$/) {
+                        v = line
+                        sub(/^[ \t]+-[ \t]*/, "", v)
+                        sub(/[ \t]+$/, "", v)
+                        if (length(v) > 0) print v
+                    }
+                    next
+                }
+                # Top-level api-keys: must start at column 0.
+                if ($0 ~ /^api-keys:/) {
+                    rest = $0
+                    sub(/^api-keys:[ \t]*/, "", rest)
+                    sub(/[ \t]+#.*/, "", rest)
+                    # A header whose value is a pure comment (`api-keys: # note`)
+                    # must fall through to block mode, not be emitted as a key.
+                    if (rest ~ /^#/) rest = ""
+                    if (rest ~ /^\[/) {
+                        sub(/^\[/, "", rest)
+                        sub(/\][ \t]*$/, "", rest)
+                        m = split(rest, arr, ",")
+                        for (i = 1; i <= m; i++) {
+                            v = arr[i]
+                            sub(/^[ \t]+/, "", v)
+                            sub(/[ \t]+$/, "", v)
+                            if (length(v) > 0) print v
+                        }
+                    } else if (length(rest) > 0) {
+                        print rest
+                    } else {
+                        in_block = 1
+                    }
+                    next
+                }
+            }
+        ' "$path" 2>/dev/null
+    )
+    return 1
+}
+
+# Extract ANTHROPIC_AUTH_TOKEN from a Claude Code profile JSON. Returns 1 if
+# the file is unreadable, the field is absent/empty, or it is a YOUR_* placeholder.
+gpt_extract_profile_token() {
+    local path="$1" token
+    [[ -r "$path" ]] || return 1
+    token=$(jq -er '.env.ANTHROPIC_AUTH_TOKEN // empty' "$path" 2>/dev/null) || return 1
+    _gpt_valid_key_value "$token" || return 1
+    printf '%s' "$token"
+}
+
+# Resolve a CLIProxyAPI key by trying config, then profile, then generation.
+# Prints the key to stdout and sets GPT_KEY_SOURCE in the calling shell
+# (only when not invoked through command substitution).
+gpt_resolve_key() {
+    local config="$1" profile="$2" key=""
+    if key=$(gpt_extract_config_key "$config" 2>/dev/null) && [[ -n "$key" ]]; then
+        GPT_KEY_SOURCE="config"
+        printf '%s' "$key"
+        return 0
+    fi
+    if key=$(gpt_extract_profile_token "$profile" 2>/dev/null) && [[ -n "$key" ]]; then
+        GPT_KEY_SOURCE="profile"
+        printf '%s' "$key"
+        return 0
+    fi
+    if key=$(gpt_generate_key) && [[ -n "$key" ]]; then
+        GPT_KEY_SOURCE="generated"
+        printf '%s' "$key"
+        return 0
+    fi
+    return 1
+}
+
+# Render the normalized 5-line CLIProxyAPI config.yaml body for a given key.
+# Rejects an empty key. Output is deterministic and byte-for-byte stable.
+# The optional second argument is the auth-dir value (defaults to the literal
+# "~/.cli-proxy-api" so CLIProxyAPI expands it at runtime). A custom auth_dir
+# is rendered as a double-quoted YAML scalar; values containing a double quote,
+# backslash, or control char are rejected so the output can never be broken or
+# injected through the path.
+gpt_render_config() {
+    local key="$1" auth_dir="${2:-~/.cli-proxy-api}"
+    _gpt_valid_key_value "$key" || return 1
+    case "$auth_dir" in
+        *'"'*|*'\'*|*$'\n'*|*$'\t'*|*$'\r'*) return 1 ;;
+    esac
+    printf '%s\n' 'host: "127.0.0.1"'
+    printf '%s\n' 'port: 8317'
+    printf 'auth-dir: "%s"\n' "$auth_dir"
+    printf '%s\n' 'api-keys:'
+    printf '  - "%s"\n' "$key"
+}
+
+# ============================================================
+# GPT CLIProxyAPI auto-configuration: atomic reconciliation layer.
+#
+# gpt_backup_file, gpt_atomic_write, gpt_sync_profile_token and the
+# configure_gpt_backend coordinator build on the pure helpers above. They
+# are the only functions here that touch the filesystem. Failures are
+# propagated: a random/permission/parse/write error increments
+# INSTALL_CRITICAL and returns non-zero so the caller can surface it.
+#
+# Paths are read from the environment so tests (and users) can relocate the
+# whole tree without editing the script:
+#   GPT_CONFIG_DIR  default ~/.cli-proxy-api   (holds config.yaml + backups)
+#   GPT_PROFILE     default $CLAUDE_DIR/profiles/gpt.json
+# Key material is never logged and never appears in a path component.
+# ============================================================
+
+# Create a 600-mode timestamped backup of <path> next to it. Prints the backup
+# path to stdout and returns 0 on success, 1 otherwise. Creates the destination
+# at mode 600 before copying bytes, avoiding any cp -p mode-inheritance window.
+# The original file is never modified on any path.
+gpt_backup_file() {
+    local path="$1" dir base stamp backup restore_umask
+    [[ -f "$path" ]] || return 1
+    dir=$(dirname "$path")
+    base=$(basename "$path")
+    stamp=$(date '+%Y%m%d%H%M%S')
+    backup="${dir%/}/${base}.${stamp}.bak"
+    restore_umask=$(umask)
+    umask 077
+    if ! ( : > "$backup" && chmod 600 "$backup" && cp "$path" "$backup" ) 2>/dev/null; then
+        umask "$restore_umask"
+        rm -f "$backup" 2>/dev/null
+        return 1
+    fi
+    umask "$restore_umask"
+    printf '%s' "$backup"
+}
+
+# Atomically replace <path> with <content>. The temp file is created in the
+# same directory (so the rename stays on one filesystem), written, chmod'd
+# 600, then mv -f into place. On ANY failure the temp file is removed and the
+# original is left byte-for-byte intact. Returns 0/1.
+gpt_atomic_write() {
+    local path="$1" content="$2" dir base tmp restore_umask
+    [[ -n "$path" ]] || return 1
+    dir=$(dirname "$path")
+    base=$(basename "$path")
+    [[ -d "$dir" ]] || return 1
+    restore_umask=$(umask)
+    umask 077
+    tmp=$(mktemp "${dir%/}/${base}.tmp.XXXXXX" 2>/dev/null) || {
+        umask "$restore_umask"
+        return 1
+    }
+    if ! printf '%s' "$content" > "$tmp" 2>/dev/null; then
+        rm -f "$tmp"; umask "$restore_umask"; return 1
+    fi
+    if ! chmod 600 "$tmp" 2>/dev/null; then
+        rm -f "$tmp"; umask "$restore_umask"; return 1
+    fi
+    if ! mv -f "$tmp" "$path" 2>/dev/null; then
+        rm -f "$tmp"; umask "$restore_umask"; return 1
+    fi
+    umask "$restore_umask"
+    return 0
+}
+
+# Sync .env.ANTHROPIC_AUTH_TOKEN in <profile> to <key>, writing atomically.
+# Skips the write when the normalized JSON is unchanged. Returns 0/1; never
+# prints the key. Leaves the profile with mode 600.
+gpt_sync_profile_token() {
+    local profile="$1" key="$2" updated
+    [[ -r "$profile" ]] || return 1
+    command -v jq >/dev/null 2>&1 || return 1
+    updated=$(jq --arg key "$key" '.env.ANTHROPIC_AUTH_TOKEN = $key' "$profile" 2>/dev/null) || return 1
+    # Reject malformed output.
+    printf '%s' "$updated" | jq -e . >/dev/null 2>&1 || return 1
+    # Skip the write when the normalized JSON is already identical.
+    if [[ "$(printf '%s' "$updated" | jq -S .)" == "$(jq -S . "$profile" 2>/dev/null)" ]]; then
+        chmod 600 "$profile" 2>/dev/null || true
+        return 0
+    fi
+    if ! gpt_atomic_write "$profile" "$updated"; then
+        return 1
+    fi
+    chmod 600 "$profile" 2>/dev/null || true
+    return 0
+}
+
+# Apply mode 600 to credential-bearing profile artifacts without recursing
+# into unrelated trees. Any chmod failure is fatal because these files can
+# contain live credentials.
+_gpt_secure_profile_artifacts() {
+    local profiles_dir="$1" artifact
+    [[ -d "$profiles_dir" ]] || return 0
+    for artifact in "$profiles_dir"/*.json "$profiles_dir"/.baseline/*.json "$profiles_dir"/*.json.*.bak; do
+        [[ -e "$artifact" ]] || continue
+        chmod 600 "$artifact" 2>/dev/null || return 1
+    done
+}
+
+# Coordinator: reconcile ~/.cli-proxy-api/config.yaml with the installed gpt
+# profile so both share a single key. Idempotent: a normalized config with a
+# matching profile token is a no-op (no backup, no write). On a config/profile
+# divergence the config key wins. Both target contents are computed BEFORE any
+# write, so a parse failure cannot leave only one file updated; if the config
+# write succeeds but the profile sync fails, the just-created backup restores
+# the config (or, for a brand-new config, it is removed). Reports the key
+# provenance category only — never the key itself.
+configure_gpt_backend() {
+    local _gpt_had_xtrace=false _gpt_selected=false _gpt_profile _gpt_rc
+    case $- in *x*) _gpt_had_xtrace=true; set +x ;; esac
+
+    # Selection, not the presence of a stale installed profile, controls this
+    # invocation. Iterate explicitly for Bash 3.2 empty-array/set -u safety.
+    local _gpt_choice
+    for _gpt_choice in ${SELECTED_PROFILES[@]+"${SELECTED_PROFILES[@]}"}; do
+        [[ "$_gpt_choice" == "gpt" ]] && { _gpt_selected=true; break; }
+    done
+    if ! $_gpt_selected; then
+        $_gpt_had_xtrace && set -x
+        return 0
+    fi
+
+    _configure_gpt_backend_impl
+    _gpt_rc=$?
+    # Secret-bearing locals belong to the inner function and are gone before
+    # the caller's xtrace state is restored.
+    $_gpt_had_xtrace && set -x
+    return "$_gpt_rc"
+}
+
+_configure_gpt_backend_impl() {
+    local config_dir profile config
+    config_dir="${GPT_CONFIG_DIR:-$HOME/.cli-proxy-api}"
+    profile="${GPT_PROFILE:-$CLAUDE_DIR/profiles/gpt.json}"
+    config="$config_dir/config.yaml"
+
+    # Not selected: no installed gpt profile -> nothing to do.
+    [[ -r "$profile" ]] || return 0
+
+    if $DRY_RUN; then
+        info "GPT backend: would reconcile $config and sync profile token (dry run)"
+        return 0
+    fi
+
+    command -v jq >/dev/null 2>&1 || {
+        warn "GPT backend: jq not found — skipping CLIProxyAPI reconciliation"
+        INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+        return 1
+    }
+
+    # Clear the provenance global before resolution so a stale value from an
+    # earlier run can never leak into the report.
+    GPT_KEY_SOURCE=""
+    local key="" _key_tmp
+    _key_tmp=$(mktemp 2>/dev/null) || { warn "GPT backend: mktemp failed"; INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1)); return 1; }
+    # Run gpt_resolve_key with a stdout redirect (NOT command substitution):
+    # the GPT_KEY_SOURCE side effect is lost inside a subshell, so we must keep
+    # the call in this shell and capture the key via the temp file.
+    if ! gpt_resolve_key "$config" "$profile" > "$_key_tmp" 2>/dev/null; then
+        rm -f "$_key_tmp"
+        warn "GPT backend: could not resolve a CLIProxyAPI key"
+        INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+        return 1
+    fi
+    key=$(cat "$_key_tmp" 2>/dev/null)
+    rm -f "$_key_tmp"
+    [[ -n "$key" ]] || { warn "GPT backend: resolved empty key"; INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1)); return 1; }
+    local source="$GPT_KEY_SOURCE"
+
+    # Compute BOTH target bodies up front; a parse failure aborts before any
+    # write so the on-disk state stays consistent. The auth-dir value tracks
+    # GPT_CONFIG_DIR so a custom config directory is reflected in the rendered
+    # config (default literal "~/.cli-proxy-api" so CLIProxyAPI expands it).
+    local rendered updated auth_dir="~/.cli-proxy-api"
+    [[ -n "${GPT_CONFIG_DIR:-}" ]] && auth_dir="$GPT_CONFIG_DIR"
+    rendered=$(gpt_render_config "$key" "$auth_dir") || {
+        warn "GPT backend: failed to render config"
+        INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+        return 1
+    }
+    updated=$(jq --arg key "$key" '.env.ANTHROPIC_AUTH_TOKEN = $key' "$profile" 2>/dev/null) || {
+        warn "GPT backend: profile JSON parse failed"
+        INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+        return 1
+    }
+    printf '%s' "$updated" | jq -e . >/dev/null 2>&1 || {
+        warn "GPT backend: normalized profile JSON invalid"
+        INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+        return 1
+    }
+
+    # Provision the config directory with mode 700.
+    if ! mkdir -p "$config_dir" 2>/dev/null; then
+        warn "GPT backend: cannot create $config_dir"
+        INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+        return 1
+    fi
+    chmod 700 "$config_dir" 2>/dev/null || {
+        warn "GPT backend: cannot chmod 700 $config_dir"
+        INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+        return 1
+    }
+
+    local had_config=false prior_config=""
+    if [[ -f "$config" ]]; then
+        had_config=true
+        prior_config=$(cat "$config" 2>/dev/null) || prior_config=""
+    fi
+
+    local need_config_write=true
+    if $had_config && [[ "$prior_config" == "$rendered" ]]; then
+        need_config_write=false
+    fi
+
+    # Back up a divergent existing config before touching it.
+    local backup=""
+    if $need_config_write && $had_config; then
+        if ! backup=$(gpt_backup_file "$config"); then
+            warn "GPT backend: backup failed — leaving config untouched"
+            INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+            return 1
+        fi
+    fi
+
+    if $need_config_write; then
+        if ! gpt_atomic_write "$config" "$rendered"; then
+            [[ -n "$backup" ]] && rm -f "$backup" 2>/dev/null
+            warn "GPT backend: atomic config write failed"
+            INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+            return 1
+        fi
+    elif ! chmod 600 "$config" 2>/dev/null; then
+        warn "GPT backend: cannot chmod 600 $config"
+        INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+        return 1
+    fi
+
+    # Sync the profile token. If this fails after a successful config write,
+    # roll the config back from the just-created backup (or remove a new one).
+    local profile_normalized
+    profile_normalized=$(printf '%s' "$updated" | jq -S . 2>/dev/null)
+    if [[ -n "$profile_normalized" && "$profile_normalized" == "$(jq -S . "$profile" 2>/dev/null)" ]]; then
+        if ! chmod 600 "$profile" 2>/dev/null; then
+            warn "GPT backend: cannot chmod 600 $profile"
+            INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+            return 1
+        fi
+    else
+        if ! gpt_atomic_write "$profile" "$updated"; then
+            # Roll the config back ONLY if we actually wrote it this run. A
+            # pristine config (need_config_write=false) is left untouched; the
+            # mv -f and the gpt_atomic_write fallback are both atomic so the
+            # restore can never leave a partial file behind.
+            if $need_config_write; then
+                if $had_config; then
+                    if [[ -n "$backup" ]]; then
+                        mv -f "$backup" "$config" 2>/dev/null || gpt_atomic_write "$config" "$prior_config" 2>/dev/null || true
+                    else
+                        gpt_atomic_write "$config" "$prior_config" 2>/dev/null || true
+                    fi
+                else
+                    rm -f "$config" 2>/dev/null || true
+                    [[ -n "$backup" ]] && rm -f "$backup" 2>/dev/null
+                fi
+            fi
+            warn "GPT backend: profile token sync failed — config rolled back"
+            INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+            return 1
+        fi
+        if ! chmod 600 "$profile" 2>/dev/null; then
+            warn "GPT backend: cannot chmod 600 $profile"
+            INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+            return 1
+        fi
+    fi
+
+    # Secure all credential-bearing profile artifacts.
+    local profiles_dir
+    profiles_dir=$(dirname "$profile")
+    if ! _gpt_secure_profile_artifacts "$profiles_dir"; then
+        warn "GPT backend: cannot secure credential-bearing profile artifacts"
+        INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+        return 1
+    fi
+
+    unset key rendered updated prior_config profile_normalized
+    ok "GPT CLIProxyAPI backend configured (key source: $source)"
+    return 0
 }
 
 # --- Main ---------------------------------------------------------------

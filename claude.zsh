@@ -271,6 +271,39 @@ cl_profiles() {
   print -u2 "* = default. Change with: cl_switch <name>"
 }
 
+# Generic prerequisite: a profile may declare the config file its service
+# reads at startup via .service.configFile. Expand ONLY a literal leading
+# $HOME or ~ to an absolute path — never eval, never command-substitute —
+# and verify it is readable before any lock or spawn. Returns 0 when the
+# file is present and readable, or when the profile declares no configFile
+# (so CCR and other config-less profiles are unaffected). On failure it
+# prints the expanded path and a repair hint, then returns 1. The check is
+# intentionally fast (one stat) so a missing config fails in well under a
+# second instead of stalling on the full health-check timeout.
+_cl_check_service_config() {
+  local file="$1" cfg_raw cfg_expanded
+  [[ -n "$file" ]] || return 0
+  cfg_raw=$(jq -r '.service.configFile // empty' "$file" 2>/dev/null)
+  [[ -n "$cfg_raw" ]] || return 0
+
+  # Expand a literal leading $HOME or ~ only. Everything else is taken
+  # verbatim — no eval, so a malicious "$(...)" in the JSON stays inert.
+  if [[ "$cfg_raw" == '$HOME'* ]]; then
+    cfg_expanded="$HOME${cfg_raw#'$HOME'}"
+  elif [[ "$cfg_raw" == '~'* ]]; then
+    cfg_expanded="$HOME${cfg_raw#'~'}"
+  else
+    cfg_expanded="$cfg_raw"
+  fi
+
+  [[ -r "$cfg_expanded" ]] && return 0
+
+  print -u2 "cl: ERROR — required backend config file is missing or unreadable:"
+  print -u2 "cl:   $cfg_expanded"
+  print -u2 "cl:   re-run the installer (install.sh) to create it, or restore the file."
+  return 1
+}
+
 # Bring up the local proxy a profile depends on, if it declares one.
 # Returns non-zero (and explains what to run) when it cannot.
 _cl_ensure_service() {
@@ -280,6 +313,11 @@ _cl_ensure_service() {
   local health
   health=$(jq -r '.service.health // empty' "$file" 2>/dev/null)
   [[ -z "$health" ]] && return 0
+
+  # Generic prerequisite: declared config file must exist before we lock or
+  # spawn. Fails fast (<1s) with the expanded path on a missing/unreadable
+  # config, instead of waiting out the service health timeout.
+  _cl_check_service_config "$file" || return 1
 
   local svc_label timeout
   svc_label=$(jq -r '.service.label // "backend service"' "$file" 2>/dev/null)
@@ -342,10 +380,12 @@ _cl_start_service() {
     return 1
   fi
 
-  local log_name log_file
+  local log_name log_file log_offset=0
   log_name=$(jq -r '.service.logName // "backend.log"' "$file" 2>/dev/null)
   log_file="$HOME/.claude/logs/$log_name"
   mkdir -p "${log_file:h}"
+  [[ -f "$log_file" ]] && log_offset=$(wc -c < "$log_file" 2>/dev/null | tr -d ' ') || log_offset=0
+  [[ "$log_offset" == <-> ]] || log_offset=0
 
   print -u2 "$tag: starting $svc_label ..."
   nohup sh -c "${start_tpl//\{bin\}/$bin}" >>"$log_file" 2>&1 &
@@ -355,18 +395,65 @@ _cl_start_service() {
   command mkdir -p "$_CL_RUN_DIR"
   print -l -- "$pid" "$bin" > "$_CL_RUN_DIR/$name.pid"
 
-  local waited
-  if waited=$(_cl_wait_healthy "$health" "$timeout"); then
-    print -u2 "$tag: $svc_label up after ${waited}s (pid $pid, stop with: cl_stop $name)"
-    return 0
+  # Early process-exit detection. A misconfigured proxy (wrong config path,
+  # bad port, missing OAuth) often dies in well under a second; the previous
+  # behaviour spent the full health timeout discovering this. Poll for at
+  # most two seconds: if the service becomes healthy, succeed immediately;
+  # if the child vanishes while still unhealthy, drop straight into the
+  # common failure-reporting path. Only a still-running-but-not-yet-healthy
+  # child falls through to the full _cl_wait_healthy path.
+  local early_poll=0 early_done=0
+  while (( early_poll < 2 )); do
+    if _cl_service_healthy "$health"; then
+      print -u2 "$tag: $svc_label up after ${early_poll}s (pid $pid, stop with: cl_stop $name)"
+      return 0
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      early_done=1
+      break
+    fi
+    sleep 1
+    (( early_poll++ ))
+  done
+
+  # Still alive and not yet healthy — give it the rest of the timeout.
+  if (( ! early_done )); then
+    local waited
+    if waited=$(_cl_wait_healthy "$health" "$timeout"); then
+      print -u2 "$tag: $svc_label up after ${waited}s (pid $pid, stop with: cl_stop $name)"
+      return 0
+    fi
   fi
 
+  # Common failure-reporting path for both early exit and full-timeout cases.
   print -u2 "$tag: ERROR — $svc_label did not become healthy within ${timeout}s"
   print -u2 "$tag:   log: $log_file"
   [[ -s "$log_file" ]] && tail -n 5 "$log_file" >&2
-  hint=$(jq -r '.service.loginHint // empty' "$file" 2>/dev/null)
-  [[ -n "$hint" ]] && print -u2 "$tag:   not authorized yet? run:  ${hint//\{bin\}/$bin}"
+  # Surface the login hint ONLY when the log carries explicit authorization
+  # evidence. Generic startup noise (connection refused, config read errors,
+  # 'auth middleware', 'token cache', 'codex provider') must not trigger a
+  # misleading "re-login" prompt.
+  if _cl_log_has_auth_failure "$log_file" "$log_offset"; then
+    hint=$(jq -r '.service.loginHint // empty' "$file" 2>/dev/null)
+    [[ -n "$hint" ]] && print -u2 "$tag:   not authorized yet? run:  ${hint//\{bin\}/$bin}"
+  fi
   return 1
+}
+
+# Predicate: does <log-file> contain explicit authorization failure evidence?
+# Matches concrete phrases (HTTP 401/403, unauthorized/forbidden, oauth,
+# login required, no codex credentials, authentication required) only.
+# Broad substrings like 'auth', 'token', or 'codex' alone are deliberately
+# NOT matched because normal CLIProxyAPI startup lines contain them.
+# Returns 0 when auth evidence is found, 1 otherwise.
+_cl_log_has_auth_failure() {
+  local log="$1" offset="${2:-0}"
+  [[ -n "$log" && -r "$log" ]] || return 1
+  [[ "$offset" == <-> ]] || offset=0
+  # Inspect only bytes appended by this launch. HTTP status numbers require
+  # token boundaries; OAuth alone is informational unless accompanied by
+  # explicit failure/required/missing/expired evidence.
+  tail -c "+$((offset + 1))" "$log" 2>/dev/null | grep -iE '(^|[^[:digit:]])(401|403)([^[:digit:]]|$)|unauthorized|forbidden|oauth.{0,80}(fail|required|missing|expired|invalid|denied)|((fail|required|missing|expired|invalid|denied).{0,80}oauth)|login[[:space:]]+required|no[[:space:]]+codex[[:space:]]+credentials|authentication[[:space:]]+required' >/dev/null 2>&1
 }
 
 # A reachable service only proves the process is up, not that the backend is
