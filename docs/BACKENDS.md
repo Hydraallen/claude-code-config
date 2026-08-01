@@ -69,7 +69,8 @@ cl_glm
 ```
 
 Coding Plan covers **`glm-5.2` (1M in / 128K out), `glm-5-turbo` (200K),
-`glm-4.7` (200K)** only — those are the three mapped to opus/sonnet/haiku.
+`glm-4.7` (200K)** only — opus and sonnet both route to `glm-5.2`, haiku routes
+to `glm-5-turbo` (`glm-4.7` is covered by the plan but wired to no slot).
 `glm-5` and `glm-5.1` are auto-routed to `glm-5.2` upstream, so don't pin them.
 The vision model **`glm-5v-turbo` (200K)** has no slot of its own; reach it with
 `cl_glm --model glm-5v-turbo`.
@@ -92,11 +93,12 @@ id. Do **not** rename the model to `glm-5.2[1m]`: that is not a Z.ai model code
 and it would go out on the wire.
 
 > **Caveat — one limit, three models.** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is a
-> single client-wide value, not per-slot. It matches glm-5.2, which is the opus
-> slot and the launcher default. If you route to **sonnet (`glm-5-turbo`)** or
-> **haiku (`glm-4.7`)**, both 200K, the client will let the context grow past
-> what the server accepts and auto-compact will not save you. Keep those
-> sessions under 200K, or `cl_switch` to a backend sized for them.
+> single client-wide value, not per-slot. It matches glm-5.2, which fills both
+> the opus and sonnet slots and is the launcher default. Only **haiku
+> (`glm-5-turbo`, 200K)** is undersized: if you route to it the client will let
+> the context grow past what the server accepts and auto-compact will not save
+> you. Keep haiku sessions under 200K, or `cl_switch` to a backend sized for
+> them.
 
 Docs: <https://docs.bigmodel.cn/cn/coding-plan/tool/claude>
 

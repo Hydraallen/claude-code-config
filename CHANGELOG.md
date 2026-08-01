@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.14.0] - 2026-08-01
+
+### Features
+- **`superpowers` is now a default-installed plugin.** It moved from `PLUGINS_OPTIONAL` (default OFF, only via `--all` / manual opt-in) into `PLUGINS_ESSENTIAL`, and its interactive-menu checkbox flips from off to on in both `install.sh` and `install.ps1`. A plain interactive install, a non-interactive `curl | bash` / `irm | iex`, and `--essential` / `-Essential` all bring it along now.
+- **`cl_glm` sonnet/haiku slots remapped.** `profiles/glm.json` now maps opus **and** sonnet to `glm-5.2` (1M / 128K out), and haiku to `glm-5-turbo` (200K). Previously sonnet was `glm-5-turbo` and haiku was `glm-4.7`. The 200K caveat in the profile note and `docs/BACKENDS.md(.zh-CN)` now applies to **haiku only** (sonnet is now the full 1M glm-5.2); `glm-4.7` is still covered by the Coding Plan but wired to no slot.
+
+### Design Rationale
+- **Menu default + array move, together.** Flipping only the checkbox would still leave `superpowers` in the optional group, so `--essential` and the non-interactive essential path would skip it while the menu lured users into expecting it. Moving it into `PLUGINS_ESSENTIAL` makes the three install paths (interactive, non-interactive, `--essential`) agree, and the checkbox default now just reflects reality.
+- **`tests/test_plugin_resolution.sh` Case 6 updated.** With `superpowers` in the essential set, an essential-only run no longer prunes it; the fixture now expects only `ecc@ecc` pruned. Case 7's guard fixture is unaffected — it only needs two catalogue plugins with an empty resolved set.
+
 ## [2.13.0] - 2026-07-31
 
 ### Features

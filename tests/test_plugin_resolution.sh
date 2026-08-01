@@ -85,7 +85,7 @@ while IFS= read -r _k; do
     [[ -n "$_k" ]] && CATALOGUE_PLUGINS+=( "$_k" )
 done < <(build_plugin_catalogue)
 
-# Selected this run = ESSENTIAL only (note: no ecc, and superpowers is now optional).
+# Selected this run = ESSENTIAL only (note: no ecc — superpowers is now essential).
 RESOLVED_PLUGINS=( "${PLUGINS_ESSENTIAL[@]}" )
 
 # Installed = the user's actual installed_plugins.json keys.
@@ -105,8 +105,8 @@ INSTALLED_PLUGINS=(
     "ralph-loop@claude-plugins-official"
     "superpowers@claude-plugins-official"
 )
-assert_eq "real fixture: ecc + superpowers pruned (both optional, installed, not selected)" \
-    "ecc@ecc superpowers@claude-plugins-official" "$(run_prune)"
+assert_eq "real fixture: ecc pruned (optional, installed, not selected; superpowers is essential)" \
+    "ecc@ecc" "$(run_prune)"
 
 # code-review is a user third-party plugin -> must never be pruned.
 if prune_contains "code-review@claude-plugins-official"; then

@@ -183,6 +183,7 @@ $MATTPOCOCK_SKILLS = @(
 
 $PLUGINS_ESSENTIAL = @(
     "andrej-karpathy-skills@karpathy-skills"
+    "superpowers@claude-plugins-official"
     "context7@claude-plugins-official"
     "commit-commands@claude-plugins-official"
     "document-skills@anthropic-agent-skills"
@@ -198,7 +199,6 @@ $PLUGINS_ESSENTIAL = @(
 # Optional plugins: default OFF, installed only via explicit -All or manual opt-in
 $PLUGINS_OPTIONAL = @(
     "ecc@ecc"
-    "superpowers@claude-plugins-official"
     "frontend-slides@frontend-slides"
     "ppt-master@ppt-master"
 )
@@ -330,7 +330,7 @@ function Show-InteractiveMenu {
         )}
         @{ Label = "Workflow"; Hint = "planning, iteration, code quality, meta-config"; Items = @(
             @{ Label = "andrej-karpathy-skills"; Desc = "Karpathy coding guidelines (Think-First, Simplicity, Surgical)"; Default = $true; Id = "plug-andrej-karpathy-skills" }
-            @{ Label = "superpowers";     Desc = "Planning, brainstorming, TDD, debugging"; Default = $false; Id = "plug-superpowers" }
+            @{ Label = "superpowers";     Desc = "Planning, brainstorming, TDD, debugging"; Default = $true;  Id = "plug-superpowers" }
             @{ Label = "mattpocock/skills"; Desc = "17 agent skills via npx: tdd, to-prd, diagnosing-bugs, handoff, teach... (mattpocock)"; Default = $true; Id = "skill-mattpocock" }
             @{ Label = "feature-dev";     Desc = "Guided feature development";        Default = $true;  Id = "plug-feature-dev" }
             @{ Label = "ralph-loop";      Desc = "Automated iteration loop";          Default = $true;  Id = "plug-ralph-loop" }

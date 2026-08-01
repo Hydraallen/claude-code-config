@@ -64,7 +64,8 @@ cl_glm
 ```
 
 Coding Plan 只覆盖 **`glm-5.2`（1M 输入 / 128K 输出）、`glm-5-turbo`（200K）、
-`glm-4.7`（200K）** 这三个模型 —— 它们分别映射到 opus/sonnet/haiku。
+`glm-4.7`（200K）** 这三个模型 —— opus 和 sonnet 都路由到 `glm-5.2`，haiku 路由到
+`glm-5-turbo`（`glm-4.7` 计划内覆盖，但不绑定到任何槽位）。
 `glm-5` 和 `glm-5.1` 在上游会被自动路由到 `glm-5.2`，所以不要固定写它们。
 视觉模型 **`glm-5v-turbo`（200K）** 没有自己的槽位；用
 `cl_glm --model glm-5v-turbo` 访问。
@@ -85,10 +86,10 @@ Coding Plan 只覆盖 **`glm-5.2`（1M 输入 / 128K 输出）、`glm-5-turbo`�
 **不要**把模型名改成 `glm-5.2[1m]`：那不是一个 Z.ai 模型代号，而且它会被原样发到线上。
 
 > **注意 —— 一个上限，三个模型。** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 是一个客户端级别的
-> 全局值，不是按槽位区分的。它是按 glm-5.2 配的，也就是 opus 槽位、启动器的默认模型。
-> 如果你切到 **sonnet（`glm-5-turbo`）** 或 **haiku（`glm-4.7`）**，这两个都只有 200K，
-> 客户端会放任上下文涨过服务端能接受的长度，而自动压缩救不了你。这类会话请控制在
-> 200K 以内，或者 `cl_switch` 到一个尺寸匹配的后端。
+> 全局值，不是按槽位区分的。它是按 glm-5.2 配的，glm-5.2 同时占 opus 和 sonnet 两个槽位、
+> 也是启动器的默认模型。只有 **haiku（`glm-5-turbo`，200K）** 偏小：切到它时客户端会放任
+> 上下文涨过服务端能接受的长度，而自动压缩救不了你。haiku 会话请控制在 200K 以内，或者
+> `cl_switch` 到一个尺寸匹配的后端。
 
 文档：<https://docs.bigmodel.cn/cn/coding-plan/tool/claude>
 

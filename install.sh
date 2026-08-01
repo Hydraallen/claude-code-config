@@ -374,6 +374,7 @@ MATTPOCOCK_SKILLS=(
 
 PLUGINS_ESSENTIAL=(
     "andrej-karpathy-skills@karpathy-skills"
+    "superpowers@claude-plugins-official"
     "context7@claude-plugins-official"
     "commit-commands@claude-plugins-official"
     "document-skills@anthropic-agent-skills"
@@ -389,7 +390,6 @@ PLUGINS_ESSENTIAL=(
 # Optional plugins: default OFF, installed only via explicit --all or manual opt-in
 PLUGINS_OPTIONAL=(
     "ecc@ecc"
-    "superpowers@claude-plugins-official"
     "frontend-slides@frontend-slides"
     "ppt-master@ppt-master"
 )
@@ -565,7 +565,7 @@ Codex CLI|Codex adversarial review (openai/codex)|0|review-codex")
     GROUP_LABELS+=("Workflow")
     GROUP_HINTS+=("planning, iteration, code quality, meta-config")
     GROUP_ITEMS+=("andrej-karpathy-skills|Karpathy coding guidelines (Think-First, Simplicity, Surgical)|1|plug-andrej-karpathy-skills
-superpowers|Planning, brainstorming, TDD, debugging|0|plug-superpowers
+superpowers|Planning, brainstorming, TDD, debugging|1|plug-superpowers
 mattpocock/skills|17 agent skills via npx: tdd, to-prd, diagnosing-bugs, handoff, teach… (mattpocock)|1|skill-mattpocock
 feature-dev|Guided feature development|1|plug-feature-dev
 ralph-loop|Automated iteration loop|1|plug-ralph-loop
