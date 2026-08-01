@@ -1,6 +1,6 @@
 {
   "label": "ChatGPT subscription (Codex OAuth via CLIProxyAPI)",
-  "note": "Reuses your ChatGPT Plus/Pro subscription through a local CLIProxyAPI instance, which exposes an Anthropic-compatible /v1/messages endpoint. Run the login step once; tokens land in ~/.cli-proxy-api and hot-reload. Anthropic does not support routing Claude Code to non-Claude models through a gateway, and this path relies on a reverse-engineered OAuth flow — it may break without notice.",
+  "note": "Reuses your ChatGPT Plus/Pro subscription through a local CLIProxyAPI instance, which exposes an Anthropic-compatible /v1/messages endpoint. Run the login step once; tokens land in ~/.cli-proxy-api and hot-reload. Anthropic does not support routing Claude Code to non-Claude models through a gateway, and this path relies on a reverse-engineered OAuth flow — it may break without notice. MODEL SLOTS: opus=gpt-5.6-sol (flagship reasoning), sonnet=gpt-5.6-terra (balanced, roughly the mini tier), haiku=gpt-5.6-luna (lightweight, lowest cost). CLIProxyAPI reuses OpenAI's official model ids verbatim. CONTEXT WINDOW: CLAUDE_CODE_MAX_CONTEXT_TOKENS / CLAUDE_CODE_AUTO_COMPACT_WINDOW / CLAUDE_CODE_MAX_OUTPUT_TOKENS are one client-wide value each, not per-slot. They are set to 1000000 / 1000000 / 128000 to match the gpt-5.6 family (~1.05M API context window, 128K output). 272K is a billing-tier threshold (input>272K triggers 2x/1.5x pricing), not a context cap. If you route the launcher to a smaller GPT/Codex model, lower these values yourself.",
   "credentialKeys": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"],
   "service": {
     "label": "CLIProxyAPI",
@@ -14,8 +14,23 @@
   },
   "unset": [],
   "env": {
-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8317",
     "ANTHROPIC_AUTH_TOKEN": "YOUR_CLIPROXYAPI_KEY",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8317",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-5.6-luna",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": "GPT-5.6 Luna",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION": "OpenAI GPT-5.6 Luna 轻量快速模型，性价比最高 (~1.05M 上下文 / 128K 输出)",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES": "effort,thinking,adaptive_thinking,interleaved_thinking",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-5.6-terra",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "GPT-5.6 Terra",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION": "OpenAI GPT-5.6 Terra 均衡模型，约对应 mini 档 (~1.05M 上下文 / 128K 输出)",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "gpt-5.6-sol",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "GPT-5.6 Sol",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION": "OpenAI GPT-5.6 Sol 旗舰推理模型 (~1.05M 上下文 / 128K 输出)",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES": "effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1000000",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "128000",
     "API_TIMEOUT_MS": "3000000"
   }
 }
