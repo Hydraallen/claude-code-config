@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.16.0] - 2026-08-02
+
+### Features
+- **CLIProxyAPI outbound `proxy-url` support (config-optional).** `configure_gpt_backend` now reconciles an optional top-level `proxy-url:` scalar in `~/.cli-proxy-api/config.yaml`, which CLIProxyAPI consumes to route its upstream HTTPS through a local forwarder (e.g. an authenticated corporate or VPN proxy). The installer never invents a value: it resolves the URL by strict precedence — **existing valid config `proxy-url` > explicit `GPT_PROXY_URL` env var > omitted** — before any filesystem write, and the normalized config optionally carries a 6th line (`proxy-url: "…"`) between `auth-dir` and `api-keys`. Accepted schemes are `http://`, `https://`, `socks5://`, `socks5h://`; credentials in the URL (`scheme://user:pass@host:port`) are allowed. `docs/BACKENDS.md` and `docs/BACKENDS.zh-CN.md` document the contract end-to-end.
+- **Standard proxy env vars are deliberately not auto-persisted.** `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` are ignored by the resolver — they routinely carry short-lived credentials, and silently writing them into `config.yaml` would break idempotency and leak secrets at rest. Use the explicit `GPT_PROXY_URL` (or a hand-written `proxy-url:`) to opt in.
+- **Fail-safe on a malformed `proxy-url`.** A top-level `proxy-url:` that is present but unparseable, has an unsupported scheme, or contains control/YAML-injection characters causes `configure_gpt_backend` to increment `INSTALL_CRITICAL` and return **without touching** `config.yaml` or `gpt.json` (no silent rewrite that strips the user's value). A malformed explicit `GPT_PROXY_URL` fails the same way.
+
+### Design Rationale
+- **Precedence mirrors the key.** The key resolver already treats the existing config as authoritative and falls back to a single explicit env var; the proxy resolver follows the same shape (`config > GPT_PROXY_URL > none`) so users reason about one ladder, not two. The URL value is captured through a temp-file redirect (never command substitution) so `GPT_PROXY_SOURCE` lands in the calling shell and the value is never echoed, logged, or leaked — not even under `set -x`, which the coordinator suppresses for the inner function. The renderer defensively double-quotes the scalar and rejects values containing `"`, `\`, or whitespace/CR/LF/tab, so a malicious `proxy-url` cannot rewrite the normalized document.
+- **One outbound proxy, two independent planes.** CLIProxyAPI's `proxy-url` (port `8317`, the `gpt` backend) and CCR's upstream proxy (port `3456`, the `ccr` backend) are intentionally separate and never share state. CCR runs on its own port `3456`, loads its upstream proxy via the `gateway-proxy-preload.cjs` preload + the `CCR_UPSTREAM_PROXY_URL` env var backed by Undici's `ProxyAgent`, and exposes no enabled proxy setting in its GUI; `cl_ccr` therefore never traverses CLIProxyAPI on `8317`. Documenting both in the same subsection keeps the boundary explicit.
+- **Why a 6th line and not a separate file.** CLIProxyAPI reads `proxy-url` from the same `config.yaml` it already loads via `--config`, so reusing that file (rather than introducing a sidecar) keeps a single source of truth, matches the launcher's hard-coded path, and lets the existing idempotency/backup machinery apply unchanged: a config already normalized with `proxy-url` is a byte-for-byte no-op on re-run (no backup written).
+
+### Notes & Caveats
+- **A direct-connect first run can enter an auth-cooldown.** With no `proxy-url`, CLIProxyAPI connects to OpenAI directly; an initial 500 from the upstream can trigger a secondary `503` auth-cooldown state that persists for the process. Routing the upstream through a stable `proxy-url` avoids the direct-connect path. This is upstream CLIProxyAPI runtime behaviour, not installer behaviour.
+- **The proxy URL is treated as a secret.** It may contain credentials and is never printed by the installer, the resolver, or the renderer; captured output and xtrace are both scrubbed. Store it in `~/.cli-proxy-api/config.yaml` (mode `600`) or pass it via `GPT_PROXY_URL` for a single run.
+- **Windows unchanged.** `install.ps1` still does not create or write `~/.cli-proxy-api/config.yaml`; `proxy-url` reconciliation is Bash/Zsh-only, identical to the rest of GPT auto-configuration.
+
 ## [2.15.0] - 2026-08-02
 
 ### Features

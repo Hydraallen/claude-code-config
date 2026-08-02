@@ -16,5 +16,6 @@ settings.local.json
 
 # Temp
 .superpowers/
+.claude/worktrees/
 __pycache__/
 *.pyc

@@ -3153,22 +3153,211 @@ gpt_resolve_key() {
     return 1
 }
 
-# Render the normalized 5-line CLIProxyAPI config.yaml body for a given key.
-# Rejects an empty key. Output is deterministic and byte-for-byte stable.
-# The optional second argument is the auth-dir value (defaults to the literal
-# "~/.cli-proxy-api" so CLIProxyAPI expands it at runtime). A custom auth_dir
-# is rendered as a double-quoted YAML scalar; values containing a double quote,
-# backslash, or control char are rejected so the output can never be broken or
-# injected through the path.
+# ------------------------------------------------------------
+# proxy-url helpers (CLIProxyAPI outbound proxy).
+#
+# CLIProxyAPI consumes an optional top-level `proxy-url:` scalar from
+# config.yaml to route its upstream HTTPS requests through a local forwarder.
+# The installer never invents a value: it only preserves an existing valid
+# config value or honours an explicit GPT_PROXY_URL env var. Standard proxy
+# env vars (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY) are deliberately NOT read —
+# they routinely carry short-lived credentials and silently persisting them
+# would break idempotency. The URL value itself is never logged.
+# ------------------------------------------------------------
+
+# Validate a candidate proxy-url scalar. Restricts the value to a safe URL
+# shape (http/https/socks5/socks5h scheme + non-empty authority) drawn from a
+# portable character set, rejecting the YAML-injection and control characters
+# (quotes, backslash, whitespace, CR/LF/tab) that could break or rewrite the
+# normalized document. Returns 0/1; never prints.
+_gpt_valid_proxy_url_value() {
+    local v="$1"
+    [[ -n "$v" ]] || return 1
+    # Reject YAML-injection / control characters wholesale.
+    case "$v" in
+        *'"'*|*"'"*|*'\'*|*' '*|*$'\t'*|*$'\n'*|*$'\r'*) return 1 ;;
+    esac
+    # Scheme + non-empty remainder.
+    local rest
+    if [[ "$v" =~ ^(https?|socks5h?)://(.*)$ ]]; then
+        rest="${BASH_REMATCH[2]}"
+    else
+        return 1
+    fi
+    [[ -n "$rest" ]] || return 1
+    # Split authority from path/query. The authority ends at the first '/' or
+    # '?' (or end of string) and MUST be non-empty: `http:///path` and
+    # `http://?x=y` both yield an empty authority and are rejected. A missing
+    # host is the primary authority-less trap.
+    local authority pathquery
+    if [[ "$rest" =~ ^([^/?]*)(.*)$ ]]; then
+        authority="${BASH_REMATCH[1]}"
+        pathquery="${BASH_REMATCH[2]}"
+    else
+        return 1
+    fi
+    [[ -n "$authority" ]] || return 1
+    # Validate the authority structurally. Two legal host shapes:
+    #   (A) bracketed IPv6:   [userinfo@][host](:port)?   — host inside [..]
+    #   (B) plain hostname:   [userinfo@]host(:port)?     — host has no ':'
+    # Constraints enforced by the regexes + port range check below:
+    #   - userinfo is optional, drawn from a safe charset that EXCLUDES '@', so
+    #     at most one '@' can ever appear in the authority (`a@@host` rejected).
+    #   - host is non-empty. A bracketed IPv6 host requires balanced [..]; a
+    #     plain host excludes ':', '[', ']' so unbracketed IPv6 (`::1:1080`),
+    #     port-with-no-host (`:1080`), and userinfo-with-no-host (`user@/path`)
+    #     all fail to match.
+    #   - a port, when its ':' separator is present, MUST be all digits (the
+    #     regex `:[0-9]+` rejects empty/non-numeric) and is then range-checked
+    #     to 1..65535 below (rejects 0 and 99999).
+    # The regexes are held in variables so bracket/colon metacharacters are not
+    # re-parsed by the [[ ]] word splitter (Bash 3.2-safe form).
+    local _br_ipv6_re='^([A-Za-z0-9._~%:+-]*@)?\[([A-Za-z0-9:.]+)\](:[0-9]+)?$'
+    local _plain_re='^([A-Za-z0-9._~%:+-]*@)?([A-Za-z0-9._~%-]+)(:[0-9]+)?$'
+    local host="" port_str=""
+    if [[ "$authority" =~ $_br_ipv6_re ]]; then
+        host="${BASH_REMATCH[2]}"
+        port_str="${BASH_REMATCH[3]}"
+    elif [[ "$authority" =~ $_plain_re ]]; then
+        host="${BASH_REMATCH[2]}"
+        port_str="${BASH_REMATCH[3]}"
+    else
+        return 1
+    fi
+    [[ -n "$host" ]] || return 1
+    # Port range: 1..65535 when the optional :port is present.
+    if [[ -n "$port_str" ]]; then
+        local port="${port_str#:}"
+        [[ "$port" =~ ^[0-9]+$ ]] || return 1
+        # Reject an oversized numeric string BEFORE the arithmetic comparison:
+        # Bash uses 64-bit signed integers, so a >5-digit value (e.g. a 20-digit
+        # uint64-overflow probe) would wrap/saturate and could slip past a bare
+        # `-le 65535` check. The largest legal port (65535) is 5 digits, so a
+        # length cap is a safe, branch-shared pre-filter for both authority
+        # shapes before the precise 1..65535 range test.
+        [[ "${#port}" -le 5 ]] || return 1
+        [[ "$port" -ge 1 && "$port" -le 65535 ]] || return 1
+    fi
+    # Optional path/query charset (may be empty).
+    if [[ -n "$pathquery" ]]; then
+        local _pq_re='^[]A-Za-z0-9._~%:@/?&=+-]+$'
+        [[ "$pathquery" =~ $_pq_re ]] || return 1
+    fi
+    return 0
+}
+
+# Return 0 if <path> contains a top-level (column-0) `proxy-url:` mapping key,
+# regardless of whether its value is valid. Used by the resolver/coordinator
+# to distinguish "absent" (fall through to env) from "present but malformed"
+# (fail safe). Nested (indented) proxy-url keys are top-level invisible.
+_gpt_proxy_url_key_present() {
+    local path="$1"
+    [[ -r "$path" ]] || return 1
+    awk 'BEGIN{f=0} /^proxy-url:/{f=1} END{exit f?0:1}' "$path" 2>/dev/null
+}
+
+# Extract and parse a top-level `proxy-url:` scalar from a CLIProxyAPI
+# config.yaml. Accepts http://, https://, socks5:// and socks5h://, quoted
+# (single/double) or unquoted, with an optional trailing comment. Rejects
+# nested keys, empty/bare values, unsupported schemes, malformed URLs,
+# control characters, and YAML-injection attempts (trailing non-comment
+# content after a quoted scalar). Prints the validated value and returns 0
+# on a clean hit; returns 1 (printing nothing) for absent/rejected values.
+gpt_extract_proxy_url() {
+    local path="$1" raw_value
+    [[ -r "$path" ]] || return 1
+    raw_value=$(awk '
+        BEGIN { found = 0; bad = 0; value = "" }
+        /^proxy-url:/ {
+            if (found) { bad = 1; next }
+            found = 1
+            line = $0
+            sub(/^proxy-url:[ \t]*/, "", line)
+            if (line == "" || substr(line, 1, 1) == "#") { bad = 1; next }
+            q = substr(line, 1, 1)
+            if (q == "\"" || q == "\x27") {
+                body = substr(line, 2)
+                i = index(body, q)
+                if (i == 0) { bad = 1; next }
+                value = substr(body, 1, i - 1)
+                trail = substr(body, i + 1)
+                gsub(/^[ \t]+/, "", trail)
+                if (trail != "" && substr(trail, 1, 1) != "#") bad = 1
+                next
+            }
+            # Unquoted scalar: drop a trailing inline comment, then trim.
+            value = line
+            sub(/[ \t]+#.*/, "", value)
+            sub(/[ \t]+$/, "", value)
+            if (value == "") bad = 1
+            next
+        }
+        END {
+            if (bad || !found) exit 1
+            print value
+        }
+    ' "$path" 2>/dev/null) || return 1
+    [[ -n "$raw_value" ]] || return 1
+    _gpt_valid_proxy_url_value "$raw_value" || return 1
+    printf '%s' "$raw_value"
+}
+
+# Resolve the effective proxy-url with fixed precedence
+#   existing valid config proxy-url  >  GPT_PROXY_URL env  >  none (empty)
+# and set GPT_PROXY_SOURCE to "config" | "env" | "none" in the calling shell.
+# Standard proxy env vars are intentionally ignored. A top-level proxy-url
+# that is present but malformed (or an explicit GPT_PROXY_URL that fails
+# validation) returns 1 so the coordinator can fail safe WITHOUT writing.
+# The URL value is printed only on a successful config/env resolution.
+gpt_resolve_proxy_url() {
+    local config="$1" v=""
+    GPT_PROXY_SOURCE="none"
+    if _gpt_proxy_url_key_present "$config"; then
+        if v=$(gpt_extract_proxy_url "$config" 2>/dev/null) && [[ -n "$v" ]]; then
+            GPT_PROXY_SOURCE="config"
+            printf '%s' "$v"
+            return 0
+        fi
+        # Present but unparseable/invalid: fail safe (no value emitted).
+        return 1
+    fi
+    if [[ -n "${GPT_PROXY_URL:-}" ]] && _gpt_valid_proxy_url_value "$GPT_PROXY_URL"; then
+        GPT_PROXY_SOURCE="env"
+        printf '%s' "$GPT_PROXY_URL"
+        return 0
+    fi
+    if [[ -n "${GPT_PROXY_URL:-}" ]]; then
+        # Explicit env value present but invalid: fail safe.
+        return 1
+    fi
+    return 0
+}
+
+# Render the normalized CLIProxyAPI config.yaml body for a given key. Rejects
+# an empty key. Output is deterministic and byte-for-byte stable. The optional
+# second argument is the auth-dir value (defaults to the literal
+# "~/.cli-proxy-api" so CLIProxyAPI expands it at runtime); a custom auth_dir
+# is rendered as a double-quoted YAML scalar, and values containing a double
+# quote, backslash, or control char are rejected. The optional third argument
+# is a proxy-url: when empty (or omitted) the original 5-line body is emitted
+# unchanged; when non-empty it must pass _gpt_valid_proxy_url_value and is
+# appended as a quoted `proxy-url:` scalar on its own line between auth-dir
+# and api-keys, yielding a stable 6-line document.
 gpt_render_config() {
-    local key="$1" auth_dir="${2:-~/.cli-proxy-api}"
+    local key="$1" auth_dir="${2:-~/.cli-proxy-api}" proxy_url="${3:-}"
     _gpt_valid_key_value "$key" || return 1
     case "$auth_dir" in
         *'"'*|*'\'*|*$'\n'*|*$'\t'*|*$'\r'*) return 1 ;;
     esac
+    if [[ -n "$proxy_url" ]]; then
+        _gpt_valid_proxy_url_value "$proxy_url" || return 1
+    fi
     printf '%s\n' 'host: "127.0.0.1"'
     printf '%s\n' 'port: 8317'
     printf 'auth-dir: "%s"\n' "$auth_dir"
+    if [[ -n "$proxy_url" ]]; then
+        printf 'proxy-url: "%s"\n' "$proxy_url"
+    fi
     printf '%s\n' 'api-keys:'
     printf '  - "%s"\n' "$key"
 }
@@ -3190,25 +3379,44 @@ gpt_render_config() {
 # ============================================================
 
 # Create a 600-mode timestamped backup of <path> next to it. Prints the backup
-# path to stdout and returns 0 on success, 1 otherwise. Creates the destination
-# at mode 600 before copying bytes, avoiding any cp -p mode-inheritance window.
-# The original file is never modified on any path.
+# path to stdout and returns 0 on success, 1 otherwise. The destination is
+# reserved ATOMICALLY (noclobber create) so two concurrent same-timestamp calls
+# can never collide on one path: the loser of the primary slot walks a numeric
+# suffix until its own atomic reservation succeeds. Both snapshots survive. The
+# trailing ".bak" is preserved on every variant so `config.yaml.*.bak` style
+# globs keep matching, and mode 600 is set before any bytes are copied (no
+# cp -p mode-inheritance window). The original file is never modified.
 gpt_backup_file() {
-    local path="$1" dir base stamp backup restore_umask
+    local path="$1" dir base stamp candidate restore_umask i=0
     [[ -f "$path" ]] || return 1
     dir=$(dirname "$path")
     base=$(basename "$path")
     stamp=$(date '+%Y%m%d%H%M%S')
-    backup="${dir%/}/${base}.${stamp}.bak"
     restore_umask=$(umask)
     umask 077
-    if ! ( : > "$backup" && chmod 600 "$backup" && cp "$path" "$backup" ) 2>/dev/null; then
+    candidate="${dir%/}/${base}.${stamp}.bak"
+    # Atomic reservation: `( set -C; : > "$candidate" )` creates the path only
+    # if it does not already exist (noclobber), so the check-and-create is a
+    # single indivisible step that survives a concurrent same-timestamp race.
+    # On collision, walk a numeric suffix (still ending in .bak) until a free
+    # slot is reserved. The bound guards against a wedged filesystem loop.
+    while ! ( set -C; : > "$candidate" ) 2>/dev/null; do
+        i=$((i + 1))
+        candidate="${dir%/}/${base}.${stamp}.${i}.bak"
+        if [[ "$i" -ge 1000 ]]; then
+            umask "$restore_umask"
+            return 1
+        fi
+    done
+    # We now exclusively own `candidate` (created under umask 077 -> mode 600).
+    # A failure here must release the reservation so a later run can retry.
+    if ! chmod 600 "$candidate" 2>/dev/null || ! cp "$path" "$candidate" 2>/dev/null; then
+        rm -f "$candidate" 2>/dev/null
         umask "$restore_umask"
-        rm -f "$backup" 2>/dev/null
         return 1
     fi
     umask "$restore_umask"
-    printf '%s' "$backup"
+    printf '%s' "$candidate"
 }
 
 # Atomically replace <path> with <content>. The temp file is created in the
@@ -3344,22 +3552,79 @@ _configure_gpt_backend_impl() {
     [[ -n "$key" ]] || { warn "GPT backend: resolved empty key"; INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1)); return 1; }
     local source="$GPT_KEY_SOURCE"
 
+    # Resolve the outbound proxy-url with fixed precedence
+    #   existing valid config  >  GPT_PROXY_URL env  >  omitted
+    # BEFORE any filesystem write. A top-level proxy-url that is present but
+    # malformed (or an explicit GPT_PROXY_URL that fails validation) is
+    # fail-safe: increment INSTALL_CRITICAL and return without touching config
+    # or profile. The URL value is captured through a temp-file redirect (not
+    # command substitution) so the GPT_PROXY_SOURCE side effect lands in this
+    # shell and the value is never echoed. xtrace is already suppressed by the
+    # configure_gpt_backend wrapper for this whole inner function.
+    GPT_PROXY_SOURCE=""
+    local proxy_url="" _proxy_tmp
+    _proxy_tmp=$(mktemp 2>/dev/null) || { warn "GPT backend: mktemp failed"; INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1)); return 1; }
+    if ! gpt_resolve_proxy_url "$config" > "$_proxy_tmp" 2>/dev/null; then
+        rm -f "$_proxy_tmp"
+        warn "GPT backend: malformed proxy-url in $(basename "$config") — leaving config and profile untouched"
+        INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+        return 1
+    fi
+    proxy_url=$(cat "$_proxy_tmp" 2>/dev/null)
+    rm -f "$_proxy_tmp"
+
     # Compute BOTH target bodies up front; a parse failure aborts before any
     # write so the on-disk state stays consistent. The auth-dir value tracks
     # GPT_CONFIG_DIR so a custom config directory is reflected in the rendered
-    # config (default literal "~/.cli-proxy-api" so CLIProxyAPI expands it).
-    local rendered updated auth_dir="~/.cli-proxy-api"
-    [[ -n "${GPT_CONFIG_DIR:-}" ]] && auth_dir="$GPT_CONFIG_DIR"
-    rendered=$(gpt_render_config "$key" "$auth_dir") || {
+    # config. The canonical default is the literal "~/.cli-proxy-api" (which
+    # CLIProxyAPI expands at runtime); a GPT_CONFIG_DIR that merely reproduces
+    # the default location keeps the literal so a hand-written canonical config
+    # is a byte-for-byte idempotent no-op. Only a directory that diverges from
+    # $HOME/.cli-proxy-api forces its absolute path into the rendered scalar.
+    local rendered updated auth_dir="~/.cli-proxy-api" custom_dir=false service_cfg=""
+    if [[ -n "${GPT_CONFIG_DIR:-}" && "$GPT_CONFIG_DIR" != "$HOME/.cli-proxy-api" ]]; then
+        auth_dir="$GPT_CONFIG_DIR"
+        custom_dir=true
+        service_cfg="${GPT_CONFIG_DIR%/}/config.yaml"
+    fi
+    rendered=$(gpt_render_config "$key" "$auth_dir" "$proxy_url") || {
         warn "GPT backend: failed to render config"
         INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
         return 1
     }
-    updated=$(jq --arg key "$key" '.env.ANTHROPIC_AUTH_TOKEN = $key' "$profile" 2>/dev/null) || {
-        warn "GPT backend: profile JSON parse failed"
-        INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
-        return 1
-    }
+    # Sync the profile token. When GPT_CONFIG_DIR diverges from the default,
+    # also rewrite the launcher-facing .service.configFile and the config path
+    # embedded in .service.start so claude.zsh launches CLIProxyAPI against the
+    # SAME config the installer just wrote. The default path is left untouched
+    # (the shipped profile already points at ~/.cli-proxy-api/config.yaml). The
+    # rewrite is guarded so a profile whose .service is a string or lacks the
+    # expected string fields is passed through unchanged. The whole normalized
+    # body is computed before any write, so the existing transactional rollback
+    # (config restored from backup if the profile atomic write fails) still
+    # holds: either both the token AND the service paths land together or
+    # nothing does.
+    if $custom_dir; then
+        updated=$(jq --arg key "$key" --arg cfg "$service_cfg" '
+            .env.ANTHROPIC_AUTH_TOKEN = $key
+            | if (.service | type) == "object"
+                and (.service.configFile | type) == "string"
+                and (.service.start | type) == "string"
+                and ($cfg | . != "")
+              then .service.configFile = $cfg
+                 | .service.start |= gsub("[^ \"]*config\\.yaml"; $cfg)
+              else . end
+        ' "$profile" 2>/dev/null) || {
+            warn "GPT backend: profile JSON parse failed"
+            INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+            return 1
+        }
+    else
+        updated=$(jq --arg key "$key" '.env.ANTHROPIC_AUTH_TOKEN = $key' "$profile" 2>/dev/null) || {
+            warn "GPT backend: profile JSON parse failed"
+            INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
+            return 1
+        }
+    fi
     printf '%s' "$updated" | jq -e . >/dev/null 2>&1 || {
         warn "GPT backend: normalized profile JSON invalid"
         INSTALL_CRITICAL=$((INSTALL_CRITICAL + 1))
@@ -3460,7 +3725,7 @@ _configure_gpt_backend_impl() {
         return 1
     fi
 
-    unset key rendered updated prior_config profile_normalized
+    unset key rendered updated prior_config profile_normalized proxy_url
     ok "GPT CLIProxyAPI backend configured (key source: $source)"
     return 0
 }

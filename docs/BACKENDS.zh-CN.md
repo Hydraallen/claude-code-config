@@ -139,6 +139,10 @@ api-keys:
   - "<解析出的 key>"
 ```
 
+**只有一行是可选的：** 当解析出了一个出站 `proxy-url`（见下面的
+「第 4b 步 —— 出站代理（`proxy-url`）」），会在 `auth-dir` 和 `api-keys` 之间插进
+第 6 行 `proxy-url: "…"`；没解析出来时，上面这个 5 行形态就按字节原样输出，不变。
+
 其中三个值是关键：
 
 - **`api-keys` 必须非空。** 如果这个列表为空或者根本没写，CLIProxyAPI 会直接把它的
@@ -184,6 +188,50 @@ cl_gpt            # 或 cl_gpt_auto
 
 注意 `/healthz` 只要 HTTP 监听器起来了就返回 200 —— 它完全不能说明你的凭证是否加载
 成功、上游是否可达。健康检查是绿的但请求全失败，说明第 3 步没生效。
+
+#### 第 4b 步 —— 出站代理（`proxy-url`，可选）
+
+当你在公司/VPN 代理后面时，CLIProxyAPI 可以把它的上游 HTTPS 请求经过一个本地转发器
+发出去。安装器会协调 `config.yaml` 里一个可选的顶层 `proxy-url:` 标量；它从不自己编造
+取值。优先级和 key 一样（配置优先）：
+
+1. **配置里的 `proxy-url`。** `~/.cli-proxy-api/config.yaml` 里的顶层 `proxy-url:` 在
+   它是合法 URL 时是权威来源，优先级最高。残留的占位符会被拒绝、不会被复用。
+2. **`GPT_PROXY_URL` 环境变量。** 配置里没有 `proxy-url:` 时，显式的 `GPT_PROXY_URL`
+   会被采用。
+3. **省略。** 两者都解析不出来时，这一行就直接不写，CLIProxyAPI 直连上游。
+
+```bash
+# 一次性：给这次安装显式传一个上游代理
+GPT_PROXY_URL="http://user:secret@127.0.0.1:10808" ./install.sh
+```
+
+接受的协议是 `http://`、`https://`、`socks5://`、`socks5h://`。URL
+**可以携带凭证**（`scheme://user:pass@host:port`），且**绝不会被打印** ——
+不在正常输出里，不在警告里，也不会在 `set -x` 下泄露（协调器会在内层解析时抑制
+xtrace）。它通过临时文件重定向捕获，取值绝不经过 stdout。把它写进
+`config.yaml`（模式 `600`）或者用 `GPT_PROXY_URL` 一次性传入都行。
+
+**标准的代理环境变量被故意不自动持久化。** `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`
+会被解析器忽略 —— 它们通常带的是临时凭证，把它们静默写进 `config.yaml` 既会破坏
+幂等性，又会让密钥落盘泄漏。请用 `GPT_PROXY_URL` 或者手写的 `proxy-url:` 显式开启。
+
+**已存在但格式错误的 `proxy-url` 会安全失败。** 如果配置里有一个顶层 `proxy-url:`，
+但它解析不出来、协议不受支持，或者含有控制字符/YAML 注入字符，
+`configure_gpt_backend` 会记一条 critical 错误，然后**原样保留** `config.yaml` 和
+`gpt.json` —— 不会偷偷重写把你的值抹掉。显式的 `GPT_PROXY_URL` 格式错误时也是同样
+的处理。修正取值后再跑一次即可。
+
+> **为什么要用？** 不设 `proxy-url` 时，CLIProxyAPI 会直连 OpenAI。上游在首次直连时
+> 返回 **500** 可能会触发二次的 **503 鉴权冷却** 状态，并在进程生命周期内持续，所以
+> 登录后最先发出的几个请求会以一种「看起来不像鉴权问题」的方式失败。把上游走一条稳定
+> 的 `proxy-url` 可以完全避开这条直连路径。
+
+> **CCR 是独立的一条线。** `ccr` 后端跑在它自己的端口 `3456` 上，与这个 `8317` 代理
+> 相互独立：`cl_ccr` 永远不会经过 CLIProxyAPI。CCR 通过 `gateway-proxy-preload.cjs`
+> 预加载脚本配合 `CCR_UPSTREAM_PROXY_URL` 环境变量加载自己的上游代理，底层用的是
+> Undici 的 `ProxyAgent`，且 GUI 里的代理设置是禁用的。两条代理线互不共享状态；在这里
+> 设 `proxy-url` 不影响 CCR，反之亦然。
 
 #### 选择模型
 

@@ -153,6 +153,11 @@ api-keys:
   - "<the resolved key>"
 ```
 
+With **one optional line**: when an outbound `proxy-url` is resolved (see
+"Step 4b — outbound proxy (`proxy-url`)" below), a 6th line `proxy-url: "…"`
+is inserted between `auth-dir` and `api-keys`; when none is resolved the
+5-line form above is emitted byte-for-byte unchanged.
+
 Three of those values are load-bearing:
 
 - **`api-keys` must be non-empty.** If the list is empty or absent, CLIProxyAPI
@@ -207,6 +212,61 @@ in the background only if needed, waits for it to come up, and logs to
 Note that `/healthz` returns 200 as soon as the HTTP listener is up — it says
 nothing about whether your credentials loaded or the upstream is reachable. A
 green health check plus failing requests means step 3 didn't take.
+
+#### Step 4b — outbound proxy (`proxy-url`, optional)
+
+CLIProxyAPI can route its upstream HTTPS through a local forwarder when you are
+behind a corporate/VPN proxy. The installer reconciles an optional top-level
+`proxy-url:` scalar in `config.yaml`; it never invents one. The precedence is
+the same shape as the key (config-first):
+
+1. **Config `proxy-url`.** A top-level `proxy-url:` in
+   `~/.cli-proxy-api/config.yaml` is authoritative when it is a valid URL.
+   A leftover placeholder is rejected, not reused.
+2. **`GPT_PROXY_URL` env var.** If the config has no `proxy-url:`, an explicit
+   `GPT_PROXY_URL` is consumed.
+3. **Omitted.** If neither resolves, the line is simply absent and
+   CLIProxyAPI connects directly.
+
+```bash
+# one-shot: pass an explicit upstream proxy for this install run
+GPT_PROXY_URL="http://user:secret@127.0.0.1:10808" ./install.sh
+```
+
+Accepted schemes are `http://`, `https://`, `socks5://`, `socks5h://`. The URL
+**may contain credentials** (`scheme://user:pass@host:port`) and is **never
+printed** by the installer — not in normal output, not in warnings, not under
+`set -x` (the coordinator suppresses xtrace for the inner resolver). It is
+captured through a temp-file redirect so the value never crosses stdout. Store
+it in `config.yaml` (mode `600`) or pass it via `GPT_PROXY_URL` for a single
+run.
+
+**Standard proxy env vars are deliberately not auto-persisted.** `HTTP_PROXY`,
+`HTTPS_PROXY`, and `ALL_PROXY` are ignored by the resolver — they routinely
+carry short-lived credentials, and silently writing them into `config.yaml`
+would break idempotency and leak secrets at rest. Opt in explicitly via
+`GPT_PROXY_URL` or a hand-written `proxy-url:`.
+
+**A malformed existing `proxy-url` fails safe.** If the config carries a
+top-level `proxy-url:` that is unparseable, has an unsupported scheme, or
+contains control/YAML-injection characters, `configure_gpt_backend` records a
+critical error and returns **without touching** `config.yaml` or `gpt.json` —
+no silent rewrite strips your value. A malformed explicit `GPT_PROXY_URL` fails
+the same way. Fix the value and re-run.
+
+> **Why bother?** With no `proxy-url`, CLIProxyAPI connects to OpenAI
+> directly. An initial direct-connect **500** from the upstream can trigger a
+> secondary **503 auth-cooldown** state that lingers for the process, so the
+> first few requests after login fail in a way that does not look like an auth
+> problem. Routing the upstream through a stable `proxy-url` avoids that
+> direct-connect path entirely.
+
+> **CCR is a separate plane.** The `ccr` backend runs on its own port `3456`
+> and is independent of this `8317` proxy: `cl_ccr` never traverses
+> CLIProxyAPI. CCR loads its own upstream proxy via the `gateway-proxy-preload.cjs`
+> preload together with the `CCR_UPSTREAM_PROXY_URL` env var, backed by Undici's
+> `ProxyAgent`, and the GUI proxy setting is disabled. The two proxy planes
+> share no state; setting `proxy-url` here does not affect CCR and vice versa.
 
 #### Choosing models
 

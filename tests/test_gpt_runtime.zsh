@@ -390,6 +390,69 @@ assert_contains "current OAuth failure triggers login hint" "codex-login" "$curr
 teardown_home
 
 # ==================================================================
+# Group 5: runtime boundary — claude.zsh must NOT parse/rewrite proxy-url
+# ==================================================================
+#
+# proxy-url is owned by the installer (configure_gpt_backend) and consumed by
+# CLIProxyAPI. The launcher must treat config.yaml as opaque: it may check the
+# file exists/readable, but must never parse, strip, or rewrite a proxy-url
+# field. A regression that introduces launcher-side proxy-url handling would
+# silently clobber the installer-managed value.
+setup_home
+source_with_stubs
+
+CLAUDE_ZSH="$DIR/../claude.zsh"
+claude_src=$(<"$CLAUDE_ZSH")
+
+# Static: the launcher source must not reference the proxy-url token at all.
+# (configFile/health/bins/start are the only fields it reads; proxy-url is not
+# among them.)
+if print -- "$claude_src" | grep -nE 'proxy-url|proxy_url'; then
+  _fail "claude.zsh references proxy-url/proxy_url (must stay installer-owned)"
+else
+  _pass "claude.zsh does not reference proxy-url/proxy_url"
+fi
+
+# Static: the launcher never opens config.yaml for writing. A write redirection
+# or sed/awk in-place edit on the config would let it mutate the installer's
+# bytes; reject any such pattern.
+if print -- "$claude_src" | grep -nE '>[^|]*config\.ya?ml|sed -i|awk -i'; then
+  _fail "claude.zsh writes/edits config.yaml in place (must be read-only)"
+else
+  _pass "claude.zsh does not write or in-place edit config.yaml"
+fi
+
+# Dynamic: a config.yaml that already contains a proxy-url line must survive
+# the prerequisite check byte-for-byte. _cl_check_service_config only tests
+# existence/readability; it must never rewrite the file.
+mkdir -p "$HOME/.cli-proxy-api"
+proxy_cfg="$HOME/.cli-proxy-api/config.yaml"
+cat > "$proxy_cfg" <<'YAML'
+host: "127.0.0.1"
+port: 8317
+auth-dir: "~/.cli-proxy-api"
+proxy-url: "http://127.0.0.1:10808"
+api-keys:
+  - "installer-managed"
+YAML
+before=$(<"$proxy_cfg")
+cfg_with_proxy="$TMP/with-proxy.json"
+cat > "$cfg_with_proxy" <<'JSON'
+{
+  "service": {
+    "label": "StubProxy",
+    "configFile": "$HOME/.cli-proxy-api/config.yaml"
+  }
+}
+JSON
+_cl_check_service_config "$cfg_with_proxy" >/dev/null 2>&1
+after=$(<"$proxy_cfg")
+assert_eq "config.yaml byte-identical after prerequisite check" "$before" "$after"
+assert_contains "proxy-url survives launcher prerequisite check" 'proxy-url: "http://127.0.0.1:10808"' "$after"
+
+teardown_home
+
+# ==================================================================
 print -- "----"
 print -- "$PASS passed, $FAIL failed"
 (( FAIL == 0 ))

@@ -756,6 +756,844 @@ CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/c12.sh" >/dev/null 2>&1 && { echo "
 
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+
+# ===========================================================================
+# Task 18: proxy-url support for CLIProxyAPI (RED tests — helpers absent)
+# ===========================================================================
+#
+# These assertions lock the proxy-url contract BEFORE any production code is
+# written. The install.sh helpers they exercise DO NOT EXIST YET:
+#   - gpt_extract_proxy_url <path>            (top-level proxy-url parser)
+#   - gpt_resolve_proxy_url <config>          (precedence + GPT_PROXY_SOURCE)
+#   - gpt_render_config <key> [auth_dir] [proxy_url]   (extended renderer)
+# plus coordinator behaviour for preserving/consuming proxy-url.
+#
+# Expected RED: every block below fails because the helper is unset (rc=127,
+# empty output) or the coordinator strips/ignores the proxy-url field.
+#
+# Bash 3.2 compatible: no associative arrays, no `${arr[@]}` without the
+# `${arr[@]+"${arr[@]}"}` guard, no lowercase-conversion parameter expansion.
+# ===========================================================================
+
+# --- Pure helper: gpt_extract_proxy_url -------------------------------------
+#
+# Contract: parse a top-level `proxy-url:` scalar from a CLIProxyAPI
+# config.yaml. Accept http://, https://, socks5:// (and socks5h://), quoted or
+# unquoted. Reject nested keys, empty values, unsupported schemes, malformed
+# URLs, control characters, and YAML-injection characters. Print the value and
+# return 0 on a valid hit; return 1 (printing nothing) otherwise.
+
+# Quoted http://
+cfg="$TMP/px-http-q.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://127.0.0.1:10808"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: quoted http:// exits 0" 0 "$rc"
+assert_eq     "proxy extract: quoted http:// value" "http://127.0.0.1:10808" "$out"
+
+# Unquoted http://
+cfg="$TMP/px-http-u.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: http://127.0.0.1:10808
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: unquoted http:// exits 0" 0 "$rc"
+assert_eq     "proxy extract: unquoted http:// value" "http://127.0.0.1:10808" "$out"
+
+# Quoted https://
+cfg="$TMP/px-https.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "https://proxy.example.internal:8443"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: quoted https:// exits 0" 0 "$rc"
+assert_eq     "proxy extract: quoted https:// value" "https://proxy.example.internal:8443" "$out"
+
+# Quoted socks5://
+cfg="$TMP/px-socks5.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "socks5://127.0.0.1:1080"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: quoted socks5:// exits 0" 0 "$rc"
+assert_eq     "proxy extract: quoted socks5:// value" "socks5://127.0.0.1:1080" "$out"
+
+# socks5h:// (hostname resolution at the proxy) is also accepted.
+cfg="$TMP/px-socks5h.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "socks5h://127.0.0.1:1080"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: socks5h:// exits 0" 0 "$rc"
+assert_eq     "proxy extract: socks5h:// value" "socks5h://127.0.0.1:1080" "$out"
+
+# proxy-url with userinfo (synthetic credential) is parsed and validated; the
+# value itself is never printed by the assertions below except via this
+# explicit equality check.
+cfg="$TMP/px-userinfo.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://user:secret@127.0.0.1:10808"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: userinfo URL exits 0" 0 "$rc"
+assert_eq     "proxy extract: userinfo URL value" "http://user:secret@127.0.0.1:10808" "$out"
+
+# Trailing comment must not leak into the value.
+cfg="$TMP/px-comment.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://127.0.0.1:10808"   # upstream proxy
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: trailing comment exits 0" 0 "$rc"
+assert_eq     "proxy extract: trailing comment stripped" "http://127.0.0.1:10808" "$out"
+
+# --- Rejection cases --------------------------------------------------------
+
+# Nested proxy-url under another mapping MUST be rejected.
+cfg="$TMP/px-nested.yaml"
+fixture "$cfg" <<'YAML'
+profiles:
+  proxy-url: "http://127.0.0.1:10808"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: nested proxy-url exits 1" 1 "$rc"
+assert_eq     "proxy extract: nested proxy-url prints nothing" "" "$out"
+
+# Empty value MUST be rejected.
+cfg="$TMP/px-empty.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: ""
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: empty value exits 1" 1 "$rc"
+assert_eq     "proxy extract: empty value prints nothing" "" "$out"
+
+# Bare `proxy-url:` with no value MUST be rejected.
+cfg="$TMP/px-bare.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url:
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: bare key exits 1" 1 "$rc"
+assert_eq     "proxy extract: bare key prints nothing" "" "$out"
+
+# Unsupported scheme (ftp://) MUST be rejected.
+cfg="$TMP/px-ftp.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "ftp://127.0.0.1:21"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: unsupported scheme exits 1" 1 "$rc"
+assert_eq     "proxy extract: unsupported scheme prints nothing" "" "$out"
+
+# Malformed URL (no host) MUST be rejected.
+cfg="$TMP/px-malformed.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: malformed URL exits 1" 1 "$rc"
+assert_eq     "proxy extract: malformed URL prints nothing" "" "$out"
+
+# Control character in value MUST be rejected.
+cfg="$TMP/px-control.yaml"
+printf 'proxy-url: "http://127.0.0.1:10808\\n"\n' > "$cfg"
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: control char exits 1" 1 "$rc"
+assert_eq     "proxy extract: control char prints nothing" "" "$out"
+
+# YAML-injection attempt MUST be rejected (unquoted mapping/quote break).
+cfg="$TMP/px-inject.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://x" injected: true
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: YAML injection exits 1" 1 "$rc"
+assert_eq     "proxy extract: YAML injection prints nothing" "" "$out"
+
+# Missing file -> exit 1, nothing printed.
+out=$(gpt_extract_proxy_url "$TMP/px-no-such.yaml" 2>/dev/null); rc=$?
+assert_return "proxy extract: missing file exits 1" 1 "$rc"
+assert_eq     "proxy extract: missing file prints nothing" "" "$out"
+
+# File without proxy-url -> exit 1 (field simply absent).
+cfg="$TMP/px-absent.yaml"
+fixture "$cfg" <<'YAML'
+api-keys:
+  - "some-key"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: absent field exits 1" 1 "$rc"
+assert_eq     "proxy extract: absent field prints nothing" "" "$out"
+
+# --- Pure helper: gpt_resolve_proxy_url precedence --------------------------
+#
+# Contract: resolve the effective proxy URL with fixed precedence
+#   existing config proxy-url  >  GPT_PROXY_URL env  >  none (empty)
+# and set GPT_PROXY_SOURCE to "config" | "env" | "none". Never log the URL.
+
+cfg_proxy="$TMP/cfg-proxy.yaml"
+fixture "$cfg_proxy" <<'YAML'
+proxy-url: "http://from-config:10808"
+api-keys:
+  - "cfg-key"
+YAML
+cfg_noproxy="$TMP/cfg-noproxy.yaml"
+fixture "$cfg_noproxy" <<'YAML'
+api-keys:
+  - "cfg-key"
+YAML
+
+# Case A: config wins over env. Call WITHOUT command substitution so the
+# GPT_PROXY_SOURCE side effect lands in this shell.
+GPT_PROXY_SOURCE=""
+GPT_PROXY_URL="http://from-env:10808"
+gpt_resolve_proxy_url "$cfg_proxy" > "$TMP/proxyA" 2>/dev/null
+proxyA=$(cat "$TMP/proxyA")
+assert_eq "proxy resolve: config wins over env" "http://from-config:10808" "$proxyA"
+assert_eq "proxy resolve: source is config" "config" "$GPT_PROXY_SOURCE"
+
+# Case B: no config proxy -> falls back to GPT_PROXY_URL.
+GPT_PROXY_SOURCE=""
+GPT_PROXY_URL="http://from-env:10808"
+gpt_resolve_proxy_url "$cfg_noproxy" > "$TMP/proxyB" 2>/dev/null
+proxyB=$(cat "$TMP/proxyB")
+assert_eq "proxy resolve: env fallback value" "http://from-env:10808" "$proxyB"
+assert_eq "proxy resolve: source is env" "env" "$GPT_PROXY_SOURCE"
+
+# Case C: neither config nor env -> empty, source = none.
+GPT_PROXY_SOURCE=""
+unset GPT_PROXY_URL
+gpt_resolve_proxy_url "$cfg_noproxy" > "$TMP/proxyC" 2>/dev/null
+proxyC=$(cat "$TMP/proxyC")
+assert_eq     "proxy resolve: none produces empty value" "" "$proxyC"
+assert_eq     "proxy resolve: source is none" "none" "$GPT_PROXY_SOURCE"
+
+# Standard proxy env vars (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY) MUST NOT be
+# auto-read by the resolver; only the explicit GPT_PROXY_URL is honoured.
+GPT_PROXY_SOURCE=""
+unset GPT_PROXY_URL
+HTTPS_PROXY="http://leak-via-https:8080" HTTP_PROXY="http://leak-via-http:8080" ALL_PROXY="http://leak-via-all:8080"
+gpt_resolve_proxy_url "$cfg_noproxy" > "$TMP/proxyD" 2>/dev/null
+proxyD=$(cat "$TMP/proxyD")
+assert_eq     "proxy resolve: standard env vars ignored (empty result)" "" "$proxyD"
+assert_eq     "proxy resolve: standard env vars ignored (source none)" "none" "$GPT_PROXY_SOURCE"
+unset HTTP_PROXY HTTPS_PROXY ALL_PROXY
+
+# --- Pure helper: gpt_render_config extended with proxy ---------------------
+
+# Without proxy: the existing 5-line output is byte-for-byte unchanged.
+expected_render_noproxy='host: "127.0.0.1"
+port: 8317
+auth-dir: "~/.cli-proxy-api"
+api-keys:
+  - "synthetic-key"'
+out=$(gpt_render_config "synthetic-key" "~/.cli-proxy-api" "" 2>/dev/null); rc=$?
+assert_return "render: no-proxy 3-arg exits 0" 0 "$rc"
+assert_eq     "render: no-proxy 3-arg unchanged 5 lines" "$expected_render_noproxy" "$out"
+
+# With proxy: a deterministic 6-line output adds proxy-url at a fixed position
+# (after auth-dir, before api-keys). Same input -> byte-stable.
+expected_render_proxy='host: "127.0.0.1"
+port: 8317
+auth-dir: "~/.cli-proxy-api"
+proxy-url: "http://127.0.0.1:10808"
+api-keys:
+  - "synthetic-key"'
+out=$(gpt_render_config "synthetic-key" "~/.cli-proxy-api" "http://127.0.0.1:10808" 2>/dev/null); rc=$?
+assert_return "render: with-proxy exits 0" 0 "$rc"
+assert_eq     "render: with-proxy byte-stable 6 lines" "$expected_render_proxy" "$out"
+# Byte stability: a second call produces identical bytes.
+out2=$(gpt_render_config "synthetic-key" "~/.cli-proxy-api" "http://127.0.0.1:10808" 2>/dev/null)
+assert_eq     "render: with-proxy deterministic across calls" "$out" "$out2"
+
+# Proxy URL is always emitted as a quoted YAML scalar (defensive quoting).
+line=$(printf '%s\n' "$out" | sed -n '/^proxy-url:/p')
+assert_match "render: proxy-url line is double-quoted scalar" "$line" '^proxy-url: ".*"$'
+
+# An unsupported-scheme proxy MUST be rejected by the renderer.
+out=$(gpt_render_config "synthetic-key" "~/.cli-proxy-api" "ftp://bad:21" 2>/dev/null); rc=$?
+assert_return "render: unsupported proxy scheme exits 1" 1 "$rc"
+assert_eq     "render: unsupported proxy scheme prints nothing" "" "$out"
+
+# --- Coordinator integration: proxy-url reconciliation ----------------------
+
+# p1: an existing valid proxy-url is PRESERVED across reconciliation.
+CASE_HOME="$TMP/p1"; setup_gpt_home "$CASE_HOME"
+mk_case "$TMP/p1.sh" "$CASE_HOME"
+cat >> "$TMP/p1.sh" <<'SH'
+printf 'host: "127.0.0.1"\nport: 8317\nauth-dir: "~/.cli-proxy-api"\nproxy-url: "http://127.0.0.1:10808"\napi-keys:\n  - "keep-this-key"\n' > "$GPT_CONFIG_DIR/config.yaml"
+DRY_RUN=false configure_gpt_backend
+grep -q '^proxy-url: "http://127.0.0.1:10808"$' "$GPT_CONFIG_DIR/config.yaml"
+SH
+CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p1.sh" >/dev/null 2>&1 && { echo "PASS: p1 existing proxy-url preserved"; PASS=$((PASS+1)); } || { echo "FAIL: p1 existing proxy-url preserved"; CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p1.sh"; FAIL=$((FAIL+1)); }
+
+# p2: explicit GPT_PROXY_URL is consumed when the config lacks proxy-url.
+CASE_HOME="$TMP/p2"; setup_gpt_home "$CASE_HOME"
+mk_case "$TMP/p2.sh" "$CASE_HOME"
+cat >> "$TMP/p2.sh" <<'SH'
+printf 'api-keys:\n  - "some-key"\n' > "$GPT_CONFIG_DIR/config.yaml"
+GPT_PROXY_URL="http://127.0.0.1:10808"
+export GPT_PROXY_URL
+DRY_RUN=false configure_gpt_backend
+grep -q '^proxy-url: "http://127.0.0.1:10808"$' "$GPT_CONFIG_DIR/config.yaml"
+SH
+CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p2.sh" >/dev/null 2>&1 && { echo "PASS: p2 GPT_PROXY_URL consumed"; PASS=$((PASS+1)); } || { echo "FAIL: p2 GPT_PROXY_URL consumed"; CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p2.sh"; FAIL=$((FAIL+1)); }
+
+# p3: when both config proxy-url and GPT_PROXY_URL are set, config wins.
+CASE_HOME="$TMP/p3"; setup_gpt_home "$CASE_HOME"
+mk_case "$TMP/p3.sh" "$CASE_HOME"
+cat >> "$TMP/p3.sh" <<'SH'
+printf 'proxy-url: "http://from-config:10808"\napi-keys:\n  - "k"\n' > "$GPT_CONFIG_DIR/config.yaml"
+GPT_PROXY_URL="http://from-env:10808"
+export GPT_PROXY_URL
+DRY_RUN=false configure_gpt_backend
+# Positive assertion MUST be fatal: under set +e an unguarded failing grep would
+# let the case exit 0 via the later negation. Use explicit exit-1 on miss.
+grep -q '^proxy-url: "http://from-config:10808"$' "$GPT_CONFIG_DIR/config.yaml" || { echo 'config proxy-url missing'; exit 1; }
+if grep -q 'http://from-env:10808' "$GPT_CONFIG_DIR/config.yaml"; then echo 'env proxy leaked into config'; exit 1; fi
+SH
+CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p3.sh" >/dev/null 2>&1 && { echo "PASS: p3 config proxy wins over env"; PASS=$((PASS+1)); } || { echo "FAIL: p3 config proxy wins over env"; CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p3.sh"; FAIL=$((FAIL+1)); }
+
+# p4: a config already normalized WITH proxy-url is a no-op: second run writes
+# nothing and creates no backup, and the proxy-url survives both runs.
+CASE_HOME="$TMP/p4"; setup_gpt_home "$CASE_HOME"
+mk_case "$TMP/p4.sh" "$CASE_HOME"
+cat >> "$TMP/p4.sh" <<'SH'
+printf 'host: "127.0.0.1"\nport: 8317\nauth-dir: "~/.cli-proxy-api"\nproxy-url: "http://127.0.0.1:10808"\napi-keys:\n  - "stable-key"\n' > "$GPT_CONFIG_DIR/config.yaml"
+DRY_RUN=false configure_gpt_backend >/dev/null 2>&1
+DRY_RUN=false configure_gpt_backend >/dev/null 2>&1
+grep -q '^proxy-url: "http://127.0.0.1:10808"$' "$GPT_CONFIG_DIR/config.yaml"
+nb=$(find "$GPT_CONFIG_DIR" -name 'config.yaml.*.bak' | wc -l | tr -d ' ')
+[[ "$nb" == "0" ]]
+SH
+CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p4.sh" >/dev/null 2>&1 && { echo "PASS: p4 idempotent with proxy, no backup"; PASS=$((PASS+1)); } || { echo "FAIL: p4 idempotent with proxy, no backup"; CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p4.sh"; FAIL=$((FAIL+1)); }
+
+# p5: DRY_RUN writes nothing and emits no proxy value.
+CASE_HOME="$TMP/p5"; setup_gpt_home "$CASE_HOME"
+mk_case "$TMP/p5.sh" "$CASE_HOME"
+cat >> "$TMP/p5.sh" <<'SH'
+pre_prof=$(cat "$GPT_PROFILE")
+GPT_PROXY_URL="http://127.0.0.1:10808"
+export GPT_PROXY_URL
+out=$(DRY_RUN=true configure_gpt_backend 2>&1)
+[[ ! -e "$GPT_CONFIG_DIR/config.yaml" ]]
+[[ "$(cat "$GPT_PROFILE")" == "$pre_prof" ]]
+[[ "$out" != *"10808"* ]]
+SH
+CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p5.sh" >/dev/null 2>&1 && { echo "PASS: p5 dry-run writes nothing, no proxy leak"; PASS=$((PASS+1)); } || { echo "FAIL: p5 dry-run writes nothing, no proxy leak"; CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p5.sh"; FAIL=$((FAIL+1)); }
+
+# p6: custom GPT_CONFIG_DIR is reflected in auth-dir AND preserves proxy-url.
+CASE_HOME="$TMP/p6"; setup_gpt_home "$CASE_HOME"
+mk_case "$TMP/p6.sh" "$CASE_HOME"
+cat >> "$TMP/p6.sh" <<'SH'
+GPT_CONFIG_DIR="$CASE_HOME/custom-proxy-dir"
+export GPT_CONFIG_DIR
+GPT_PROXY_URL="http://127.0.0.1:10808"
+export GPT_PROXY_URL
+DRY_RUN=false configure_gpt_backend
+cfg="$GPT_CONFIG_DIR/config.yaml"
+grep -q '^auth-dir: "'"$CASE_HOME/custom-proxy-dir"'"$' "$cfg"
+grep -q '^proxy-url: "http://127.0.0.1:10808"$' "$cfg"
+SH
+CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p6.sh" >/dev/null 2>&1 && { echo "PASS: p6 custom GPT_CONFIG_DIR + proxy"; PASS=$((PASS+1)); } || { echo "FAIL: p6 custom GPT_CONFIG_DIR + proxy"; CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p6.sh"; FAIL=$((FAIL+1)); }
+
+# p7: a malformed EXISTING proxy-url must fail safe: critical recorded, and both
+# config.yaml and profile are left byte-for-byte unchanged (no silent rewrite
+# that strips the user's value).
+CASE_HOME="$TMP/p7"; setup_gpt_home "$CASE_HOME"
+mk_case "$TMP/p7.sh" "$CASE_HOME"
+cat >> "$TMP/p7.sh" <<'SH'
+printf 'host: "127.0.0.1"\nport: 8317\nauth-dir: "~/.cli-proxy-api"\nproxy-url: "ftp://bad-scheme:21"\napi-keys:\n  - "preserve-me"\n' > "$GPT_CONFIG_DIR/config.yaml"
+prof_before=$(cat "$GPT_PROFILE")
+cfg_before=$(cat "$GPT_CONFIG_DIR/config.yaml")
+DRY_RUN=false configure_gpt_backend 2>/dev/null; rc=$?
+[[ $rc -ne 0 ]]
+[[ $INSTALL_CRITICAL -ge 1 ]]
+[[ "$(cat "$GPT_CONFIG_DIR/config.yaml")" == "$cfg_before" ]]
+[[ "$(cat "$GPT_PROFILE")" == "$prof_before" ]]
+SH
+CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p7.sh" >/dev/null 2>&1 && { echo "PASS: p7 malformed proxy fails safe"; PASS=$((PASS+1)); } || { echo "FAIL: p7 malformed proxy fails safe"; CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p7.sh"; FAIL=$((FAIL+1)); }
+
+# p8: with xtrace enabled, a synthetic credential-bearing proxy URL MUST NOT
+# leak to stderr, and the xtrace state is restored afterward.
+CASE_HOME="$TMP/p8"; setup_gpt_home "$CASE_HOME"
+mk_case "$TMP/p8.sh" "$CASE_HOME"
+cat >> "$TMP/p8.sh" <<'SH'
+secret_proxy='http://synuser:synpass@127.0.0.1:10808'
+GPT_PROXY_URL="$secret_proxy"
+export GPT_PROXY_URL
+set -x
+DRY_RUN=false configure_gpt_backend 2>"$CASE_HOME/p8.err"
+case $- in *x*) : ;; *) exit 1 ;; esac
+set +x
+! grep -Fq "$secret_proxy" "$CASE_HOME/p8.err"
+! grep -Fq 'synpass' "$CASE_HOME/p8.err"
+SH
+CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p8.sh" >/dev/null 2>&1 && { echo "PASS: p8 xtrace does not leak proxy credentials"; PASS=$((PASS+1)); } || { echo "FAIL: p8 xtrace does not leak proxy credentials"; CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p8.sh"; FAIL=$((FAIL+1)); }
+
+# p9: when GPT is not selected, an explicit GPT_PROXY_URL is a complete no-op:
+# nothing is read, written, or echoed even with a credential-bearing URL.
+CASE_HOME="$TMP/p9"; setup_gpt_home "$CASE_HOME"
+printf 'sentinel-config\n' > "$CASE_HOME/.cli-proxy-api/config.yaml"
+printf 'sentinel-profile\n' > "$CASE_HOME/.claude/profiles/gpt.json"
+mk_case "$TMP/p9.sh" "$CASE_HOME"
+cat >> "$TMP/p9.sh" <<'SH'
+SELECTED_PROFILES=("glm" "ccr")
+GPT_PROXY_URL='http://synuser:synpass@127.0.0.1:10808'
+export GPT_PROXY_URL
+config_before=$(cat "$GPT_CONFIG_DIR/config.yaml")
+profile_before=$(cat "$GPT_PROFILE")
+out=$(DRY_RUN=false configure_gpt_backend 2>&1); rc=$?
+[[ $rc -eq 0 ]]
+[[ -z "$out" ]]
+[[ "$(cat "$GPT_CONFIG_DIR/config.yaml")" == "$config_before" ]]
+[[ "$(cat "$GPT_PROFILE")" == "$profile_before" ]]
+[[ "$out" != *"synpass"* ]]
+SH
+CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p9.sh" >/dev/null 2>&1 && { echo "PASS: p9 unselected GPT no-op with proxy env"; PASS=$((PASS+1)); } || { echo "FAIL: p9 unselected GPT no-op with proxy env"; CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p9.sh"; FAIL=$((FAIL+1)); }
+
+# ===========================================================================
+# Task 18 review findings: three verified gaps (RED tests — behavior absent)
+# ===========================================================================
+#
+# Locking three findings from review before any production code lands:
+#   (1) custom GPT_CONFIG_DIR must also rewrite the gpt profile's
+#       .service.configFile / .service.start so the launcher reads the SAME
+#       config the installer wrote; the default path stays unchanged.
+#   (2) gpt_extract_proxy_url must accept IPv6-literal hosts and query strings.
+#   (3) gpt_backup_file must never overwrite a same-timestamp backup: two calls
+#       forced into the same second produce distinct paths and both snapshots
+#       survive.
+# All three fail RED against the current implementation.
+# ===========================================================================
+
+# --- Finding (2): IPv6 literal + query-delimiter proxy URLs -----------------
+
+cfg="$TMP/px-ipv6.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://[::1]:10808"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: IPv6 literal exits 0" 0 "$rc"
+assert_eq     "proxy extract: IPv6 literal value" "http://[::1]:10808" "$out"
+
+cfg="$TMP/px-query.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://127.0.0.1:10808?x=y&z=1"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: query delimiter exits 0" 0 "$rc"
+assert_eq     "proxy extract: query delimiter value" "http://127.0.0.1:10808?x=y&z=1" "$out"
+
+# IPv6 + userinfo + query all together must also parse.
+cfg="$TMP/px-ipv6-full.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://user:s3cr3t@[::1]:10808?x=y&z=1"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: IPv6+userinfo+query exits 0" 0 "$rc"
+assert_eq     "proxy extract: IPv6+userinfo+query value" "http://user:s3cr3t@[::1]:10808?x=y&z=1" "$out"
+
+# The renderer must also emit these byte-for-byte as quoted scalars.
+out=$(gpt_render_config "synthetic-key" "~/.cli-proxy-api" "http://[::1]:10808" 2>/dev/null); rc=$?
+assert_return "render: IPv6 proxy exits 0" 0 "$rc"
+assert_match "render: IPv6 proxy-url line emitted" "$(printf '%s\n' "$out" | sed -n '/^proxy-url:/p')" '^proxy-url: "http://\[::1\]:10808"$'
+
+# --- Finding (3): gpt_backup_file same-timestamp collision ------------------
+#
+# Force an identical timestamp by shadowing `date` with a stub. Two backups of
+# the same path in the same second MUST yield distinct paths and preserve BOTH
+# snapshots (never overwrite). Under the current implementation the second cp
+# clobbers the first and the paths collide, so both assertions RED.
+
+bkc_dir="$TMP/bkc"; mkdir -p "$bkc_dir"
+bkc_cfg="$bkc_dir/config.yaml"
+
+# Shadow date for this block only; restore immediately after.
+date() { printf '20260101000000\n'; }
+
+printf 'snapshot-one\n' > "$bkc_cfg"
+bak1=$(gpt_backup_file "$bkc_cfg" 2>/dev/null); rc1=$?
+printf 'snapshot-two\n' > "$bkc_cfg"
+bak2=$(gpt_backup_file "$bkc_cfg" 2>/dev/null); rc2=$?
+
+unset -f date
+
+assert_return "backup collision: first call exits 0" 0 "$rc1"
+assert_return "backup collision: second call exits 0" 0 "$rc2"
+assert_ne     "backup collision: second path distinct from first" "$bak1" "$bak2"
+assert_eq     "backup collision: first snapshot preserved"  "snapshot-one" "$(cat "$bak1" 2>/dev/null)"
+assert_eq     "backup collision: second snapshot preserved" "snapshot-two" "$(cat "$bak2" 2>/dev/null)"
+
+# --- Finding (1): custom GPT_CONFIG_DIR rewrites profile service config -----
+#
+# Build a service-bearing profile fixture (the real profiles/gpt.json shape).
+# The default setup_gpt_home uses GPT_FIXTURE whose `service` is a string, so
+# lay down a dedicated fixture with the .service.configFile / .service.start
+# object fields the launcher reads.
+
+SVC_FIXTURE="$TMP/gpt_svc.json"
+fixture "$SVC_FIXTURE" <<'JSON'
+{
+  "label": "ChatGPT subscription (Codex OAuth via CLIProxyAPI)",
+  "credentialKeys": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"],
+  "service": {
+    "label": "CLIProxyAPI",
+    "health": "http://127.0.0.1:8317/healthz",
+    "bins": ["cli-proxy-api"],
+    "start": "{bin} --config \"$HOME/.cli-proxy-api/config.yaml\"",
+    "configFile": "$HOME/.cli-proxy-api/config.yaml",
+    "timeoutSec": 25,
+    "logName": "cli-proxy-api.log"
+  },
+  "unset": [],
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_CLIPROXYAPI_KEY",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8317"
+  }
+}
+JSON
+
+# p10: custom GPT_CONFIG_DIR must propagate to profile service.configFile AND
+# service.start so claude.zsh launches CLIProxyAPI against the same config the
+# installer wrote. Current coordinator never rewrites these fields -> RED.
+CASE_HOME="$TMP/p10"
+rm -rf "$CASE_HOME"
+mkdir -p "$CASE_HOME/.claude/profiles" "$CASE_HOME/.cli-proxy-api"
+cp "$SVC_FIXTURE" "$CASE_HOME/.claude/profiles/gpt.json"
+mk_case "$TMP/p10.sh" "$CASE_HOME"
+cat >> "$TMP/p10.sh" <<'SH'
+GPT_CONFIG_DIR="$CASE_HOME/custom-proxy-dir"
+export GPT_CONFIG_DIR
+DRY_RUN=false configure_gpt_backend
+cf=$(jq -r '.service.configFile // empty' "$GPT_PROFILE")
+st=$(jq -r '.service.start // empty' "$GPT_PROFILE")
+# Both must reference the custom config path the installer just wrote.
+[[ "$cf" == *"$CASE_HOME/custom-proxy-dir/config.yaml"* ]] || { echo "configFile not updated"; exit 1; }
+[[ "$st" == *"$CASE_HOME/custom-proxy-dir/config.yaml"* ]] || { echo "start not updated"; exit 1; }
+SH
+CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p10.sh" >/dev/null 2>&1 && { echo "PASS: p10 custom dir rewrites profile service config"; PASS=$((PASS+1)); } || { echo "FAIL: p10 custom dir rewrites profile service config"; CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p10.sh"; FAIL=$((FAIL+1)); }
+
+# p10b: default GPT_CONFIG_DIR leaves the profile service config pointing at
+# the standard ~/.cli-proxy-api path (and never leaks a custom dir). This is a
+# guard: it must stay green now and after the fix.
+CASE_HOME="$TMP/p10b"
+rm -rf "$CASE_HOME"
+mkdir -p "$CASE_HOME/.claude/profiles" "$CASE_HOME/.cli-proxy-api"
+cp "$SVC_FIXTURE" "$CASE_HOME/.claude/profiles/gpt.json"
+mk_case "$TMP/p10b.sh" "$CASE_HOME"
+cat >> "$TMP/p10b.sh" <<'SH'
+DRY_RUN=false configure_gpt_backend
+cf=$(jq -r '.service.configFile // empty' "$GPT_PROFILE")
+st=$(jq -r '.service.start // empty' "$GPT_PROFILE")
+[[ "$cf" == *"/.cli-proxy-api/config.yaml"* ]] || { echo "default configFile changed"; exit 1; }
+[[ "$st" == *"/.cli-proxy-api/config.yaml"* ]] || { echo "default start changed"; exit 1; }
+[[ "$cf" != *"custom"* ]] || { echo "custom leak in configFile"; exit 1; }
+SH
+CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p10b.sh" >/dev/null 2>&1 && { echo "PASS: p10b default profile service config unchanged"; PASS=$((PASS+1)); } || { echo "FAIL: p10b default profile service config unchanged"; CASE_HOME="$CASE_HOME" DIR="$DIR" bash "$TMP/p10b.sh"; FAIL=$((FAIL+1)); }
+
+# ===========================================================================
+# Task 18 MEDIUM findings: concurrent backup race + authority-less proxy URLs
+# ===========================================================================
+#
+# Two more verified review gaps locked here as RED tests:
+#   (1) gpt_backup_file under a forced same-timestamp RACE: two CONCURRENT
+#       calls against the same source must each yield a distinct path and both
+#       snapshot files must survive (no clobber). The current implementation
+#       computes `<base>.<stamp>.bak` from `date` alone, so a same-second race
+#       collides on one path and the second cp overwrites the first.
+#   (2) Authority-less / bracket-malformed proxy URLs MUST be rejected at the
+#       extractor and at render validation. The current validator regex
+#       (`[A-Za-z0-9._~%:@/+-]+`) accepts `http:///path` (no authority) and,
+#       once broadened for IPv6/query, risks accepting `http://?x=y` and
+#       unmatched-bracket forms unless authority is required explicitly.
+# Bash 3.2 compatible.
+# ===========================================================================
+
+# --- Finding (1): concurrent gpt_backup_file, forced identical timestamp ----
+#
+# Shadow `date` so both concurrent calls compute the same stamp. Launch both
+# backups in the background against the same source, wait, then assert:
+# both exit 0, the returned paths are DISTINCT, exactly two backup files exist,
+# and each preserves the source snapshot bytes.
+
+date() { printf '20260101000000\n'; }
+
+conc_dir="$TMP/conc"; mkdir -p "$conc_dir"
+conc_cfg="$conc_dir/config.yaml"
+printf 'concurrent-snapshot\n' > "$conc_cfg"
+
+# Background both calls; capture each stdout (the backup path) to its own file.
+gpt_backup_file "$conc_cfg" > "$TMP/conc_a.out" 2>/dev/null &
+pid_a=$!
+gpt_backup_file "$conc_cfg" > "$TMP/conc_b.out" 2>/dev/null &
+pid_b=$!
+wait "$pid_a"; rc_a=$?
+wait "$pid_b"; rc_b=$?
+
+unset -f date
+
+bak_a=$(cat "$TMP/conc_a.out" 2>/dev/null)
+bak_b=$(cat "$TMP/conc_b.out" 2>/dev/null)
+
+assert_return "backup race: call A exits 0" 0 "$rc_a"
+assert_return "backup race: call B exits 0" 0 "$rc_b"
+assert_ne     "backup race: path A non-empty" "" "$bak_a"
+assert_ne     "backup race: path B non-empty" "" "$bak_b"
+assert_ne     "backup race: A and B paths distinct" "$bak_a" "$bak_b"
+nb=$(find "$conc_dir" -name 'config.yaml.*.bak' 2>/dev/null | wc -l | tr -d ' ')
+assert_eq     "backup race: exactly two backup files exist" "2" "$nb"
+assert_eq     "backup race: snapshot A bytes preserved" "concurrent-snapshot" "$(cat "$bak_a" 2>/dev/null)"
+assert_eq     "backup race: snapshot B bytes preserved" "concurrent-snapshot" "$(cat "$bak_b" 2>/dev/null)"
+
+# --- Finding (2): reject authority-less / bracket-malformed proxy URLs ------
+#
+# Each malformed value MUST be rejected (rc=1, nothing printed) at the
+# extractor AND at render validation. `http:///path` (authority-less) is the
+# case currently ACCEPTED by the validator regex and is the primary RED signal;
+# the remaining forms are forward-looking guards against over-broadening when
+# the regex is opened up for IPv6 brackets and query strings.
+
+# http:///path — no authority. Currently ACCEPTED by the char-class regex.
+cfg="$TMP/px-noauth-slash.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http:///path"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: authority-less http:///path exits 1" 1 "$rc"
+assert_eq     "proxy extract: authority-less http:///path prints nothing" "" "$out"
+
+# http://?x=y — no authority, only a query. Authority MUST be required.
+cfg="$TMP/px-noauth-query.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://?x=y"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: authority-less http://?x=y exits 1" 1 "$rc"
+assert_eq     "proxy extract: authority-less http://?x=y prints nothing" "" "$out"
+
+# Unmatched opening IPv6 bracket: http://[::1:10808 (no closing ]).
+cfg="$TMP/px-bracket-open.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://[::1:10808"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: unmatched opening bracket exits 1" 1 "$rc"
+assert_eq     "proxy extract: unmatched opening bracket prints nothing" "" "$out"
+
+# Unmatched closing IPv6 bracket: http://::1]:10808 (no opening [).
+cfg="$TMP/px-bracket-close.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://::1]:10808"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: unmatched closing bracket exits 1" 1 "$rc"
+assert_eq     "proxy extract: unmatched closing bracket prints nothing" "" "$out"
+
+# The renderer shares the validator and MUST reject the authority-less value
+# (the primary over-broadening trap).
+out=$(gpt_render_config "synthetic-key" "~/.cli-proxy-api" "http:///path" 2>/dev/null); rc=$?
+assert_return "render: authority-less http:///path exits 1" 1 "$rc"
+assert_eq     "render: authority-less http:///path prints nothing" "" "$out"
+
+# Resolver fail-safe: when the EXISTING config holds an authority-less proxy-url,
+# the resolver MUST treat it as malformed (not fall through to env). It must
+# surface the failure rather than silently dropping or rewriting the value.
+cfg_noauth="$TMP/cfg-noauth.yaml"
+fixture "$cfg_noauth" <<'YAML'
+proxy-url: "http:///path"
+api-keys:
+  - "cfg-key"
+YAML
+GPT_PROXY_SOURCE=""
+GPT_PROXY_URL="http://from-env:10808"
+gpt_resolve_proxy_url "$cfg_noauth" > "$TMP/noauth_resolve.out" 2>/dev/null; rcr=$?
+# Resolver must signal malformed-existing-proxy (non-zero), NOT silently fall
+# through to the env value. This guards config-first precedence against
+# silently masking a broken existing value.
+assert_return "proxy resolve: authority-less existing proxy is malformed" 1 "$rcr"
+assert_eq     "proxy resolve: authority-less existing proxy prints nothing" "" "$(cat "$TMP/noauth_resolve.out" 2>/dev/null)"
+
+# ===========================================================================
+# Task 18 final MEDIUM validator gap: authority/userinfo/port/IPv6 structure
+# ===========================================================================
+#
+# The validator regex was broadened to accept []?&= for IPv6/query, but still
+# lacks structural checks. These RED tests pin the missing structure:
+#   - userinfo with NO host:        http://user@/path
+#   - port with NO host:            http://:1080
+#   - unbracketed IPv6 in authority: http://::1:1080
+#   - multiple @ in authority:      http://a@@host:1080
+#   - nonnumeric / empty / out-of-range port (validator claims numeric port)
+# Each malformed value MUST be rejected at extractor, renderer and resolver as
+# appropriate. Positive guards confirm well-formed userinfo+IPv6 still pass.
+# Bash 3.2 compatible.
+# ===========================================================================
+
+# --- Negative: userinfo with no host ----------------------------------------
+cfg="$TMP/px-userinfo-nohost.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://user@/path"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: userinfo-no-host exits 1" 1 "$rc"
+assert_eq     "proxy extract: userinfo-no-host prints nothing" "" "$out"
+
+# --- Negative: port with no host --------------------------------------------
+cfg="$TMP/px-port-nohost.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://:1080"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: port-no-host exits 1" 1 "$rc"
+assert_eq     "proxy extract: port-no-host prints nothing" "" "$out"
+
+# --- Negative: unbracketed IPv6 in authority --------------------------------
+cfg="$TMP/px-ipv6-unbracketed.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://::1:1080"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: unbracketed IPv6 exits 1" 1 "$rc"
+assert_eq     "proxy extract: unbracketed IPv6 prints nothing" "" "$out"
+
+# --- Negative: multiple @ in authority --------------------------------------
+cfg="$TMP/px-multi-at.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://a@@host:1080"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: multiple @ exits 1" 1 "$rc"
+assert_eq     "proxy extract: multiple @ prints nothing" "" "$out"
+
+# --- Negative: port structure (nonnumeric / empty / out-of-range) -----------
+# The validator claims an optional numeric port, so the port, when present,
+# must be all digits in [1,65535]. A trailing ':' with no digits is an empty
+# port (rejected); nonnumeric and >65535 are rejected.
+
+# Nonnumeric port.
+cfg="$TMP/px-port-alpha.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://host:abc"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: nonnumeric port exits 1" 1 "$rc"
+assert_eq     "proxy extract: nonnumeric port prints nothing" "" "$out"
+
+# Empty port (trailing colon, no digits).
+cfg="$TMP/px-port-empty.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://host:"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: empty port exits 1" 1 "$rc"
+assert_eq     "proxy extract: empty port prints nothing" "" "$out"
+
+# Out-of-range port (>65535).
+cfg="$TMP/px-port-range.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://host:99999"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: out-of-range port exits 1" 1 "$rc"
+assert_eq     "proxy extract: out-of-range port prints nothing" "" "$out"
+
+# --- Renderer shares the validator: reject authority-structure values -------
+out=$(gpt_render_config "synthetic-key" "~/.cli-proxy-api" "http://user@/path" 2>/dev/null); rc=$?
+assert_return "render: userinfo-no-host exits 1" 1 "$rc"
+assert_eq     "render: userinfo-no-host prints nothing" "" "$out"
+
+out=$(gpt_render_config "synthetic-key" "~/.cli-proxy-api" "http://:1080" 2>/dev/null); rc=$?
+assert_return "render: port-no-host exits 1" 1 "$rc"
+assert_eq     "render: port-no-host prints nothing" "" "$out"
+
+out=$(gpt_render_config "synthetic-key" "~/.cli-proxy-api" "http://::1:1080" 2>/dev/null); rc=$?
+assert_return "render: unbracketed IPv6 exits 1" 1 "$rc"
+assert_eq     "render: unbracketed IPv6 prints nothing" "" "$out"
+
+# --- Resolver fail-safe: malformed existing proxy is NOT silently dropped ---
+# A config holding userinfo-no-host MUST surface failure rather than fall
+# through to env or mask a broken value.
+cfg_userinfo_nohost="$TMP/cfg-userinfo-nohost.yaml"
+fixture "$cfg_userinfo_nohost" <<'YAML'
+proxy-url: "http://user@/path"
+api-keys:
+  - "cfg-key"
+YAML
+GPT_PROXY_SOURCE=""
+GPT_PROXY_URL="http://from-env:10808"
+gpt_resolve_proxy_url "$cfg_userinfo_nohost" > "$TMP/uin_resolve.out" 2>/dev/null; rcu=$?
+assert_return "proxy resolve: userinfo-no-host existing proxy is malformed" 1 "$rcu"
+assert_eq     "proxy resolve: userinfo-no-host existing proxy prints nothing" "" "$(cat "$TMP/uin_resolve.out" 2>/dev/null)"
+
+# --- Positive guards: well-formed userinfo + IPv6 still accepted -------------
+cfg="$TMP/px-pos-userinfo.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://user:pass@host:1080/path?x=y"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract (guard): userinfo+path+query exits 0" 0 "$rc"
+assert_eq     "proxy extract (guard): userinfo+path+query value" "http://user:pass@host:1080/path?x=y" "$out"
+
+cfg="$TMP/px-pos-ipv6.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://[::1]:10808"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract (guard): IPv6 literal exits 0" 0 "$rc"
+assert_eq     "proxy extract (guard): IPv6 literal value" "http://[::1]:10808" "$out"
+
+# Renderer must also emit the positive guards as quoted scalars.
+out=$(gpt_render_config "synthetic-key" "~/.cli-proxy-api" "http://user:pass@host:1080/path?x=y" 2>/dev/null); rc=$?
+assert_return "render (guard): userinfo+path+query exits 0" 0 "$rc"
+assert_match "render (guard): userinfo+path+query line" "$(printf '%s\n' "$out" | sed -n '/^proxy-url:/p')" '^proxy-url: "http://user:pass@host:1080/path\?x=y"$'
+
+out=$(gpt_render_config "synthetic-key" "~/.cli-proxy-api" "http://[::1]:10808" 2>/dev/null); rc=$?
+assert_return "render (guard): IPv6 literal exits 0" 0 "$rc"
+assert_match "render (guard): IPv6 literal line" "$(printf '%s\n' "$out" | sed -n '/^proxy-url:/p')" '^proxy-url: "http://\[::1\]:10808"$'
+
+# ===========================================================================
+# Task 18 oversized-port guard: http://host:18446744073709551696
+# ===========================================================================
+#
+# A numeric port that overflows uint64 (2^64+32) MUST be rejected. The current
+# validator regex only checks a flat character class, so the value is accepted;
+# an implementation that naively parses the port with strtoul/uint64 would wrap
+# or silently error and must still reject. RED until structural port validation
+# (all digits AND in [1,65535], with overflow protection) lands.
+# Bash 3.2 compatible.
+# ===========================================================================
+
+# --- Extractor: oversized numeric port rejected -----------------------------
+cfg="$TMP/px-port-oversize.yaml"
+fixture "$cfg" <<'YAML'
+proxy-url: "http://host:18446744073709551696"
+YAML
+out=$(gpt_extract_proxy_url "$cfg" 2>/dev/null); rc=$?
+assert_return "proxy extract: oversized uint64 port exits 1" 1 "$rc"
+assert_eq     "proxy extract: oversized uint64 port prints nothing" "" "$out"
+
+# --- Renderer shares the validator: oversized port rejected -----------------
+out=$(gpt_render_config "synthetic-key" "~/.cli-proxy-api" "http://host:18446744073709551696" 2>/dev/null); rc=$?
+assert_return "render: oversized uint64 port exits 1" 1 "$rc"
+assert_eq     "render: oversized uint64 port prints nothing" "" "$out"
+
+# --- Resolver fail-safe: malformed existing proxy not silently dropped ------
+cfg_oversize="$TMP/cfg-oversize.yaml"
+fixture "$cfg_oversize" <<'YAML'
+proxy-url: "http://host:18446744073709551696"
+api-keys:
+  - "cfg-key"
+YAML
+GPT_PROXY_SOURCE=""
+GPT_PROXY_URL="http://from-env:10808"
+gpt_resolve_proxy_url "$cfg_oversize" > "$TMP/oversize_resolve.out" 2>/dev/null; rco=$?
+assert_return "proxy resolve: oversized port existing proxy is malformed" 1 "$rco"
+assert_eq     "proxy resolve: oversized port existing proxy prints nothing" "" "$(cat "$TMP/oversize_resolve.out" 2>/dev/null)"
+
 # ===========================================================================
 # Task 4: installer hints + cross-platform boundary
 # ===========================================================================
@@ -961,12 +1799,12 @@ assert_doc_pair() {
 
 # --- Release metadata -------------------------------------------------------
 
-assert_eq "VERSION is 2.15.0" "2.15.0" "$(cat "$DIR/VERSION")"
+assert_eq "VERSION is 2.16.0" "2.16.0" "$(cat "$DIR/VERSION")"
 
-if grep -Eq '^## \[2\.15\.0\] - 2026-08-02' "$DIR/CHANGELOG.md"; then
-    echo "PASS: changelog has [2.15.0] - 2026-08-02 entry"; PASS=$((PASS+1))
+if grep -Eq '^## \[2\.16\.0\] - 2026-08-02' "$DIR/CHANGELOG.md"; then
+    echo "PASS: changelog has [2.16.0] - 2026-08-02 entry"; PASS=$((PASS+1))
 else
-    echo "FAIL: changelog missing [2.15.0] - 2026-08-02 entry"; FAIL=$((FAIL+1))
+    echo "FAIL: changelog missing [2.16.0] - 2026-08-02 entry"; FAIL=$((FAIL+1))
 fi
 
 # --- Concept assertions (translated concepts use separate en/zh patterns) ---
@@ -1000,6 +1838,53 @@ assert_doc_pair "docs: Windows limitation stated" \
 assert_doc_pair "docs: config + profile auto-sync" \
     'sync|in sync|both.*config' \
     '同步|一致'
+
+# --- Task 20: proxy-url documentation contract (v2.16.0) --------------------
+#
+# Lock the CLIProxyAPI outbound proxy-url contract documented in BACKENDS.md /
+# BACKENDS.zh-CN.md so the guides cannot drift from the implemented
+# gpt_resolve_proxy_url / gpt_render_config behaviour.
+
+# Optional proxy-url line exists as a concept in both guides.
+assert_doc_both "docs: proxy-url mentioned" 'proxy-url'
+# Explicit GPT_PROXY_URL env var is the documented opt-in.
+assert_doc_both "docs: GPT_PROXY_URL env var mentioned" 'GPT_PROXY_URL'
+
+# Config-first precedence applies to proxy-url too.
+assert_doc_pair "docs: proxy-url config-first precedence" \
+    'proxy-url.*authoritative|authoritative.*proxy-url|config.*proxy-url' \
+    'proxy-url.*权威|权威.*proxy-url|配置.*proxy-url'
+
+# Standard proxy env vars are explicitly NOT auto-persisted.
+assert_doc_pair "docs: standard proxy env vars not auto-persisted" \
+    'HTTP_PROXY.*HTTPS_PROXY.*ALL_PROXY|not.*auto-persist|deliberately.*not' \
+    'HTTP_PROXY.*HTTPS_PROXY.*ALL_PROXY|不自动持久化|故意不'
+
+# Credentials may be present in the URL and the URL is never printed.
+assert_doc_pair "docs: proxy URL may carry credentials, never printed" \
+    'credentials|never.*printed|never.*log' \
+    '凭证|绝不被打印|从不打印|不会泄露'
+
+# Malformed existing proxy-url fails safe (no silent rewrite).
+assert_doc_pair "docs: malformed proxy-url fails safe" \
+    'malformed.*fails safe|fails safe|without touching' \
+    '格式错误.*安全失败|安全失败|原样保留|不会.*重写'
+
+# Accepted schemes (http/https/socks5) documented.
+assert_doc_pair "docs: proxy schemes listed" \
+    'socks5://|http://.*https://' \
+    'socks5://|http://.*https://'
+
+# CCR independence: cl_ccr never traverses CLIProxyAPI on 8317.
+assert_doc_pair "docs: cl_ccr never traverses CLIProxyAPI 8317" \
+    'never traverses CLIProxyAPI|separate plane|cl_ccr.*never' \
+    '永远不会经过 CLIProxyAPI|独立.*线|cl_ccr.*不会'
+
+# CCR port 3456 + gateway-proxy-preload.cjs + CCR_UPSTREAM_PROXY_URL.
+assert_doc_pair "docs: CCR uses preload + CCR_UPSTREAM_PROXY_URL on 3456" \
+    'gateway-proxy-preload\.cjs|CCR_UPSTREAM_PROXY_URL|ProxyAgent' \
+    'gateway-proxy-preload\.cjs|CCR_UPSTREAM_PROXY_URL|ProxyAgent'
+assert_doc_both "docs: CCR port 3456" '3456'
 
 # --- Shared literal tokens present in both guides ---------------------------
 
