@@ -690,7 +690,7 @@ test_all_off_unit() {
         source "$DIR/install.sh" 2>/dev/null
         set +euo pipefail
         for fn in install_claude_md install_settings install_rules install_skills \
-                  install_agents install_mattpocock_skills install_lessons \
+                  install_agents install_lessons \
                   install_statusline install_mcp install_plugins install_deepxiv \
                   install_shell_wrapper configure_gpt_backend configure_ccr_profile \
                   choose_default_profile prune_retired_plugins prune_unlisted_plugins \
@@ -703,7 +703,7 @@ test_all_off_unit() {
         install_image_gen() { echo x >> "$counter"; }
         SCRIPT_DIR="$tmp"; export SCRIPT_DIR
         INSTALL_CLAUDE_MD=false; INSTALL_SETTINGS=false; INSTALL_RULES=false
-        INSTALL_SKILLS=false; INSTALL_AGENTS=false; INSTALL_MATTPOCOCK=false
+        INSTALL_SKILLS=false; INSTALL_AGENTS=false
         INSTALL_LESSONS=false; INSTALL_STATUSLINE=false; INSTALL_SHELL_WRAPPER=false
         INSTALL_PLUGINS=false; INSTALL_MCP=false; INSTALL_LARK=false; INSTALL_DEEPXIV=false
         main >/dev/null 2>&1

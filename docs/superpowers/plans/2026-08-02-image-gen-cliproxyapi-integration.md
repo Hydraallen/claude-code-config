@@ -111,7 +111,7 @@ npx -y skills@latest add sinedied/agent-skills --global --agent claude-code --co
 - [ ] Create temporary-HOME/fake-npx tests for exact command, `DO_NOT_TRACK=1`, detached stdin, three attempts, transient recovery, and final warning.
 - [ ] Add failing full dry-run tests proving no network/HOME writes; fix top-level directory creation if required.
 - [ ] Add failing augmentation cases: insert, replace once, preserve outside bytes and upstream changes, reject missing layout and malformed/duplicate markers, support spaced paths, atomic replacement.
-- [ ] Implement bounded network installation next to `install_mattpocock_skills` with warning accounting.
+- [ ] Implement bounded network installation alongside the existing network-Skill helper patterns, with warning accounting.
 - [ ] Implement canonical managed instructions: invoke wrapper, forward arguments, no OpenAI Platform key, `gpt-image-2`, Windows limitation.
 - [ ] Add the wrapper to installer-managed user scripts with executable permissions and accurate output.
 - [ ] Write mode-600 manifest atomically only after all installation and augmentation steps succeed.

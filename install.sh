@@ -315,7 +315,6 @@ INSTALL_CRITICAL=0
 INSTALL_RULES=false
 INSTALL_SKILLS=false
 INSTALL_AGENTS=false
-INSTALL_MATTPOCOCK=false
 INSTALL_LESSONS=false
 INSTALL_STATUSLINE=false
 INSTALL_MCP=false
@@ -361,14 +360,94 @@ RESOLVED_PLUGINS=()
 CATALOGUE_PLUGINS=()
 INSTALLED_PLUGINS=()
 
-# Skills shipped by mattpocock/skills (installed via `npx skills`, NOT vendored).
-# Snapshot of the plugin.json skill list at integration time; used for uninstall cleanup.
-MATTPOCOCK_SKILLS=(
-    "ask-matt" "diagnosing-bugs" "grill-with-docs" "triage"
-    "improve-codebase-architecture" "setup-matt-pocock-skills" "tdd"
-    "to-issues" "to-prd" "prototype" "domain-modeling" "codebase-design"
-    "grill-me" "grilling" "handoff" "teach" "writing-great-skills"
-)
+# Retired Skill ownership tombstones.
+RETIRED_HARNESS_WORKFLOW_SHA256="d897cbfec20f87b553cbbe0f0541a1169f045492881b78b566149d15af1e68ba"
+
+is_safe_retired_skill_name() {
+    local name="${1-}"
+    [[ -n "$name" ]] || return 1
+    [[ "$name" != "." && "$name" != ".." ]] || return 1
+    [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+}
+
+sha256_file() {
+    local path="$1"
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$path" | cut -d " " -f 1 | tr "[:upper:]" "[:lower:]"
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$path" | cut -d " " -f 1 | tr "[:upper:]" "[:lower:]"
+    else
+        return 1
+    fi
+}
+
+cleanup_retired_mattpocock_skills() {
+    local manifest="$CLAUDE_DIR/.mattpocock-skills"
+    [[ -f "$manifest" ]] || return 0
+    local skill_name skill_path
+    while IFS= read -r skill_name || [[ -n "$skill_name" ]]; do
+        [[ -n "$skill_name" ]] || continue
+        if ! is_safe_retired_skill_name "$skill_name"; then
+            warn "Skipping unsafe retired skill manifest entry"
+            continue
+        fi
+        skill_path="$CLAUDE_DIR/skills/$skill_name"
+        [[ -d "$skill_path" ]] || continue
+        if $DRY_RUN; then info "Would remove retired manifest-owned skill: $skill_name";
+        else rm -rf -- "$skill_path"; ok "Removed retired manifest-owned skill: $skill_name"; fi
+    done < "$manifest"
+    if $DRY_RUN; then info "Would remove retired skill manifest: $manifest";
+    else rm -f -- "$manifest"; ok "Removed retired skill manifest"; fi
+}
+
+cleanup_retired_harness_workflow() {
+    local skill_dir="$CLAUDE_DIR/skills/harness-workflow" skill_file digest
+    [[ -d "$skill_dir" ]] || return 0
+    skill_file="$skill_dir/SKILL.md"
+    if [[ ! -f "$skill_file" ]]; then warn "Retired harness-workflow: cannot verify ownership; preserving directory"; return 0; fi
+    if ! digest="$(sha256_file "$skill_file")"; then warn "Retired harness-workflow: cannot verify ownership; preserving directory"; return 0; fi
+    if [[ "$digest" != "$RETIRED_HARNESS_WORKFLOW_SHA256" ]]; then warn "Retired harness-workflow is modified or user-authored; preserving directory"; return 0; fi
+    if $DRY_RUN; then
+        info "Would remove retired managed skill file: harness-workflow/SKILL.md"
+        return 0
+    fi
+    rm -f -- "$skill_file"
+    if rmdir "$skill_dir" 2>/dev/null; then
+        ok "Removed retired managed skill: harness-workflow"
+    else
+        warn "Removed retired managed harness-workflow/SKILL.md; preserved additional content"
+    fi
+}
+
+cleanup_retired_enabled_plugins() {
+    local settings="$CLAUDE_DIR/settings.json" removed_json tmp
+    [[ -f "$settings" ]] || return 0
+    if ! command -v jq >/dev/null 2>&1; then warn "jq unavailable — cannot remove retired enabled plugins safely"; return 0; fi
+    if ! jq empty "$settings" 2>/dev/null; then warn "settings.json is invalid — cannot remove retired enabled plugins safely"; return 0; fi
+    local found=false pkg
+    for pkg in "${PLUGINS_REMOVED[@]}"; do
+        if jq -e --arg k "$pkg" '(.enabledPlugins // {}) | has($k)' "$settings" >/dev/null; then
+            found=true
+            if $DRY_RUN; then info "Would remove retired enabled plugin: $pkg"; fi
+        fi
+    done
+    $found || return 0
+    $DRY_RUN && return 0
+    removed_json="$(printf '%s\n' "${PLUGINS_REMOVED[@]}" | jq -R . | jq -s .)"
+    tmp="$(mktemp "${settings}.tmp.XXXXXX")" || return 1
+    if jq --argjson removed "$removed_json" 'reduce $removed[] as $r (. ; del(.enabledPlugins[$r]))' "$settings" > "$tmp" && jq empty "$tmp"; then
+        chmod --reference="$settings" "$tmp" 2>/dev/null || chmod 600 "$tmp" 2>/dev/null || true
+        mv -f "$tmp" "$settings"
+        ok "Removed retired enabled plugin settings"
+    else
+        rm -f "$tmp"; warn "Could not remove retired enabled plugins safely"
+    fi
+}
+
+cleanup_retired_skills() {
+    cleanup_retired_mattpocock_skills
+    cleanup_retired_harness_workflow
+}
 
 # --- Plugin groups ------------------------------------------------------
 
@@ -382,7 +461,6 @@ PLUGINS_ESSENTIAL=(
     "feature-dev@claude-plugins-official"
     "code-simplifier@claude-plugins-official"
     "ralph-loop@claude-plugins-official"
-    "frontend-design@claude-plugins-official"
     "example-skills@anthropic-agent-skills"
     "github@claude-plugins-official"
 )
@@ -415,6 +493,7 @@ PLUGINS_PUA=(
 # uninstalls these stale ids and removes their orphaned marketplaces so a
 # rename (e.g. everything-claude-code -> ecc) self-heals on the next run.
 RETIRED_PLUGINS=(
+    "frontend-design@claude-plugins-official"
     "everything-claude-code@everything-claude-code"  # renamed to ecc@ecc
     "health@claude-health"                           # claude-health renamed to the waza suite
 )
@@ -426,6 +505,7 @@ RETIRED_MARKETPLACES=(
 # Tombstones: plugins removed upstream. Stripped from a user's enabledPlugins
 # on upgrade and uninstalled on --uninstall, so "removed" plugins don't linger.
 PLUGINS_REMOVED=(
+    "frontend-design@claude-plugins-official"
     "everything-claude-code@everything-claude-code"
 )
 
@@ -566,13 +646,11 @@ Codex CLI|Codex adversarial review (openai/codex)|0|review-codex")
     GROUP_HINTS+=("planning, iteration, code quality, meta-config")
     GROUP_ITEMS+=("andrej-karpathy-skills|Karpathy coding guidelines (Think-First, Simplicity, Surgical)|1|plug-andrej-karpathy-skills
 superpowers|Planning, brainstorming, TDD, debugging|1|plug-superpowers
-mattpocock/skills|17 agent skills via npx: tdd, to-prd, diagnosing-bugs, handoff, teach… (mattpocock)|1|skill-mattpocock
 feature-dev|Guided feature development|1|plug-feature-dev
 ralph-loop|Automated iteration loop|1|plug-ralph-loop
 commit-commands|git commit / push / PR workflow|1|plug-commit-commands
 code-simplifier|Code simplification & cleanup|1|plug-code-simplifier
 ecc|Everything Claude Code: TDD, security, database, Go/Python/Spring Boot|1|plug-everything-claude-code
-harness-workflow|Structured development workflow (Planner→Generator→Evaluator)|1|skill-harness-workflow
 update-config|Configure Claude Code via settings.json (skill)|1|skill-update-config")
 
     # Group 4: Integrations
@@ -587,7 +665,6 @@ playwright|Browser automation & E2E testing|1|plug-playwright")
     GROUP_HINTS+=("documents, UI, creative artifacts, humanization")
     GROUP_ITEMS+=("document-skills|Document processing (PDF, DOCX, PPTX, XLSX)|1|plug-document-skills
 example-skills|Frontend/design/canvas/algorithmic-art skills|1|plug-example-skills
-frontend-design|Frontend UI design|1|plug-frontend-design
 humanizer|Remove AI writing patterns (English, blader) (skill)|1|skill-humanizer
 humanizer-zh|Remove AI writing patterns (Chinese, op7418) (skill)|0|skill-humanizer-zh")
 
@@ -986,7 +1063,6 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
             plug-feature-dev)       echo "feature-dev@claude-plugins-official" ;;
             plug-code-simplifier)   echo "code-simplifier@claude-plugins-official" ;;
             plug-ralph-loop)        echo "ralph-loop@claude-plugins-official" ;;
-            plug-frontend-design)   echo "frontend-design@claude-plugins-official" ;;
             plug-example-skills)    echo "example-skills@anthropic-agent-skills" ;;
             plug-github)            echo "github@claude-plugins-official" ;;
             plug-claude-mem)        echo "claude-mem@thedotmack" ;;
@@ -1034,8 +1110,6 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
             skill-humanizer)        INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer") ;;
             skill-humanizer-zh)     INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer-zh") ;;
             skill-update-config)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("update-config") ;;
-            skill-harness-workflow) INSTALL_SKILLS=true; SELECTED_SKILLS+=("harness-workflow") ;;
-            skill-mattpocock)       INSTALL_MATTPOCOCK=true ;;
             # DeepXiv
             deepxiv-cli)            INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-cli") ;;
             deepxiv-trending-digest) INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-trending-digest") ;;
@@ -1498,11 +1572,7 @@ install_skills() {
     info "Installing custom skills..."
     $DRY_RUN || mkdir -p "$CLAUDE_DIR/skills"
 
-    # Migration: remove renamed/deleted skills from previous installs.
-    # NOTE: handoff/teach are intentionally NOT removed here — they were vendored in
-    # <=2.7.x and now ship via mattpocock/skills. Deleting them up front would lose them
-    # for users who lack npx or deselect mattpocock; instead they are overwritten in
-    # place by install_mattpocock_skills (--copy) when that item is selected.
+    # Migration removes only explicitly provenance-backed retired content.
     for old_skill in "update"; do
         if [[ -d "$CLAUDE_DIR/skills/$old_skill" ]]; then
             if $DRY_RUN; then
@@ -2298,55 +2368,10 @@ cl_commands_hint() {
     return 0
 }
 
-# The exact `skills add` invocation. Scoped to the MATTPOCOCK_SKILLS names (the 17
-# plugin.json skills) via repeated `--skill` flags — `--skill '*'` would pull all 35
-# SKILL.md files in the repo, including personal/in-progress ones we don't track or
-# uninstall. Installs globally to ~/.claude/skills/ for Claude Code only, as real
-# copies (not symlinks). Returns the command as an array via the global _MP_NPX_CMD.
-_mattpocock_npx_cmd() {
-    _MP_NPX_CMD=(npx -y skills@latest add mattpocock/skills --global --agent claude-code --copy --yes)
-    local s
-    for s in "${MATTPOCOCK_SKILLS[@]}"; do
-        _MP_NPX_CMD+=(--skill "$s")
-    done
-}
-
-_mattpocock_npx() {
-    env DO_NOT_TRACK=1 "${_MP_NPX_CMD[@]}" </dev/null
-}
-
-install_mattpocock_skills() {
-    info "Installing mattpocock/skills (via npx skills)..."
-    _mattpocock_npx_cmd
-    if ! command -v npx &>/dev/null; then
-        warn "npx not found (needs Node.js) — skipping mattpocock/skills (optional)."
-        warn "  Install Node.js to get npx: https://nodejs.org"
-        warn "  e.g. macOS: 'brew install node' · Debian/Ubuntu: 'sudo apt install nodejs npm' · or use nvm (https://github.com/nvm-sh/nvm)"
-        warn "  Then run: DO_NOT_TRACK=1 ${_MP_NPX_CMD[*]}"
-        # Optional add-on: do NOT count as an install warning (would block the version stamp).
-        return 0
-    fi
-    if $DRY_RUN; then
-        info "Would run: DO_NOT_TRACK=1 ${_MP_NPX_CMD[*]}"
-        return 0
-    fi
-    if retry 3 5 "mattpocock/skills" _mattpocock_npx; then
-        ok "mattpocock/skills installed (~/.claude/skills/)"
-        # Record what we installed so uninstall removes only these (provenance), never a
-        # user-authored skill that merely shares a generic name (tdd, handoff, …).
-        printf '%s\n' "${MATTPOCOCK_SKILLS[@]}" > "$CLAUDE_DIR/.mattpocock-skills" 2>/dev/null || true
-    else
-        warn "Failed to install mattpocock/skills via npx (optional — install skipped)."
-        warn "  Retry manually: DO_NOT_TRACK=1 ${_MP_NPX_CMD[*]}"
-        # Optional add-on failure is non-fatal: do NOT block the version stamp.
-    fi
-}
-
 # ============================================================
 # image-gen (sinedied/agent-skills) always-installed network Skill.
 #
-# The upstream Skill is fetched with the same `skills` CLI architecture as
-# mattpocock/skills — never vendored. After a successful download the installer
+# The upstream Skill is fetched through a bounded argument-array `skills` CLI helper — never vendored. After a successful download the installer
 # augments the downloaded SKILL.md with an idempotent managed instructions
 # block pointing Claude Code at the repository-owned wrapper, then writes a
 # mode-600 ownership manifest so uninstall can delete only an installer-owned
@@ -3396,19 +3421,7 @@ uninstall() {
         rm -rf "$deepxiv_skill" && ok "Removed DeepXiv skill: $(basename "$deepxiv_skill")"
     done
 
-    # Remove mattpocock/skills we installed, tracked via the install manifest written at
-    # install time — so we never delete a user-authored skill that merely shares a
-    # generic name (tdd, handoff, teach, …). No manifest → we installed nothing → skip.
-    local mp_manifest mp_skill
-    mp_manifest="$CLAUDE_DIR/.mattpocock-skills"
-    if [[ -f "$mp_manifest" ]]; then
-        while IFS= read -r mp_skill; do
-            [[ -n "$mp_skill" ]] || continue
-            [[ -d "$CLAUDE_DIR/skills/$mp_skill" ]] || continue
-            rm -rf "$CLAUDE_DIR/skills/$mp_skill" && ok "Removed mattpocock skill: $mp_skill"
-        done < "$mp_manifest"
-        rm -f "$mp_manifest"
-    fi
+    cleanup_retired_skills
 
     # Remove the image-gen Skill ONLY when the ownership manifest proves this
     # installer installed it. Validates EVERY fixed field (skill/source/wrapper)
@@ -4229,8 +4242,6 @@ main() {
         SELECTED_PROFILES=("glm" "gpt" "ccr")
         # Review defaults for --all: adversarial ON, codex OFF
         REVIEW_ADVERSARIAL=true
-        # mattpocock/skills is installed by default (replaces the former handoff/teach skills)
-        INSTALL_MATTPOCOCK=true
         if $EXPLICIT_ALL; then
             # Explicit --all: install everything including MCP, DeepXiv, and all plugin groups
             INSTALL_MCP=true
@@ -4281,6 +4292,8 @@ main() {
     # chmod) so the run is fully side-effect-free and previewable from an empty
     # HOME. Each install_* function also guards its own writes on $DRY_RUN.
     $DRY_RUN || mkdir -p "$CLAUDE_DIR"
+    cleanup_retired_skills
+    cleanup_retired_enabled_plugins
 
     $INSTALL_CLAUDE_MD && install_claude_md
     $INSTALL_SETTINGS && install_settings
@@ -4292,7 +4305,6 @@ main() {
     # so the wrapper (a USER_SCRIPT) is already in place when augmentation and
     # the ownership-manifest write check for it.
     install_image_gen
-    $INSTALL_MATTPOCOCK && install_mattpocock_skills
     $INSTALL_LESSONS && install_lessons
     $INSTALL_STATUSLINE && install_statusline
     { $INSTALL_MCP || $INSTALL_LARK; } && install_mcp

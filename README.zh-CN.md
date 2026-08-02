@@ -6,7 +6,7 @@
 
 ![Statusline](assets/statusline.png)
 
-[Claude Code](https://claude.com/claude-code) 的生产级配置。一条命令安装：全局指令、多语言编码规则（Python / TypeScript / Go）、10 个 marketplace 下的 25 个精选插件、5 个内置 skill（外加通过 npx 安装的 [mattpocock/skills](https://github.com/mattpocock/skills) 集合与 `sinedied/agent-skills` 的 `image-gen` Skill，二者均通过 npx 安装）、渐变状态栏，以及能跨会话记住纠正的自我改进回路。
+[Claude Code](https://claude.com/claude-code) 的生产级配置。一条命令安装：全局指令、多语言编码规则（Python / TypeScript / Go）、10 个 marketplace 下的 24 个精选插件、7 个内置 skill（外加通过 npx 安装的 `sinedied/agent-skills` `image-gen` Skill）、渐变状态栏，以及能跨会话记住纠正的自我改进回路。
 
 ## 示例
 
@@ -35,9 +35,9 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
   > [5/5] Core                   全局指令、设置、规则...
     [0/3] Language Rules          Python / TypeScript / Go
     [2/3] Review                  code-review + adversarial-review
-    [7/8] Workflow                karpathy、mattpocock/skills、update-config...
+    [8/8] Workflow                karpathy、superpowers、update-config...
     [3/3] Integrations            context7、github、playwright
-    [4/5] Design & Content        document-skills、frontend-design、humanizer...
+    [3/4] Design & Content        document-skills、example-skills、humanizer...
     [0/2] Slides                  frontend-slides、ppt-master
     [0/3] Memory & Lifestyle      claude-mem、claude-health、PUA
     [1/10] Academic Research      paper-reading、deepxiv-cli...
@@ -80,12 +80,12 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 | 项目 | 来源 | 功能 | 默认 |
 |------|------|------|------|
 | [**andrej-karpathy-skills**](https://github.com/forrestchang/andrej-karpathy-skills) | karpathy-skills（插件） | Karpathy 编码守则：Think-First、Simplicity、Surgical、Goal-Driven | 开启 |
-| [**superpowers**](https://github.com/obra/superpowers) | claude-plugins-official（插件） | 头脑风暴、调试、代码审查、Git worktree、计划编写 | 关闭 |
-| [**mattpocock/skills**](https://github.com/mattpocock/skills) | npx `skills` | 17 个 agent skill（tdd、to-prd、to-issues、diagnosing-bugs、handoff、teach、grilling…），通过 `skills` CLI 安装到 `~/.claude/skills/` | 开启 |
+| [**superpowers**](https://github.com/obra/superpowers) | claude-plugins-official（Essential 插件） | 头脑风暴、调试、代码审查、Git worktree、计划编写 | 开启 |
 | **feature-dev** | claude-plugins-official | 引导式功能开发 | 开启 |
 | **ralph-loop** | claude-plugins-official | 自动化迭代循环（会话感知 REPL） | 开启 |
 | **commit-commands** | claude-plugins-official | Git 提交 / 推送 / PR 工作流 | 开启 |
 | **code-simplifier** | claude-plugins-official | 代码简化与重构 | 开启 |
+| **ecc** | ecc（Optional 插件；交互菜单默认） | Everything Claude Code 工作流与 skills | 开启 |
 | [**update-config**](skills/update-config/) | 内置 skill | `/update-config` — 在会话内重新运行安装器 | 开启 |
 
 **Integrations (3)** — 外部工具与服务。
@@ -96,13 +96,12 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 | [**github**](https://github.com/github/github-mcp-server) | claude-plugins-official | GitHub 集成（Issue、PR、工作流） | 开启 |
 | [**playwright**](https://github.com/microsoft/playwright-mcp) | claude-plugins-official | 浏览器自动化、E2E 测试、截图 | 开启 |
 
-**Design & Content (5)** — 文档、UI、创意与文本"人化"。
+**Design & Content (4)** — 文档、UI、创意与文本"人化"。
 
 | 项目 | 来源 | 功能 | 默认 |
 |------|------|------|------|
 | [**document-skills**](https://github.com/anthropics/skills) | anthropic-agent-skills | PDF、DOCX、PPTX、XLSX 创建和操作 | 开启 |
 | [**example-skills**](https://github.com/anthropics/skills) | anthropic-agent-skills | 前端设计、MCP 构建器、画布、算法艺术 | 开启 |
-| **frontend-design** | claude-plugins-official | 生产级前端界面设计 | 开启 |
 | [**humanizer**](https://github.com/blader/humanizer) | 内置 skill | 去除 AI 写作特征（英文） | 开启 |
 | [**humanizer-zh**](https://github.com/op7418/Humanizer-zh) | 内置 skill | 去除 AI 写作特征（中文） | 关闭 |
 

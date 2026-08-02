@@ -13,7 +13,6 @@
 | [**claude-mem**](https://github.com/thedotmack/claude-mem) | thedotmack | Persistent memory with smart search, timeline, AST-aware code search |
 | [**claude-health**](https://github.com/tw93/claude-health) | claude-health | Health check & wellness dashboard (default off) |
 | [**PUA**](https://github.com/tanweai/pua) | pua-skills | AI agent productivity booster (pua, pua-en, pua-ja) (default off) |
-| **frontend-design** | claude-plugins-official | Production-grade frontend interfaces |
 | [**context7**](https://github.com/upstash/context7) | claude-plugins-official | Up-to-date library documentation lookup |
 | **code-review** | claude-plugins-official | Confidence-based code review |
 | [**github**](https://github.com/github/github-mcp-server) | claude-plugins-official | GitHub integration (issues, PRs, workflows) |

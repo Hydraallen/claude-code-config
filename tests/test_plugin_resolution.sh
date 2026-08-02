@@ -99,7 +99,6 @@ INSTALLED_PLUGINS=(
     "ecc@ecc"
     "example-skills@anthropic-agent-skills"
     "feature-dev@claude-plugins-official"
-    "frontend-design@claude-plugins-official"
     "github@claude-plugins-official"
     "playwright@claude-plugins-official"
     "ralph-loop@claude-plugins-official"
@@ -107,6 +106,13 @@ INSTALLED_PLUGINS=(
 )
 assert_eq "real fixture: ecc pruned (optional, installed, not selected; superpowers is essential)" \
     "ecc@ecc" "$(run_prune)"
+
+# Superpowers remains selected under its essential policy.
+if prune_contains "superpowers@claude-plugins-official"; then
+    echo "FAIL: real fixture: superpowers must NOT be pruned"; FAIL=$((FAIL + 1))
+else
+    echo "PASS: real fixture: superpowers preserved (essential)"; PASS=$((PASS + 1))
+fi
 
 # code-review is a user third-party plugin -> must never be pruned.
 if prune_contains "code-review@claude-plugins-official"; then

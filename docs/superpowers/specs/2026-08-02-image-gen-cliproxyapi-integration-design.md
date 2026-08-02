@@ -30,7 +30,7 @@ The public image model identifier is `gpt-image-2`. The integration must not req
 
 ## Upstream Dependency
 
-The installer runs the existing `skills` CLI using the same architecture as `install_mattpocock_skills`:
+The installer invokes the `skills` CLI through an argument-array helper, detached stdin, bounded retry, telemetry suppression, and warning accounting:
 
 ```bash
 npx -y skills@latest add sinedied/agent-skills \

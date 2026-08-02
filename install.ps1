@@ -183,16 +183,31 @@ function Confirm-Action {
     return ($answer -match '^[Yy]$')
 }
 
-# --- Plugin groups ---------------------------------------------------------
+# Retired Skill ownership tombstones.
+$RETIRED_HARNESS_WORKFLOW_SHA256 = "d897cbfec20f87b553cbbe0f0541a1169f045492881b78b566149d15af1e68ba"
+function Test-SafeRetiredSkillName { param([string]$Name); return -not [string]::IsNullOrEmpty($Name) -and $Name -ne "." -and $Name -ne ".." -and $Name -match '^[A-Za-z0-9][A-Za-z0-9._-]*$' }
+function Remove-RetiredMattpocockSkills {
+    $manifest = Join-Path $CLAUDE_DIR ".mattpocock-skills"; if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { return }
+    foreach ($skillName in (Get-Content -LiteralPath $manifest)) { if ([string]::IsNullOrEmpty($skillName)) { continue }; if (-not (Test-SafeRetiredSkillName $skillName)) { Write-Warn "Skipping unsafe retired skill manifest entry"; continue }; $skillPath = Join-Path (Join-Path $CLAUDE_DIR "skills") $skillName; if (-not (Test-Path -LiteralPath $skillPath -PathType Container)) { continue }; if ($DryRun) { Write-Info "Would remove retired manifest-owned skill: $skillName" } else { Remove-Item -LiteralPath $skillPath -Recurse -Force; Write-Ok "Removed retired manifest-owned skill: $skillName" } }
+    if ($DryRun) { Write-Info "Would remove retired skill manifest: $manifest" } else { Remove-Item -LiteralPath $manifest -Force; Write-Ok "Removed retired skill manifest" }
+}
+function Remove-RetiredHarnessWorkflow {
+    $skillDir = Join-Path (Join-Path $CLAUDE_DIR "skills") "harness-workflow"; if (-not (Test-Path -LiteralPath $skillDir -PathType Container)) { return }; $skillFile = Join-Path $skillDir "SKILL.md"; if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { Write-Warn "Retired harness-workflow: cannot verify ownership; preserving directory"; return }; try { $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $skillFile).Hash.ToLowerInvariant() } catch { Write-Warn "Retired harness-workflow: cannot verify ownership; preserving directory"; return }; if ($digest -ne $RETIRED_HARNESS_WORKFLOW_SHA256) { Write-Warn "Retired harness-workflow is modified or user-authored; preserving directory"; return }; if ($DryRun) { Write-Info "Would remove retired managed skill file: harness-workflow/SKILL.md"; return }
+    Remove-Item -LiteralPath $skillFile -Force
+    if (@(Get-ChildItem -LiteralPath $skillDir -Force).Count -eq 0) { Remove-Item -LiteralPath $skillDir -Force; Write-Ok "Removed retired managed skill: harness-workflow" }
+    else { Write-Warn "Removed retired managed harness-workflow/SKILL.md; preserved additional content" }
+}
+function Remove-RetiredEnabledPlugins {
+    $settings = Join-Path $CLAUDE_DIR "settings.json"; if (-not (Test-Path -LiteralPath $settings -PathType Leaf)) { return }
+    try { $obj = Get-Content -LiteralPath $settings -Raw | ConvertFrom-Json } catch { Write-Warn "settings.json is invalid - cannot remove retired enabled plugins safely"; return }
+    $found = $false; foreach ($pkg in $PLUGINS_REMOVED) { if ($obj.enabledPlugins -and $obj.enabledPlugins.PSObject.Properties.Name -contains $pkg) { $found = $true; if ($DryRun) { Write-Info "Would remove retired enabled plugin: $pkg" } else { $obj.enabledPlugins.PSObject.Properties.Remove($pkg) } } }
+    if (-not $found -or $DryRun) { return }
+    $tmp = Join-Path (Split-Path $settings -Parent) ("settings.json.tmp." + [Guid]::NewGuid().ToString("N"))
+    try { $obj | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $tmp -Encoding UTF8; Get-Content -LiteralPath $tmp -Raw | ConvertFrom-Json | Out-Null; [System.IO.File]::Replace($tmp, $settings, $null); Write-Ok "Removed retired enabled plugin settings" } catch { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue; Write-Warn "Could not remove retired enabled plugins safely: $_" }
+}
+function Remove-RetiredSkills { Remove-RetiredMattpocockSkills; Remove-RetiredHarnessWorkflow }
 
-# Skills shipped by mattpocock/skills (installed via `npx skills`, NOT vendored).
-# Snapshot of the plugin.json skill list at integration time; used for uninstall cleanup.
-$MATTPOCOCK_SKILLS = @(
-    "ask-matt", "diagnosing-bugs", "grill-with-docs", "triage",
-    "improve-codebase-architecture", "setup-matt-pocock-skills", "tdd",
-    "to-issues", "to-prd", "prototype", "domain-modeling", "codebase-design",
-    "grill-me", "grilling", "handoff", "teach", "writing-great-skills"
-)
+# --- Plugin groups ---------------------------------------------------------
 
 $PLUGINS_ESSENTIAL = @(
     "andrej-karpathy-skills@karpathy-skills"
@@ -204,7 +219,6 @@ $PLUGINS_ESSENTIAL = @(
     "feature-dev@claude-plugins-official"
     "code-simplifier@claude-plugins-official"
     "ralph-loop@claude-plugins-official"
-    "frontend-design@claude-plugins-official"
     "example-skills@anthropic-agent-skills"
     "github@claude-plugins-official"
 )
@@ -237,6 +251,7 @@ $PLUGINS_PUA = @(
 # uninstalls these stale ids and removes their orphaned marketplaces so a
 # rename (e.g. everything-claude-code -> ecc) self-heals on the next run.
 $RETIRED_PLUGINS = @(
+    "frontend-design@claude-plugins-official"
     "everything-claude-code@everything-claude-code"
     "health@claude-health"
 )
@@ -248,6 +263,7 @@ $RETIRED_MARKETPLACES = @(
 # Tombstones: plugins removed upstream. Stripped from a user's enabledPlugins
 # on upgrade and uninstalled on -Uninstall, so "removed" plugins don't linger.
 $PLUGINS_REMOVED = @(
+    "frontend-design@claude-plugins-official"
     "everything-claude-code@everything-claude-code"
 )
 
@@ -344,13 +360,11 @@ function Show-InteractiveMenu {
         @{ Label = "Workflow"; Hint = "planning, iteration, code quality, meta-config"; Items = @(
             @{ Label = "andrej-karpathy-skills"; Desc = "Karpathy coding guidelines (Think-First, Simplicity, Surgical)"; Default = $true; Id = "plug-andrej-karpathy-skills" }
             @{ Label = "superpowers";     Desc = "Planning, brainstorming, TDD, debugging"; Default = $true;  Id = "plug-superpowers" }
-            @{ Label = "mattpocock/skills"; Desc = "17 agent skills via npx: tdd, to-prd, diagnosing-bugs, handoff, teach... (mattpocock)"; Default = $true; Id = "skill-mattpocock" }
             @{ Label = "feature-dev";     Desc = "Guided feature development";        Default = $true;  Id = "plug-feature-dev" }
             @{ Label = "ralph-loop";      Desc = "Automated iteration loop";          Default = $true;  Id = "plug-ralph-loop" }
             @{ Label = "commit-commands"; Desc = "git commit / push / PR workflow";   Default = $true;  Id = "plug-commit-commands" }
             @{ Label = "code-simplifier"; Desc = "Code simplification & cleanup";     Default = $true;  Id = "plug-code-simplifier" }
             @{ Label = "ecc"; Desc = "Everything Claude Code: TDD, security, database, Go/Python/Spring Boot"; Default = $true; Id = "plug-everything-claude-code" }
-            @{ Label = "harness-workflow"; Desc = "Structured development workflow (Planner->Generator->Evaluator)"; Default = $true; Id = "skill-harness-workflow" }
             @{ Label = "update-config";   Desc = "Configure Claude Code via settings.json (skill)"; Default = $true; Id = "skill-update-config" }
         )}
         @{ Label = "Integrations"; Hint = "external tools & services"; Items = @(
@@ -361,7 +375,6 @@ function Show-InteractiveMenu {
         @{ Label = "Design & Content"; Hint = "documents, UI, creative artifacts, humanization"; Items = @(
             @{ Label = "document-skills"; Desc = "Document processing (PDF, DOCX, PPTX, XLSX)"; Default = $true; Id = "plug-document-skills" }
             @{ Label = "example-skills";  Desc = "Frontend/design/canvas/algorithmic-art skills"; Default = $true;  Id = "plug-example-skills" }
-            @{ Label = "frontend-design"; Desc = "Frontend UI design";                Default = $true;  Id = "plug-frontend-design" }
             @{ Label = "humanizer";       Desc = "Remove AI writing patterns (English, blader) (skill)"; Default = $true; Id = "skill-humanizer" }
             @{ Label = "humanizer-zh";    Desc = "Remove AI writing patterns (Chinese, op7418) (skill)"; Default = $false; Id = "skill-humanizer-zh" }
         )}
@@ -594,7 +607,6 @@ function Show-InteractiveMenu {
         "plug-feature-dev" = "feature-dev@claude-plugins-official"
         "plug-code-simplifier" = "code-simplifier@claude-plugins-official"
         "plug-ralph-loop" = "ralph-loop@claude-plugins-official"
-        "plug-frontend-design" = "frontend-design@claude-plugins-official"
         "plug-example-skills" = "example-skills@anthropic-agent-skills"
         "plug-github" = "github@claude-plugins-official"
         "plug-claude-mem" = "claude-mem@thedotmack"
@@ -620,7 +632,6 @@ function Show-InteractiveMenu {
         Skills             = $false
         SelectedSkills     = @()
         Agents             = $false
-        Mattpocock         = $false
         Plugins            = $false
         SelectedPlugins    = @()
         PluginGroups       = @()
@@ -655,8 +666,6 @@ function Show-InteractiveMenu {
             "skill-humanizer"      { $result.Skills = $true; $result.SelectedSkills += "humanizer" }
             "skill-humanizer-zh"   { $result.Skills = $true; $result.SelectedSkills += "humanizer-zh" }
             "skill-update-config"  { $result.Skills = $true; $result.SelectedSkills += "update-config" }
-            "skill-harness-workflow" { $result.Skills = $true; $result.SelectedSkills += "harness-workflow" }
-            "skill-mattpocock"     { $result.Mattpocock = $true }
             "deepxiv-cli"          { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-cli" }
             "deepxiv-trending-digest" { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-trending-digest" }
             "deepxiv-baseline-table"  { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-baseline-table" }
@@ -1007,11 +1016,7 @@ function Install-Skills {
     $skillsDir = Join-Path $CLAUDE_DIR "skills"
     if (-not $DryRun) { New-Item -ItemType Directory -Path $skillsDir -Force | Out-Null }
 
-    # Migration: remove renamed/deleted skills from previous installs.
-    # NOTE: handoff/teach are intentionally NOT removed here — they were vendored in
-    # <=2.7.x and now ship via mattpocock/skills. Deleting them up front would lose them
-    # for users who lack npx or deselect mattpocock; instead they are overwritten in
-    # place by Install-MattpocockSkills (--copy) when that item is selected.
+    # Migration removes only explicitly provenance-backed retired content.
     foreach ($oldSkill in @("update")) {
         $oldPath = Join-Path $skillsDir $oldSkill
         if (Test-Path $oldPath) {
@@ -1149,52 +1154,6 @@ function Invoke-Cleanup {
     Write-Info "Running Claude data cleanup (--apply)..."
     & bash "$script" --apply
     if ($LASTEXITCODE -ne 0) { Write-Warn "Data cleanup reported a non-fatal error" }
-}
-
-# Install the full mattpocock/skills collection via the `skills` CLI (npx).
-# Installs globally to ~/.claude/skills/ for Claude Code only, as real copies
-# (not symlinks). Replaces the formerly vendored handoff/teach skills.
-function Install-MattpocockSkills {
-    Write-Info "Installing mattpocock/skills (via npx skills)..."
-    # Scope to the MATTPOCOCK_SKILLS names (the 17 plugin.json skills) via repeated
-    # --skill flags. `--skill '*'` would pull all 35 SKILL.md files in the repo,
-    # including personal/in-progress ones we neither track nor uninstall.
-    $npxArgs = @("-y", "skills@latest", "add", "mattpocock/skills", "--global", "--agent", "claude-code", "--copy", "--yes")
-    foreach ($s in $MATTPOCOCK_SKILLS) { $npxArgs += @("--skill", $s) }
-    $cmdPreview = "`$env:DO_NOT_TRACK='1'; npx " + ($npxArgs -join " ")
-    $npx = Get-Command npx -ErrorAction SilentlyContinue
-    if (-not $npx) {
-        Write-Warn "npx not found (needs Node.js) - skipping mattpocock/skills (optional)."
-        Write-Warn "  Install Node.js to get npx: https://nodejs.org"
-        Write-Warn "  e.g. run 'winget install OpenJS.NodeJS' (or download the installer from the link above)"
-        Write-Warn "  Then run: $cmdPreview"
-        # Optional add-on: do NOT count as an install warning (would block the version stamp).
-        return
-    }
-    if ($DryRun) {
-        Write-Info "Would run: $cmdPreview"
-        return
-    }
-    $prevDnt = $env:DO_NOT_TRACK
-    $env:DO_NOT_TRACK = "1"
-    try {
-        $ok = Invoke-Retry -MaxAttempts 3 -DelaySeconds 5 -Description "mattpocock/skills" -Action {
-            & npx @npxArgs
-            if ($LASTEXITCODE -ne 0) { throw "npx skills exited with code $LASTEXITCODE" }
-        }
-    } finally {
-        $env:DO_NOT_TRACK = $prevDnt
-    }
-    if ($ok) {
-        Write-Ok "mattpocock/skills installed (~/.claude/skills/)"
-        # Record what we installed so uninstall removes only these (provenance), never a
-        # user-authored skill that merely shares a generic name (tdd, handoff, ...).
-        try { $MATTPOCOCK_SKILLS | Set-Content -Path (Join-Path $CLAUDE_DIR ".mattpocock-skills") -Encoding UTF8 } catch {}
-    } else {
-        Write-Warn "Failed to install mattpocock/skills via npx (optional - install skipped)."
-        Write-Warn "  Retry manually: $cmdPreview"
-        # Optional add-on failure is non-fatal: do NOT block the version stamp.
-    }
 }
 
 # ============================================================
@@ -2379,19 +2338,7 @@ function Invoke-Uninstall {
         }
     }
 
-    # Remove mattpocock/skills we installed, tracked via the install manifest written at
-    # install time — so we never delete a user-authored skill that merely shares a
-    # generic name (tdd, handoff, teach, ...). No manifest -> we installed nothing -> skip.
-    $mpManifest = Join-Path $CLAUDE_DIR ".mattpocock-skills"
-    if (Test-Path $mpManifest) {
-        foreach ($mpSkill in (Get-Content $mpManifest)) {
-            $mpSkill = $mpSkill.Trim()
-            if (-not $mpSkill) { continue }
-            $mp = Join-Path $CLAUDE_DIR "skills\$mpSkill"
-            if (Test-Path $mp) { Remove-Item $mp -Recurse -Force; Write-Ok "Removed mattpocock skill: $mpSkill" }
-        }
-        Remove-Item $mpManifest -Force
-    }
+    Remove-RetiredSkills
 
     $p = Join-Path $CLAUDE_DIR "lessons.md"
     if (Test-Path $p) { Remove-Item $p -Force; Write-Ok "Removed lessons.md" }
@@ -2519,7 +2466,6 @@ function Main {
     $doMcp = $false
     $doLark = $false
     $doDeepXiv = $false
-    $doMattpocock = $false
     $deepXivSkills = @()
     $ruleLangs = @()
     $ruleLangsExplicit = $false
@@ -2532,7 +2478,6 @@ function Main {
     if ($All) {
         # Explicit -All: install everything including MCP
         # mattpocock/skills is installed by default (replaces the former handoff/teach skills)
-        $doMattpocock = $true
         $doClaudeMd = $true
         $doSettings = $true
         $doRules = $true
@@ -2565,7 +2510,6 @@ function Main {
             $doRules = $menuResult.Rules
             $doSkills = $menuResult.Skills
             $doAgents = $menuResult.Agents
-            $doMattpocock = $menuResult.Mattpocock
             $doLessons = $menuResult.Lessons
             $doHooks = $menuResult.Hooks
             $doPlugins = $menuResult.Plugins
@@ -2587,7 +2531,6 @@ function Main {
             $doSettings = $true
             $doRules = $true
             $doSkills = $true
-            $doMattpocock = $true
             $doLessons = $true
             $doHooks = $true
             $doPlugins = $true
@@ -2605,7 +2548,6 @@ function Main {
         $doSettings = $true
         $doRules = $true
         $doSkills = $true
-        $doMattpocock = $true
         $doLessons = $true
         $doHooks = $true
         $doPlugins = $true
@@ -2653,6 +2595,8 @@ function Main {
     if ($doClaudeMd) { Install-ClaudeMd -ReviewAdversarial $reviewAdversarial -ReviewCodex $reviewCodex }
     if ($doSettings) { Install-Settings -InstallPlugins $doPlugins -SelectedPluginsList $selectedPlugins -PluginGroups $pluginGroups }
     if ($doRules) { Install-Rules -Langs $ruleLangs -LangsExplicit $ruleLangsExplicit }
+    Remove-RetiredSkills
+    Remove-RetiredEnabledPlugins
     if ($doSkills) { Install-Skills -SelectedSkills $selectedSkills }
     if ($doAgents) { Install-Agents }
     Install-Scripts
@@ -2660,7 +2604,6 @@ function Main {
     # so the wrapper (a USER_SCRIPT) is already in place when augmentation and
     # the ownership-manifest write check for it.
     Install-ImageGen
-    if ($doMattpocock) { Install-MattpocockSkills }
     if ($doLessons) { Install-Lessons }
     if ($doHooks) { Install-Hooks }
     if ($doMcp -or $doLark) { Install-Mcp -InstallPlaywright $doMcp -InstallLark $doLark }

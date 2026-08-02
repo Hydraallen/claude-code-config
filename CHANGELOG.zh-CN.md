@@ -2,6 +2,11 @@
 
 ## [2.17.0] - 2026-08-02
 
+### 移除
+- 在不变更 2.17.0 版本号的前提下，停用 Matt Pocock Skill 集合、`frontend-design` 插件目录项和 vendored `harness-workflow` Skill。早期版本曾引入这些集成，2.17.0 是其正式退役版本。
+- Bash 与 PowerShell 保持升级清理一致：旧 Matt ownership manifest 仅删除其中记录的安全单层目录；原 frontend 插件 ID 仅保留为 retired/removed tombstone；harness 仅在摘要与旧托管内容完全一致时删除，修改过或用户自建的同名副本会保留。
+
+
 ### 新功能
 - **通过网络安装的 `image-gen` Skill（`sinedied/agent-skills`），始终安装。** 两个安装器现在都会通过网络拉取上游 `image-gen` Skill，命令为 `npx -y skills@latest add sinedied/agent-skills --global --agent claude-code --copy --yes --skill image-gen` —— 本仓库**不**追踪上游的 `image_gen.py`、提示词、示例或 license。安装是无条件的：在每种模式下都会运行（交互式、`--all` / `-All`、`--essential` / `-Essential`，即使所有可选项都被取消勾选），且没有为它新增菜单开关。仓库自有的 Bash 包装器（`scripts/image-gen-cliproxyapi.sh`）被安装到 `~/.claude/scripts/` 并注册为用户脚本；下载下来的 `SKILL.md` 会通过受管标记做幂等注入。
 - **安全的 CLIProxyAPI 委派包装器。** `~/.claude/scripts/image-gen-cliproxyapi.sh` 在环回地址 `http://127.0.0.1:8317/v1` 上启动或复用 CLIProxyAPI，要求 **CLIProxyAPI >= v7.2.17**（仅稳定版；所有预发布后缀都被拒绝），从 `~/.cli-proxy-api/config.yaml` 读取本地 client key（**绝不**打印/日志/放进 argv），注入仅作用于子进程的 `OPENAI_*` 变量，然后把原始参数委派给上游 `image_gen.py`。图像模型固定为 `gpt-image-2`。`/healthz` 仅作为存活探针；包装器额外执行一次鉴权过的 `GET /v1/models` 能力探针（key 通过 curl `--config -` stdin 传入，绝不在 argv），要求精确匹配 `data[].id == "gpt-image-2"`，并在超时内无法证明能力时 fail-closed。
@@ -110,27 +115,19 @@
 ## [Upstream merge: 2.8.0] - 2026-06-29
 
 ### 功能
-- **用通过 npx 安装的 `mattpocock/skills` 集合替换内置的 `handoff` / `teach` skill。** 删除两个 vendored skill（`skills/handoff/`、`skills/teach/`）。**Workflow** 组改为提供单个 `mattpocock/skills` 条目（默认**开启**），执行 `skills add mattpocock/skills`，并通过显式 `--skill` 参数限定为集合 `plugin.json` 声明的 17 个 skill，安装到 Claude Code 的 `~/.claude/skills/`。
 - **新增 `Slides` 分组，含两个 AI 演示文稿插件，默认全部关闭：** [`frontend-slides`](https://github.com/zarazhangrui/frontend-slides)（零依赖 HTML 幻灯片生成器，支持 PPT 转换）与 [`ppt-master`](https://github.com/hugohe3/ppt-master)（从 PDF/DOCX/URL/Markdown 生成可编辑 PPTX）。仅在 `--all` 或手动勾选时安装。
-- **`superpowers` 改为默认关闭。** 从 essentials 插件层移动到 optional 层（`PLUGINS_OPTIONAL`），仅在使用 `--all` 或手动勾选时安装。它与 `mattpocock/skills` 可以共存——两者**不**互斥。
 - **彻底移除 `everything-claude-code` 插件**：Workflow 菜单项、optional 插件组槽位、`affaan-m/everything-claude-code` marketplace、id→包名映射，以及 `settings.json` 条目。新增墓碑机制（`PLUGINS_REMOVED`）：升级时从用户 `enabledPlugins` 中剔除它，并在 `--uninstall` 时卸载，确保不残留。
 
 ### 设计理由
 - **npx 而非 vendoring。** 通过 `skills` CLI 安装可避免仓库塞进 vendored skill 目录。`DO_NOT_TRACK=1` 关闭 CLI 的匿名遥测；`--copy` 写入真实文件（非 symlink），便于卸载删除；`--agent claude-code` 仅安装到 Claude Code。
-- **限定为 plugin.json 的 17 个 skill，而非 `--skill '*'`。** 该仓库实际包含 35 个 `SKILL.md`（含个人/未完成的 skill），`--skill '*'` 会全部安装。安装器从同一个 `MATTPOCOCK_SKILLS` 数组传入精确的 17 个名字，该数组同时生成卸载用的安装清单（manifest），使安装 / 文档 / 卸载保持一致。
-- **superpowers 与 mattpocock/skills 不互斥。** 二者理念上有重叠但可同时安装；`mattpocock/skills` 只是新的默认项，而 `superpowers` 变为可选项，沿用此前 `everything-claude-code` 所处的 optional 层定位。
 
 ### 注意事项
-- 安装 `mattpocock/skills` 在安装时需要 Node.js / `npx` 及联网。若缺少 `npx`，安装器会打印 Node.js 安装指引和完整命令后跳过，不阻塞其余安装，也不阻塞版本戳（属可选附加项）。
 - `ppt-master` 需在其安装目录内执行 `pip install -r requirements.txt`，其 Python 后处理脚本才能工作。
-- 升级用户残留的 vendored `~/.claude/skills/{handoff,teach}` **不会**被强制删除：勾选 `mattpocock/skills` 时其 `--copy` 安装会用上游版本覆盖它们；取消勾选（或没有 `npx`）时旧副本仍可正常使用。legacy skill 迁移也对 `--dry-run` 安全。
-- `--uninstall` 仅删除安装清单（`~/.claude/.mattpocock-skills`，安装成功时写入）中记录的 mattpocock skill，因此用户自建的同名 skill（如 `tdd`、`handoff`）不会被误删。
 - README 的插件 / marketplace / 内置 skill 计数相应更新为 25 / 10 / 5。
 
 ## [2.7.1] - 2026-06-09
 
 ### 新功能
-- **新增内置 skill：`teach`**（来自 [`mattpocock/skills`](https://github.com/mattpocock/skills/blob/main/skills/productivity/teach/SKILL.md)）—— 一个有状态、跨多次会话的「教学工作区」skill。它把当前目录视为教学工作区，以 `MISSION.md` 为根基锚定教学目标，产出位于学习者「最近发展区」(zone of proximal development) 内的自包含 HTML 课程，并配套参考文档、按序编号的学习记录 (learning records) 与精选资源清单。共 5 个文件（`SKILL.md` + `MISSION-` / `LEARNING-RECORD-` / `GLOSSARY-` / `RESOURCES-FORMAT.md` 模板）。已注册到两个安装器的 **Workflow** 分组，**默认开启**。
 
 ### 注意事项
 - `teach` 仅限用户主动调用（`disable-model-invocation: true` → `/teach`）；这里的「默认开启」指安装器选单中默认勾选，而非模型自动触发。
@@ -157,7 +154,6 @@
 ## [2.6.1] - 2026-05-25
 
 ### 新功能
-- **新增内置 skill：`handoff`**（来自 [`mattpocock/skills`](https://github.com/mattpocock/skills/blob/main/skills/productivity/handoff/SKILL.md)）—— 把当前对话压缩成一份交接文档并写入操作系统的临时目录，方便下一个 agent 直接接手而无须继承完整上下文。文档包含 `suggested skills` 章节、用路径/URL 引用已有制品（PRD、计划、ADR、issue、commit、diff）而非重复粘贴、并对密钥与隐私敏感信息做脱敏。已注册到两个安装器的 **Workflow** 分组，**默认开启**。
 
 ### 注意事项
 - skill 会把交接文档写入用户操作系统的临时目录（如 `/tmp` 或 `%TEMP%`），不会污染当前仓库。
@@ -206,7 +202,6 @@
 - **菜单重新分组**：取消旧的 "Plugins — Official" / "Plugins — Community" / "Skills" 分组，按用途重排。插件与 skill 不再按来源区分，而是按用途并列展示：
   - **Workflow**（8）：andrej-karpathy-skills、superpowers、feature-dev、ralph-loop、commit-commands、code-simplifier、everything-claude-code、`update-config`（skill）
   - **Integrations**（3）：context7、github、playwright
-  - **Design & Content**（5）：document-skills、example-skills、frontend-design、`humanizer`（skill）、`humanizer-zh`（skill）
   - **Memory & Lifestyle**（3）：claude-mem、claude-health、PUA
   - **Academic Research**（10）：`paper-reading`（skill）+ 6 个 AI-Research 插件 + 3 个 DeepXiv skill（原 9 项）
   分组标签不再带冗余的 "Plugins —" 前缀。
@@ -509,7 +504,6 @@
 ### 新特性
 - **交互式安装器**：不带参数运行 `./install.sh` 会启动多选菜单——按数字切换组件，Enter 确认
 - **插件组简化**：13 个通用插件合并为一个 Essential 组（默认开启）；claude-mem 单独拆出作为独立切换项（默认关闭）
-  - Essential（13 个）：everything-claude-code, superpowers, code-review, context7, commit-commands, document-skills, playwright, feature-dev, code-simplifier, ralph-loop, frontend-design, example-skills, github
   - claude-mem（1 个）：独立分出——每 session 注入约 3k tokens（观测索引 + session 摘要）
 - **语言规则按需安装**：在交互模式下，Python/TypeScript/Go 规则默认关闭——只安装项目需要的
 - **自动清理**：选择特定语言规则时，之前安装的未选中语言目录会自动删除

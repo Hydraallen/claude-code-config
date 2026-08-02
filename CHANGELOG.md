@@ -2,6 +2,11 @@
 
 ## [2.17.0] - 2026-08-02
 
+### Removed
+- Retired the active Matt Pocock Skill-bundle integration, the `frontend-design` plugin catalogue entry, and the vendored `harness-workflow` Skill without changing the 2.17.0 version. Earlier releases introduced these integrations; 2.17.0 is their retirement point.
+- Preserved upgrade safety in Bash and PowerShell: the legacy Matt ownership manifest removes only recorded safe leaf directories, the former frontend plugin ID remains only as retired/removed tombstones, and harness cleanup removes only the exact former managed digest while preserving modified or user-authored copies.
+
+
 ### Features
 - **Network-installed `image-gen` Skill via `sinedied/agent-skills`, always installed.** Both installers now fetch the upstream `image-gen` Skill over the network with `npx -y skills@latest add sinedied/agent-skills --global --agent claude-code --copy --yes --skill image-gen` — no upstream `image_gen.py`, prompts, samples, or license is tracked in this repo. The install is unconditional: it runs in every mode (interactive, `--all` / `-All`, `--essential` / `-Essential`, and even when every selectable item is deselected), and no menu flag was added for it. A repository-owned Bash wrapper (`scripts/image-gen-cliproxyapi.sh`) is installed to `~/.claude/scripts/` and registered as a user script; the downloaded `SKILL.md` is augmented idempotently with managed markers.
 - **Secure CLIProxyAPI delegation wrapper.** `~/.claude/scripts/image-gen-cliproxyapi.sh` starts or reuses CLIProxyAPI on the loopback endpoint `http://127.0.0.1:8317/v1`, requires **CLIProxyAPI >= v7.2.17** (stable releases only; every pre-release suffix is rejected), reads the local client key from `~/.cli-proxy-api/config.yaml` without ever printing/logging/passing it in argv, injects child-only `OPENAI_*` variables, and delegates unchanged arguments to upstream `image_gen.py`. The image model is pinned to `gpt-image-2`. `/healthz` is treated as a liveness probe only; the wrapper additionally runs an authenticated `GET /v1/models` capability probe (key via curl `--config -` stdin, never argv) that requires an exact `data[].id == "gpt-image-2"` and fails closed if capability cannot be proven within the configured timeout.
@@ -185,27 +190,19 @@
 ## [Upstream merge: 2.8.0] - 2026-06-29
 
 ### Features
-- **Replaced the bundled `handoff` / `teach` skills with the `mattpocock/skills` collection, installed via npx.** The two vendored skills (`skills/handoff/`, `skills/teach/`) are removed. The **Workflow** group now offers a single `mattpocock/skills` item (default **on**) that runs `skills add mattpocock/skills` scoped to the 17 skills declared in the collection's `plugin.json` (via explicit `--skill` flags), installing them into `~/.claude/skills/` for Claude Code.
 - **New `Slides` group with two AI-presentation plugins, both default OFF:** [`frontend-slides`](https://github.com/zarazhangrui/frontend-slides) (zero-dependency HTML slide generator with PPT conversion) and [`ppt-master`](https://github.com/hugohe3/ppt-master) (editable PPTX from PDF/DOCX/URL/Markdown). They install only via explicit `--all` or a manual pick.
-- **`superpowers` is now default OFF.** It moved from the essential plugin tier to the optional tier (`PLUGINS_OPTIONAL`), so it installs only via explicit `--all` or a manual pick. It coexists with `mattpocock/skills` — the two are **not** mutually exclusive.
 - **Removed the `everything-claude-code` plugin** entirely: Workflow menu entry, optional-plugin slot, the `affaan-m/everything-claude-code` marketplace, the id→package mapping, and its `settings.json` entry. A tombstone (`PLUGINS_REMOVED`) strips it from an upgrading user's `enabledPlugins` and uninstalls it on `--uninstall`, so it does not linger.
 
 ### Design Rationale
 - **npx over vendoring.** Installing the collection through the `skills` CLI keeps the repo free of vendored skill directories. `DO_NOT_TRACK=1` disables the CLI's anonymous telemetry; `--copy` writes real files (not symlinks) so uninstall can delete them; `--agent claude-code` scopes the install to Claude Code only.
-- **Scoped to the 17 plugin.json skills, not `--skill '*'`.** The repo actually contains 35 `SKILL.md` files (including personal/in-progress ones); `--skill '*'` would install all 35. The installer passes the exact 17 names from a single `MATTPOCOCK_SKILLS` array, which also seeds the install manifest that drives uninstall, so install / docs / uninstall stay consistent.
-- **superpowers and mattpocock/skills are not mutually exclusive.** They overlap in spirit but can be installed together; `mattpocock/skills` is simply the new default and `superpowers` becomes opt-in, mirroring the optional tier `everything-claude-code` previously occupied.
 
 ### Notes & Caveats
-- Installing `mattpocock/skills` requires Node.js / `npx` and network access at install time. If `npx` is missing the installer prints a Node.js install hint and the exact command, then skips it without blocking the rest of the install or the version stamp (it is an optional add-on).
 - `ppt-master` needs `pip install -r requirements.txt` inside its installed plugin directory for its Python post-processing scripts to work.
-- Upgraders' vendored `~/.claude/skills/{handoff,teach}` are **not** force-deleted: when `mattpocock/skills` is selected its `--copy` install overwrites them with the upstream versions; when it is deselected (or `npx` is unavailable) the old copies keep working. The legacy-skill migration is also `--dry-run` safe.
-- `--uninstall` removes only the mattpocock skills recorded in an install manifest (`~/.claude/.mattpocock-skills`, written on a successful install), so a user-authored skill that merely shares a generic name (e.g. `tdd`, `handoff`) is never deleted.
 - README plugin / marketplace / bundled-skill counts updated to 25 / 10 / 5.
 
 ## [2.7.1] - 2026-06-09
 
 ### Features
-- **New bundled skill: `teach`** (from [`mattpocock/skills`](https://github.com/mattpocock/skills/blob/main/skills/productivity/teach/SKILL.md)) — a stateful, multi-session learning-workspace skill. It treats the current directory as a teaching workspace grounded in a `MISSION.md`, producing self-contained HTML lessons that sit in the user's zone of proximal development, plus reference docs, sequential learning records, and a curated resources list. Ships 5 files (`SKILL.md` + `MISSION-` / `LEARNING-RECORD-` / `GLOSSARY-` / `RESOURCES-FORMAT.md` templates). Registered in the **Workflow** group of both installers and **enabled by default**.
 
 ### Notes & Caveats
 - `teach` is user-invoked only (`disable-model-invocation: true` → `/teach`); "default on" refers to installer selection, not model auto-invocation.
@@ -232,7 +229,6 @@
 ## [2.6.1] - 2026-05-25
 
 ### Features
-- **New bundled skill: `handoff`** (from [`mattpocock/skills`](https://github.com/mattpocock/skills/blob/main/skills/productivity/handoff/SKILL.md)) — compacts the current conversation into a handoff document written to the OS temp directory, so a fresh agent can pick up the work without inheriting the full context. Includes a `suggested skills` section, references existing artifacts by path/URL rather than duplicating them, and redacts sensitive data. Registered in the **Workflow** group of both installers and **enabled by default**.
 
 ### Notes & Caveats
 - The skill writes to the user's OS temp directory (e.g. `/tmp` or `%TEMP%`), not the current workspace — handoff docs do not pollute the repo.
@@ -281,7 +277,6 @@
 - **Menu reorganisation**: the "Plugins — Official" and "Plugins — Community" groups have been replaced with four usage-oriented groups and the old "Skills" group has been dissolved into them. Plugins and skills now live side-by-side in the same category, since they serve the same workflow:
   - **Workflow** (8): andrej-karpathy-skills, superpowers, feature-dev, ralph-loop, commit-commands, code-simplifier, everything-claude-code, `update-config` (skill)
   - **Integrations** (3): context7, github, playwright
-  - **Design & Content** (5): document-skills, example-skills, frontend-design, `humanizer` (skill), `humanizer-zh` (skill)
   - **Memory & Lifestyle** (3): claude-mem, claude-health, PUA
   - **Academic Research** (10): `paper-reading` (skill) + 6 AI-Research plugins + 3 DeepXiv skills (previously 9)
   Group labels no longer carry the redundant "Plugins —" prefix.
@@ -584,7 +579,6 @@
 ### Features
 - **Interactive installer**: `./install.sh` with no args launches a multi-select menu — toggle components by number, confirm with Enter
 - **Plugin groups simplified**: All 13 general plugins merged into one Essential group (on by default); claude-mem separated as standalone toggle (off by default)
-  - Essential (13): everything-claude-code, superpowers, code-review, context7, commit-commands, document-skills, playwright, feature-dev, code-simplifier, ralph-loop, frontend-design, example-skills, github
   - claude-mem (1): separated — injects ~3k tokens/session (observation index + session summary)
 - **Language rules opt-in**: Python/TypeScript/Go rules are off by default in interactive mode — only install what your projects need
 - **Automatic cleanup**: When selecting specific language rules, previously installed unselected language dirs are removed

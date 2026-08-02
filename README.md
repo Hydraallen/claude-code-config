@@ -6,7 +6,7 @@
 
 ![Statusline](assets/statusline.png)
 
-Production-ready configuration for [Claude Code](https://claude.com/claude-code). One-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 25 curated plugins across 10 marketplaces, five bundled skills (plus the [mattpocock/skills](https://github.com/mattpocock/skills) collection and the `image-gen` Skill from `sinedied/agent-skills`, both installed via npx), a gradient status bar, and a self-improvement loop that remembers corrections across sessions.
+Production-ready configuration for [Claude Code](https://claude.com/claude-code). One-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 24 curated plugins across 10 marketplaces, seven bundled skills (plus the `image-gen` Skill from `sinedied/agent-skills`, installed via npx), a gradient status bar, and a self-improvement loop that remembers corrections across sessions.
 
 ## Showcase
 
@@ -35,9 +35,9 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
   > [5/5] Core                   Global instructions, settings, rules...
     [0/3] Language Rules          Python / TypeScript / Go
     [2/3] Review                  code-review + adversarial-review
-    [7/8] Workflow                karpathy, mattpocock/skills, update-config...
+    [8/8] Workflow                karpathy, superpowers, update-config...
     [3/3] Integrations            context7, github, playwright
-    [4/5] Design & Content        document-skills, frontend-design, humanizer...
+    [3/4] Design & Content        document-skills, example-skills, humanizer...
     [0/2] Slides                  frontend-slides, ppt-master
     [0/3] Memory & Lifestyle      claude-mem, claude-health, PUA
     [1/10] Academic Research      paper-reading, deepxiv-cli...
@@ -80,12 +80,12 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | Item | Source | What It Does | Default |
 |------|--------|--------------|---------|
 | [**andrej-karpathy-skills**](https://github.com/forrestchang/andrej-karpathy-skills) | karpathy-skills (plugin) | Karpathy coding guidelines: Think-First, Simplicity, Surgical, Goal-Driven | on |
-| [**superpowers**](https://github.com/obra/superpowers) | claude-plugins-official (plugin) | Brainstorming, debugging, code review, git worktrees, plan writing | off |
-| [**mattpocock/skills**](https://github.com/mattpocock/skills) | npx `skills` | 17 agent skills (tdd, to-prd, to-issues, diagnosing-bugs, handoff, teach, grilling…) installed into `~/.claude/skills/` via the `skills` CLI | on |
+| [**superpowers**](https://github.com/obra/superpowers) | claude-plugins-official (plugin, Essential) | Brainstorming, debugging, code review, git worktrees, plan writing | on |
 | **feature-dev** | claude-plugins-official | Guided feature development | on |
 | **ralph-loop** | claude-plugins-official | Automated iteration loop (session-aware REPL) | on |
 | **commit-commands** | claude-plugins-official | Git commit / push / PR workflow | on |
 | **code-simplifier** | claude-plugins-official | Code simplification and refactoring | on |
+| **ecc** | ecc (Optional plugin; interactive default) | Everything Claude Code workflows and skills | on |
 | [**update-config**](skills/update-config/) | bundled skill | `/update-config` — re-run installer from inside a session | on |
 
 **Integrations (3)** — external tools and services.
@@ -96,13 +96,12 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | [**github**](https://github.com/github/github-mcp-server) | claude-plugins-official | GitHub integration (issues, PRs, workflows) | on |
 | [**playwright**](https://github.com/microsoft/playwright-mcp) | claude-plugins-official | Browser automation, E2E testing, screenshots | on |
 
-**Design & Content (5)** — documents, UI, creative artifacts, text humanization.
+**Design & Content (4)** — documents, UI, creative artifacts, text humanization.
 
 | Item | Source | What It Does | Default |
 |------|--------|--------------|---------|
 | [**document-skills**](https://github.com/anthropics/skills) | anthropic-agent-skills | PDF, DOCX, PPTX, XLSX creation and manipulation | on |
 | [**example-skills**](https://github.com/anthropics/skills) | anthropic-agent-skills | Frontend design, MCP builder, canvas, algorithmic art | on |
-| **frontend-design** | claude-plugins-official | Production-grade frontend interfaces | on |
 | [**humanizer**](https://github.com/blader/humanizer) | bundled skill | Remove AI writing patterns (English) | on |
 | [**humanizer-zh**](https://github.com/op7418/Humanizer-zh) | bundled skill | Remove AI writing patterns (Chinese) | off |
 
