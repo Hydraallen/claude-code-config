@@ -1799,12 +1799,12 @@ assert_doc_pair() {
 
 # --- Release metadata -------------------------------------------------------
 
-assert_eq "VERSION is 2.16.0" "2.16.0" "$(cat "$DIR/VERSION")"
+assert_eq "VERSION is 2.17.0" "2.17.0" "$(cat "$DIR/VERSION")"
 
-if grep -Eq '^## \[2\.16\.0\] - 2026-08-02' "$DIR/CHANGELOG.md"; then
-    echo "PASS: changelog has [2.16.0] - 2026-08-02 entry"; PASS=$((PASS+1))
+if grep -Eq '^## \[2\.17\.0\] - 2026-08-02' "$DIR/CHANGELOG.md"; then
+    echo "PASS: changelog has [2.17.0] - 2026-08-02 entry"; PASS=$((PASS+1))
 else
-    echo "FAIL: changelog missing [2.16.0] - 2026-08-02 entry"; FAIL=$((FAIL+1))
+    echo "FAIL: changelog missing [2.17.0] - 2026-08-02 entry"; FAIL=$((FAIL+1))
 fi
 
 # --- Concept assertions (translated concepts use separate en/zh patterns) ---

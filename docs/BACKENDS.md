@@ -293,6 +293,121 @@ non-Claude models through any gateway"*. Neither vendor will help you if this
 breaks, and it can break at any release. The `claude` and `glm` profiles carry
 none of this risk.
 
+### Image generation — `sinedied/agent-skills:image-gen`
+
+This repo ships **no image-generation code**. The `image-gen` Skill is fetched
+over the network by both installers and is **always installed** — there is no
+menu item for it, and it installs even when every selectable item is
+deselected:
+
+```bash
+npx -y skills@latest add sinedied/agent-skills --global --agent claude-code --copy --yes --skill image-gen
+```
+
+`DO_NOT_TRACK=1` disables the `skills` CLI's anonymous telemetry; `--copy`
+writes real files (not symlinks) so `--uninstall` can remove them. A missing
+`npx` or a network failure is non-fatal: the install records a warning and
+continues, so the version stamp and the rest of the install still complete.
+The Skill lands at `~/.claude/skills/image-gen/` (a global `$HOME` path); no
+upstream `image_gen.py`, prompts, samples, or license is tracked in this repo.
+A repository-owned wrapper is installed at
+`~/.claude/scripts/image-gen-cliproxyapi.sh` and the downloaded `SKILL.md` is
+augmented idempotently with a managed instructions block.
+
+#### Model, version, endpoints
+
+| | |
+|---|---|
+| Image model | `gpt-image-2` (exact — never `image2`) |
+| Minimum CLIProxyAPI | `v7.2.17` (stable only; **all** pre-release suffixes `-rc`/`-beta`/`-alpha`/`-pre`/`-dev`/… are rejected) |
+| Base URL | `http://127.0.0.1:8317/v1` (exact constant; never derived from the health URL) |
+| Liveness | `GET /healthz` — 200 means the listener is up, **nothing about auth** |
+| Capability readiness | authenticated `GET /v1/models`, requires an exact `data[].id == "gpt-image-2"` (substring is not enough); fail-closed within the timeout (default 25 s, overridable) |
+| Image routes | `/v1/images/generations` and `/v1/images/edits` (called by upstream `image_gen.py` against the loopback base URL) |
+
+The wrapper probes `/healthz` to decide start-vs-reuse, then runs the
+authenticated `/v1/models` capability check before delegating. If capability
+cannot be proven it prints a sanitized diagnostic
+(`OAuth/login may be inactive - run \`cliproxyapi --codex-login\` and retry`)
+and exits **without** delegating, so a misconfigured proxy cannot masquerade
+as ready.
+
+#### Local proxy key vs OAuth — no OpenAI Platform key
+
+The wrapper **never** asks for an OpenAI Platform API key. Authentication has
+two layers, both already set up by the `gpt` backend above:
+
+1. **Local client key** — the first `api-keys:` entry of
+   `~/.cli-proxy-api/config.yaml`, read securely and **never** printed,
+   logged, or placed in argv (it is `export`ed into the delegated child's
+   environment only; xtrace is disabled around the read and the Authorization
+   header is fed to curl via `--config -` stdin).
+2. **ChatGPT/Codex OAuth** — the one-time `cliproxyapi --codex-login`
+   described in the `gpt` section. If login has lapsed, the capability probe
+   fails closed with the diagnostic above.
+
+To upgrade an existing CLIProxyAPI:
+
+```bash
+brew upgrade cliproxyapi        # then restart with cl_gpt so the new binary is picked up
+```
+
+The wrapper and the launcher profile keep **separate** candidate lists, so do
+not assume one from the other. The wrapper's own `IMAGE_GEN_BIN_NAMES` tries
+`cliproxyapi`, then `cli-proxy-api`, then `cliproxy-api`; the launcher's
+`profiles/gpt.json` `service.bins` tries `cli-proxy-api`, then `cliproxyapi`,
+then `CLIProxyAPI` (the lists and the order differ). When the binary is
+missing or below `v7.2.17` the wrapper prints both `brew install cliproxyapi`
+and `brew upgrade cliproxyapi` as the remediation.
+
+#### All launchers share the same paths
+
+`claude.zsh` was grep-audited and contains **no** image-gen / `OPENAI_*`
+coupling. Every `cl`, `cl_claude`, `cl_glm`, `cl_gpt`, `cl_ccr`, and generated
+`cl_<name>_auto` flows through `_cl_profile_run` → `_cl_run` → `claude`, which
+only manages `ANTHROPIC_*` env and the `claude` binary. The Skill and wrapper
+live at global `$HOME` paths the launcher never touches, so image generation
+works from any backend. A hostile or incompatible `ANTHROPIC_BASE_URL` never
+changes the child `OPENAI_BASE_URL`, which is always the loopback constant
+above — image traffic goes directly to `:8317`, bypassing whichever proxy the
+active launcher started (including `cl_gpt` itself, which is fine:
+CLIProxyAPI accepts the request on its own port).
+
+#### Ownership-safe uninstall
+
+The installer writes a mode-600 manifest at `~/.claude/.image-gen-sinedied`
+only after the wrapper exists, the upstream layout (`SKILL.md` +
+`image_gen.py`) validates, and augmentation succeeds:
+
+```text
+skill=image-gen
+source=sinedied/agent-skills
+wrapper=image-gen-cliproxyapi.sh
+```
+
+`--uninstall` deletes `~/.claude/skills/image-gen` only when **all three**
+agree: a byte-exact canonical manifest, the directory layout, **and**
+well-formed augmentation markers in `SKILL.md`. A user-authored directory that
+collides by name, a planted/leftover valid manifest without the markers, or a
+stale manifest with the directory absent are all preserved (only a stale
+manifest is pruned). The wrapper itself is removed through the same
+`USER_SCRIPTS` loop that manages `cleanup-claude-data.sh`. A prior-owned
+upgrade is backed up before `npx` runs and restored byte-for-byte on any later
+failure; on restore failure the backup is retained and its path emitted.
+
+#### Native Windows unsupported
+
+The wrapper is a Bash script and CLIProxyAPI service lifecycle is Bash/Zsh-only.
+`install.ps1` installs the network Skill and the wrapper asset on Windows, but
+the `cl_*` / CLIProxyAPI image-generation path is **not** supported natively.
+Run the Bash installer **inside WSL** so it lands in the WSL `~/.claude` — WSL
+does not see `%USERPROFILE%\.claude` as `~/.claude`, and Git Bash's
+`~/.claude` → `%USERPROFILE%\.claude` mapping depends on the install. Real
+PowerShell runtime behaviour was **not** verified here (the behavioural test
+suite SKIPs cleanly when `pwsh` is absent); a pwsh-equipped Windows machine
+must confirm the parser, the `cmd.exe /d /s /c` `npx.cmd` invocation, the
+byte-level `SKILL.md` augmentation, and the manifest atomicity.
+
 ### `ccr` — one `/model` list across providers
 
 [claude-code-router](https://github.com/musistudio/claude-code-router) v3 fronts

@@ -1420,7 +1420,7 @@ install_settings() {
 
 install_rules() {
     info "Installing rules..."
-    mkdir -p "$CLAUDE_DIR/rules"
+    $DRY_RUN || mkdir -p "$CLAUDE_DIR/rules"
 
     # Always install common rules when any rules are selected
     if $DRY_RUN; then
@@ -1496,7 +1496,7 @@ install_rules() {
 
 install_skills() {
     info "Installing custom skills..."
-    mkdir -p "$CLAUDE_DIR/skills"
+    $DRY_RUN || mkdir -p "$CLAUDE_DIR/skills"
 
     # Migration: remove renamed/deleted skills from previous installs.
     # NOTE: handoff/teach are intentionally NOT removed here — they were vendored in
@@ -1577,7 +1577,7 @@ install_skills() {
 
 install_agents() {
     info "Installing custom agents..."
-    mkdir -p "$CLAUDE_DIR/agents"
+    $DRY_RUN || mkdir -p "$CLAUDE_DIR/agents"
     for agent_file in "$SCRIPT_DIR"/agents/*.md; do
         [[ -f "$agent_file" ]] || continue
         local agent
@@ -1593,12 +1593,16 @@ install_agents() {
 
 # User-facing maintenance scripts to install into ~/.claude/scripts.
 # Repo-dev-only scripts (e.g. check-readme-sync.sh) are deliberately excluded.
-USER_SCRIPTS=("cleanup-claude-data.sh")
+# image-gen-cliproxyapi.sh is the always-installed CLIProxyAPI delegation
+# wrapper consumed by the network-installed sinedied/agent-skills:image-gen
+# Skill (see install_image_gen). It is installed as a user script so uninstall
+# removes it through the same USER_SCRIPTS loop.
+USER_SCRIPTS=("cleanup-claude-data.sh" "image-gen-cliproxyapi.sh")
 
 install_scripts() {
     info "Installing maintenance scripts..."
     [[ -d "$SCRIPT_DIR/scripts" ]] || { info "No scripts/ directory in source, skipping"; return; }
-    mkdir -p "$CLAUDE_DIR/scripts"
+    $DRY_RUN || mkdir -p "$CLAUDE_DIR/scripts"
     for script in "${USER_SCRIPTS[@]}"; do
         local src="$SCRIPT_DIR/scripts/$script"
         [[ -f "$src" ]] || { warn "Expected script missing in source: $script"; continue; }
@@ -2338,10 +2342,430 @@ install_mattpocock_skills() {
     fi
 }
 
+# ============================================================
+# image-gen (sinedied/agent-skills) always-installed network Skill.
+#
+# The upstream Skill is fetched with the same `skills` CLI architecture as
+# mattpocock/skills — never vendored. After a successful download the installer
+# augments the downloaded SKILL.md with an idempotent managed instructions
+# block pointing Claude Code at the repository-owned wrapper, then writes a
+# mode-600 ownership manifest so uninstall can delete only an installer-owned
+# image-gen directory (never a user-authored one that shares the name).
+#
+# This component is always installed: it has no selectable flag and no menu
+# item. Missing npx or a failed download is non-fatal — it increments
+# INSTALL_WARNINGS so the summary surfaces it while letting the rest of the
+# install complete.
+# ============================================================
+
+# Managed markers wrapping the integration block in the installed SKILL.md.
+IMAGE_GEN_BEGIN_MARKER="<!-- BEGIN claude-code-config CLIProxyAPI image-gen integration -->"
+IMAGE_GEN_END_MARKER="<!-- END claude-code-config CLIProxyAPI image-gen integration -->"
+
+# The exact `skills add` invocation. Installs globally to ~/.claude/skills/ as
+# real copies (not symlinks) for Claude Code, scoped to the single image-gen
+# Skill. Returns the command via the global _IMAGE_GEN_NPX_CMD array.
+_image_gen_npx_cmd() {
+    _IMAGE_GEN_NPX_CMD=(npx -y skills@latest add sinedied/agent-skills --global --agent claude-code --copy --yes --skill image-gen)
+}
+
+# Run the command with DO_NOT_TRACK=1 (so the skills CLI's telemetry stays off)
+# and stdin detached from the caller's tty (so an interactive prompt can never
+# block a non-interactive install). The key material is never on the command
+# line; npx receives only the public source/skill identifiers.
+_image_gen_npx() {
+    env DO_NOT_TRACK=1 "${_IMAGE_GEN_NPX_CMD[@]}" </dev/null
+}
+
+# Render the canonical managed instructions block (the bytes between the
+# markers). Pure: no side effects, unit-testable. Tells Claude Code to invoke
+# the wrapper, forward upstream arguments, avoid requesting an OpenAI Platform
+# key, and notes the loopback endpoint, model, and Windows limitation.
+image_gen_render_integration_block() {
+    cat <<'EOF'
+Run image generation through the local CLIProxyAPI wrapper instead of invoking
+`image_gen.py` directly or requesting an OpenAI Platform API key:
+
+    ~/.claude/scripts/image-gen-cliproxyapi.sh <upstream arguments>
+
+Forward all upstream arguments (`generate`, `edit`, prompts, file paths, and
+image options) unchanged. The wrapper starts or reuses CLIProxyAPI on the
+loopback endpoint `http://127.0.0.1:8317/v1`, reads the local client key
+without exposing it, and requests the `gpt-image-2` model. Do not ask the user
+for an OpenAI Platform API key — image generation is covered by the local
+CLIProxyAPI using ChatGPT/Codex OAuth.
+
+Note: native Windows `cl_*`/CLIProxyAPI service lifecycle is not supported;
+use WSL or a Bash-compatible environment for the wrapper.
+EOF
+}
+
+# Idempotently augment the installed image-gen SKILL.md with the managed
+# integration block. Single-pass exact-line state validation runs BEFORE any
+# write, rejecting: missing layout, end-before-begin, nested/duplicate markers,
+# embedded marker text (a line that contains a marker substring but is not an
+# exact marker line), and one-sided/unterminated markers. Outside bytes are
+# preserved. Atomic: the new content is written to a temp file in the SAME
+# directory as the target (same-filesystem rename), the target's mode is
+# preserved, and `mv -f` is the only mutation. Paths containing spaces are
+# handled via fully-quoted expansion.
+#
+# $1 = skills directory root (defaults to $CLAUDE_DIR/skills)
+image_gen_augment_skill() {
+    local skills_dir="${1:-$CLAUDE_DIR/skills}"
+    local skill_md="$skills_dir/image-gen/SKILL.md"
+    local upstream="$skills_dir/image-gen/image_gen.py"
+
+    if [[ ! -f "$skill_md" ]]; then
+        warn "image-gen: SKILL.md not found at $skill_md — augmentation skipped"
+        return 1
+    fi
+    if [[ ! -f "$upstream" ]]; then
+        warn "image-gen: image_gen.py not found at $upstream — augmentation skipped"
+        return 1
+    fi
+
+    local begin="$IMAGE_GEN_BEGIN_MARKER"
+    local end="$IMAGE_GEN_END_MARKER"
+    local block
+    block="$(image_gen_render_integration_block)"
+
+    local dir base mode_perm tmp
+    dir=$(dirname "$skill_md")
+    base=$(basename "$skill_md")
+    mode_perm=$(stat -f "%Lp" "$skill_md" 2>/dev/null || stat -c "%a" "$skill_md" 2>/dev/null || echo "644")
+    [[ -d "$dir" ]] || { warn "image-gen: skills directory missing"; return 1; }
+    # Same-directory temp so the final rename is guaranteed atomic on one fs.
+    tmp=$(mktemp "${dir}/${base}.augment.XXXXXX" 2>/dev/null) || { warn "image-gen: mktemp failed"; return 1; }
+
+    # Decide mode via the SHARED strict validator (review round 3 #1): single
+    # source of truth for marker-layout validity, identical to what ownership
+    # checks use. No duplicated weak grep checks here.
+    local mode="reject"
+    if _image_gen_markers_strict "$skill_md"; then
+        mode="replace"
+    elif ! grep -qF -- "$begin" "$skill_md" 2>/dev/null \
+         && ! grep -qF -- "$end" "$skill_md" 2>/dev/null; then
+        mode="append"
+    fi
+    if [[ "$mode" == "reject" ]]; then
+        rm -f "$tmp"
+        warn "image-gen: SKILL.md markers malformed (duplicate/embedded/mismatched) — augmentation skipped"
+        return 1
+    fi
+
+    # Emit pass: assumes validated mode. The block carries newlines; BSD awk
+    # rejects them in -v, so pass it through ENVIRON. The emit awk does NOT
+    # re-validate (the shared validator already did); it only reconstructs.
+    local emit_rc=0
+    if [[ "$mode" == "replace" ]]; then
+        IMAGE_GEN_AWK_BLOCK="$block" awk -v begin="$begin" -v end="$end" '
+            BEGIN { in_block=0; block=ENVIRON["IMAGE_GEN_AWK_BLOCK"] }
+            $0 == begin { print; print block; in_block=1; next }
+            $0 == end   { print; in_block=0; next }
+            !in_block { print }
+        ' "$skill_md" > "$tmp" 2>/dev/null || emit_rc=$?
+    else
+        { cat "$skill_md"; printf '\n%s\n%s\n%s\n' "$begin" "$block" "$end"; } > "$tmp" 2>/dev/null || emit_rc=$?
+    fi
+    if [[ "$emit_rc" -ne 0 ]]; then
+        rm -f "$tmp"
+        warn "image-gen: augmentation emit failed"
+        return 1
+    fi
+
+    # Post-write sanity: the result must itself be strictly valid (one exact
+    # begin, one exact end, correct order, no embedded text).
+    if ! _image_gen_markers_strict "$tmp"; then
+        rm -f "$tmp"
+        warn "image-gen: augmentation produced malformed markers — skipped"
+        return 1
+    fi
+
+    chmod "$mode_perm" "$tmp" 2>/dev/null || true
+    if ! mv -f "$tmp" "$skill_md" 2>/dev/null; then
+        rm -f "$tmp"
+        warn "image-gen: failed to write SKILL.md"
+        return 1
+    fi
+    return 0
+}
+
+# Exact canonical manifest bytes. Kept as a single literal so validation can
+# compare byte-for-byte (order, one trailing newline, no extras/CRLF).
+_IMAGE_GEN_MANIFEST_CANONICAL="skill=image-gen
+source=sinedied/agent-skills
+wrapper=image-gen-cliproxyapi.sh"
+
+# Write the ownership manifest atomically at mode 600. The manifest is the sole
+# authority uninstall uses to decide whether ~/.claude/skills/image-gen was
+# installed by this installer.
+_image_gen_write_manifest() {
+    local manifest="$CLAUDE_DIR/.image-gen-sinedied"
+    local dir
+    dir=$(dirname "$manifest")
+    [[ -d "$dir" ]] || return 1
+    local tmp restore_umask
+    restore_umask=$(umask)
+    umask 077
+    tmp=$(mktemp "${dir}/.image-gen-sinedied.tmp.XXXXXX" 2>/dev/null) || {
+        umask "$restore_umask"; return 1
+    }
+    printf '%s\n' "$_IMAGE_GEN_MANIFEST_CANONICAL" > "$tmp" || { rm -f "$tmp"; umask "$restore_umask"; return 1; }
+    chmod 600 "$tmp" 2>/dev/null || { rm -f "$tmp"; umask "$restore_umask"; return 1; }
+    mv -f "$tmp" "$manifest" || { rm -f "$tmp"; umask "$restore_umask"; return 1; }
+    umask "$restore_umask"
+    return 0
+}
+
+# Validate that an image-gen ownership manifest is byte-for-byte identical to
+# the canonical content this installer writes: exactly three lines in order,
+# one trailing newline, no duplicates/extras, no CRLF. `cmp -s` gives a true
+# byte comparison (a field-by-field grep would accept reordering/duplication).
+# Pure: reads one file, returns 0/1.
+_image_gen_manifest_valid() {
+    local manifest="$1"
+    [[ -r "$manifest" ]] || return 1
+    printf '%s\n' "$_IMAGE_GEN_MANIFEST_CANONICAL" | cmp -s - "$manifest"
+}
+
+# Strict marker-layout validator (review round 3 #1). Single source of truth
+# for "does this SKILL.md have a well-formed managed block?" Returns 0 iff the
+# file contains exactly one exact-line BEGIN marker, exactly one exact-line END
+# marker, BEGIN precedes END, and NO line carries marker text without being an
+# exact marker line (embedded prose), with no duplicates, nesting, or
+# unterminated state. This is the same validation the augmentation parser
+# applies before it writes; ownership uses it so a hand-edited or hostile
+# SKILL.md can never authorize deletion/overwrite.
+_image_gen_markers_strict() {
+    local skill_md="$1"
+    [[ -f "$skill_md" && -r "$skill_md" ]] || return 1
+    local begin="$IMAGE_GEN_BEGIN_MARKER" end="$IMAGE_GEN_END_MARKER"
+    awk -v begin="$begin" -v end="$end" '
+        BEGIN { b=0; e=0; in_block=0; bad=0; emb=0 }
+        $0 == begin { if (in_block) bad=1; if (e>0) bad=1; b++; if (b>1) bad=1; in_block=1; next }
+        $0 == end   { if (!in_block) bad=1; e++; if (e>1) bad=1; in_block=0; next }
+        index($0, begin) > 0 || index($0, end) > 0 { emb=1; next }
+        END {
+            if (bad || emb) exit 1
+            if (b != 1 || e != 1) exit 1
+            exit 0
+        }
+    ' "$skill_md" 2>/dev/null
+}
+
+# Full ownership proof (review #1): a directory is installer-owned ONLY when a
+# valid manifest exists AND the installed SKILL.md passes the STRICT marker
+# layout validator. A completed install always writes a strictly-valid marker
+# block before the manifest, so a user-created directory with a
+# planted/leftover valid manifest but malformed/absent markers is treated as
+# unowned and never mutated or deleted.
+_image_gen_dir_owned() {
+    local skill_dir="$1" manifest="$2"
+    [[ -d "$skill_dir" ]] || return 1
+    _image_gen_manifest_valid "$manifest" || return 1
+    _image_gen_markers_strict "$skill_dir/SKILL.md" || return 1
+    return 0
+}
+
+# Coordinator. Always-installed (no flag gate). Transactional upgrade semantics:
+#   - Prior valid ownership (manifest valid AND dir present): the prior skill
+#     directory and manifest are backed up before npx mutation; on ANY later
+#     failure (npx, wrapper, augment, manifest write) both are restored, so the
+#     on-disk state is exactly the previous good install.
+#   - Unowned directory present (dir exists but no valid manifest): the user's
+#     directory is NEVER overwritten. The run warns and skips.
+#   - Fresh target (no dir): any stale/foreign manifest is removed first (a
+#     failed run never claims ownership of nothing); on failure after npx, the
+#     partially-downloaded directory is removed so the target returns to fresh.
+# Failure is non-fatal to the rest of the install (increments
+# INSTALL_WARNINGS, returns 0).
+install_image_gen() {
+    info "Installing image-gen Skill (sinedied/agent-skills, via npx skills)..."
+    _image_gen_npx_cmd
+
+    local skill_dir="$CLAUDE_DIR/skills/image-gen"
+    local manifest="$CLAUDE_DIR/.image-gen-sinedied"
+    local prior_owned=false
+    if _image_gen_dir_owned "$skill_dir" "$manifest"; then
+        prior_owned=true
+    fi
+
+    if $DRY_RUN; then
+        info "Would run: DO_NOT_TRACK=1 ${_IMAGE_GEN_NPX_CMD[*]}"
+        $prior_owned && info "Would upgrade prior installer-owned image-gen (backed up first, restored on failure)"
+        info "Would augment ~/.claude/skills/image-gen/SKILL.md with the managed integration block"
+        info "Would write ownership manifest $manifest (mode 600)"
+        return 0
+    fi
+
+    # Reconcile stale ownership BEFORE every other early return (review #1).
+    # A valid manifest with no skill directory is stale ownership of nothing;
+    # remove it so it can never later authorize deletion of a directory the
+    # user creates themselves. (Dry-run returned above, so this write is safe.)
+    if ! $prior_owned && [[ -f "$manifest" ]] && _image_gen_manifest_valid "$manifest"; then
+        rm -f "$manifest"
+        warn "image-gen: removed stale ownership manifest (no image-gen directory present)"
+    fi
+
+    # npx availability check comes AFTER reconciliation so a missing-npx run
+    # still cleans a stale manifest rather than leaving it to authorize a
+    # later user-created directory.
+    if ! command -v npx &>/dev/null; then
+        warn "npx not found (needs Node.js) — skipping image-gen Skill (always-installed)."
+        warn "  Install Node.js to get npx: https://nodejs.org"
+        warn "  e.g. macOS: 'brew install node' · Debian/Ubuntu: 'sudo apt install nodejs npm' · or use nvm (https://github.com/nvm-sh/nvm)"
+        warn "  Then run: DO_NOT_TRACK=1 ${_IMAGE_GEN_NPX_CMD[*]}"
+        (( INSTALL_WARNINGS++ )) || true
+        return 0
+    fi
+
+    # Unowned directory protection: never overwrite a user-authored/foreign
+    # directory that merely collides with the image-gen name. A stale manifest
+    # was already invalidated above, so it cannot authorize overwriting this.
+    if [[ -d "$skill_dir" ]] && ! $prior_owned; then
+        warn "image-gen: $skill_dir exists but is not installer-owned (no valid manifest) — skipping to avoid overwriting user content"
+        warn "  To manage image-gen via this installer, remove the directory manually first, then re-run."
+        (( INSTALL_WARNINGS++ )) || true
+        return 0
+    fi
+
+    # Mandatory upgrade backup (review #2). For a prior-owned install, a verified
+    # backup of skill+manifest MUST exist before npx is invoked; any failure
+    # aborts the upgrade with prior bytes intact. The backup lives outside the
+    # skill directory so the npx overwrite cannot disturb it.
+    local backup_dir=""
+    if $prior_owned; then
+        backup_dir=$(mktemp -d "${TMPDIR:-/tmp}/image-gen-prev.XXXXXX" 2>/dev/null)
+        if [[ -z "$backup_dir" ]]; then
+            warn "image-gen: failed to create upgrade backup — aborting upgrade (prior install left intact)"
+            (( INSTALL_WARNINGS++ )) || true
+            return 0
+        fi
+        if ! cp -a "$skill_dir" "$backup_dir/image-gen" 2>/dev/null \
+           || ! cp -a "$manifest" "$backup_dir/manifest" 2>/dev/null; then
+            rm -rf "$backup_dir" 2>/dev/null
+            warn "image-gen: failed to copy prior install to backup — aborting upgrade (prior install left intact)"
+            (( INSTALL_WARNINGS++ )) || true
+            return 0
+        fi
+        # Verified copies: both the manifest file and the skill directory must
+        # be present and non-empty before we are willing to mutate the target.
+        if [[ ! -s "$backup_dir/manifest" ]] || [[ ! -d "$backup_dir/image-gen" ]]; then
+            rm -rf "$backup_dir" 2>/dev/null
+            warn "image-gen: upgrade backup verification failed — aborting upgrade (prior install left intact)"
+            (( INSTALL_WARNINGS++ )) || true
+            return 0
+        fi
+    fi
+
+    # Restore helper (review round 3 #2). Returns 0 on verified success, 1 on
+    # any failure. NEVER ignores target removal failure, NEVER copies into a
+    # surviving target. On failure the backup is RETAINED (never deleted) so
+    # manual recovery is possible; the caller emits its path + increments the
+    # warning count. The backup is deleted ONLY after a fully verified restore.
+    #
+    # For a backed-up (prior-owned) install, restore proceeds to a fresh SIBLING
+    # temp path, validates the expected layout (dir + image_gen.py + strict
+    # markers + canonical manifest), then atomically renames into place — so a
+    # crash never leaves a partially overwritten target.
+    _image_gen_restore_prev() {
+        if [[ -z "$backup_dir" ]]; then
+            # Fresh: remove what npx created so no unowned half-install lingers.
+            # Removal MUST succeed and leave no target behind.
+            if ! rm -rf "$skill_dir" 2>/dev/null; then return 1; fi
+            [[ -e "$skill_dir" ]] && return 1
+            rm -f "$manifest" 2>/dev/null || true
+            [[ -e "$manifest" ]] && return 1
+            return 0
+        fi
+        # Require target removal success and confirmed absence before restore.
+        if ! rm -rf "$skill_dir" 2>/dev/null; then return 1; fi
+        [[ -e "$skill_dir" ]] && return 1
+        # Restore into a fresh sibling temp dir (same filesystem as the target
+        # so the final rename is atomic).
+        local parent rtmp
+        parent=$(dirname "$skill_dir")
+        rtmp=$(mktemp -d "${parent}/.image-gen-restore.XXXXXX" 2>/dev/null) || return 1
+        if ! cp -a "$backup_dir/image-gen" "$rtmp/image-gen" 2>/dev/null \
+           || ! cp -a "$backup_dir/manifest" "$rtmp/manifest" 2>/dev/null; then
+            rm -rf "$rtmp" 2>/dev/null
+            return 1
+        fi
+        # Validate the restored layout BEFORE renaming: dir, upstream script,
+        # strict marker block, and canonical manifest must all hold.
+        if [[ ! -d "$rtmp/image-gen" ]] \
+           || [[ ! -f "$rtmp/image-gen/image_gen.py" ]] \
+           || ! _image_gen_markers_strict "$rtmp/image-gen/SKILL.md" 2>/dev/null \
+           || ! _image_gen_manifest_valid "$rtmp/manifest" 2>/dev/null; then
+            rm -rf "$rtmp" 2>/dev/null
+            return 1
+        fi
+        # Atomic rename into place. The manifest lives one level up.
+        if ! mv -f "$rtmp/image-gen" "$skill_dir" 2>/dev/null; then
+            rm -rf "$rtmp" 2>/dev/null
+            return 1
+        fi
+        if ! mv -f "$rtmp/manifest" "$manifest" 2>/dev/null; then
+            rm -rf "$rtmp" 2>/dev/null
+            return 1
+        fi
+        chmod 600 "$manifest" 2>/dev/null || true
+        rm -rf "$rtmp" 2>/dev/null
+        return 0
+    }
+
+    # Post-mutation failure handler: restore prior (or clean fresh install),
+    # retain backup + emit its path when restoration itself fails. Always
+    # increments INSTALL_WARNINGS and returns 0 (non-fatal).
+    _image_gen_abort_after_mutation() {
+        local label="$1"
+        if ! _image_gen_restore_prev; then
+            warn "image-gen: $label — restore FAILED, prior-install backup RETAINED at: $backup_dir (manual recovery needed)"
+            (( INSTALL_WARNINGS++ )) || true
+            return 0
+        fi
+        [[ -n "$backup_dir" ]] && rm -rf "$backup_dir" 2>/dev/null
+        (( INSTALL_WARNINGS++ )) || true
+        return 0
+    }
+
+    if ! retry 3 5 "image-gen Skill" _image_gen_npx; then
+        warn "Failed to install image-gen Skill via npx (always-installed — install skipped)."
+        warn "  Retry manually: DO_NOT_TRACK=1 ${_IMAGE_GEN_NPX_CMD[*]}"
+        _image_gen_abort_after_mutation "npx failed"
+        return 0
+    fi
+    ok "image-gen Skill installed (~/.claude/skills/image-gen/)"
+
+    local wrapper="$CLAUDE_DIR/scripts/image-gen-cliproxyapi.sh"
+    if [[ ! -x "$wrapper" ]]; then
+        warn "image-gen wrapper not installed at $wrapper — augmentation/manifest skipped"
+        _image_gen_abort_after_mutation "wrapper missing"
+        return 0
+    fi
+
+    if ! image_gen_augment_skill "$CLAUDE_DIR/skills"; then
+        warn "image-gen: SKILL.md augmentation failed — ownership manifest NOT written"
+        _image_gen_abort_after_mutation "augmentation failed"
+        return 0
+    fi
+    ok "image-gen: SKILL.md augmented with managed integration block"
+
+    if ! _image_gen_write_manifest; then
+        warn "image-gen: failed to write ownership manifest"
+        _image_gen_abort_after_mutation "manifest write failed"
+        return 0
+    fi
+    # Successful upgrade: the backup is no longer needed.
+    [[ -n "$backup_dir" ]] && rm -rf "$backup_dir" 2>/dev/null
+    ok "image-gen: ownership manifest written ($manifest)"
+}
+
 install_deepxiv() {
     local repo_url="https://github.com/DeepXiv/deepxiv_sdk"
     info "Installing DeepXiv skills from github.com/DeepXiv/deepxiv_sdk..."
-    mkdir -p "$CLAUDE_DIR/skills"
+    $DRY_RUN || mkdir -p "$CLAUDE_DIR/skills"
 
     # Pre-flight: git must be available
     if ! command -v git &>/dev/null; then
@@ -2349,30 +2773,35 @@ install_deepxiv() {
         return 1
     fi
 
-    local deepxiv_tmp
-    deepxiv_tmp="$(mktemp -d "${TMPDIR:-/tmp}/deepxiv_sdk.XXXXXX")" || { error "Failed to create temporary directory"; return 1; }
-
     # Use local copy; default to known list when nothing selected (--all mode)
     local -a skills_to_install=("${SELECTED_DEEPXIV_SKILLS[@]}")
     if [[ ${#skills_to_install[@]} -eq 0 ]]; then
         skills_to_install=("${DEEPXIV_KNOWN_SKILLS[@]}")
     fi
 
+    # Dry-run: report only, NO filesystem writes (no mktemp, no clone, no copy).
+    if $DRY_RUN; then
+        info "Would clone $repo_url (shallow) to a temporary directory"
+        for skill in "${skills_to_install[@]}"; do
+            info "Would install DeepXiv skill: $skill -> $CLAUDE_DIR/skills/$skill/"
+        done
+        return 0
+    fi
+
+    # Non-dry-run: create the temp dir now and clone into it.
+    local deepxiv_tmp
+    deepxiv_tmp="$(mktemp -d "${TMPDIR:-/tmp}/deepxiv_sdk.XXXXXX")" || { error "Failed to create temporary directory"; return 1; }
+
     # Clone the deepxiv_sdk repo (shallow clone for speed)
     local clone_ok=false
-    if $DRY_RUN; then
-        info "Would clone $repo_url (shallow) to temporary directory"
+    if retry 3 3 "Clone deepxiv_sdk" git clone --depth 1 "$repo_url" "$deepxiv_tmp/deepxiv_sdk"; then
         clone_ok=true
+        ok "DeepXiv SDK repo cloned (latest)"
     else
-        if retry 3 3 "Clone deepxiv_sdk" git clone --depth 1 "$repo_url" "$deepxiv_tmp/deepxiv_sdk"; then
-            clone_ok=true
-            ok "DeepXiv SDK repo cloned (latest)"
-        else
-            error "Failed to clone deepxiv_sdk repo. Check network/proxy and try again."
-            (( INSTALL_WARNINGS++ )) || true
-            rm -rf "$deepxiv_tmp"
-            return 1
-        fi
+        error "Failed to clone deepxiv_sdk repo. Check network/proxy and try again."
+        (( INSTALL_WARNINGS++ )) || true
+        rm -rf "$deepxiv_tmp"
+        return 1
     fi
 
     if $clone_ok && ! $DRY_RUN; then
@@ -2423,7 +2852,7 @@ install_lessons() {
 
 install_statusline() {
     info "Installing StatusLine..."
-    mkdir -p "$CLAUDE_DIR/hooks"
+    $DRY_RUN || mkdir -p "$CLAUDE_DIR/hooks"
 
     local hook_file="$SCRIPT_DIR/hooks/statusline.sh"
     if [[ -f "$hook_file" ]]; then
@@ -2885,6 +3314,9 @@ uninstall() {
     echo "  - $CLAUDE_DIR/skills/ (installer-managed only)"
     echo "  - $CLAUDE_DIR/agents/ (installer-managed only)"
     echo "  - $CLAUDE_DIR/scripts/ (installer-managed only)"
+    echo "  - $CLAUDE_DIR/skills/image-gen/ (when installer-owned, via .image-gen-sinedied)"
+    echo "  - $CLAUDE_DIR/scripts/image-gen-cliproxyapi.sh (image-gen wrapper)"
+    echo "  - $CLAUDE_DIR/.image-gen-sinedied (image-gen ownership manifest)"
     echo "  - $CLAUDE_DIR/skills/deepxiv-* (DeepXiv skills)"
     echo "  - $CLAUDE_DIR/lessons.md"
     echo "  - $CLAUDE_DIR/hooks/ (installer-managed only)"
@@ -2922,7 +3354,13 @@ uninstall() {
             rm -rf "$CLAUDE_DIR/skills/$skill" && ok "Removed skill: $skill"
         done
     else
-        rm -rf "$CLAUDE_DIR/skills" && ok "Removed skills/"
+        # No trustworthy source inventory: cannot distinguish installer-managed
+        # skills from user-authored ones. The image-gen ownership manifest is
+        # the sole authority for image-gen (handled below); everything else is
+        # preserved rather than blanket-deleted.
+        if [[ -d "$CLAUDE_DIR/skills" ]]; then
+            warn "No source skills inventory ($SCRIPT_DIR/skills missing) — leaving $CLAUDE_DIR/skills untouched (installer-managed + user skills preserved; the image-gen manifest governs image-gen only)"
+        fi
     fi
 
     # Only remove agents that ship with this repo
@@ -2970,6 +3408,25 @@ uninstall() {
             rm -rf "$CLAUDE_DIR/skills/$mp_skill" && ok "Removed mattpocock skill: $mp_skill"
         done < "$mp_manifest"
         rm -f "$mp_manifest"
+    fi
+
+    # Remove the image-gen Skill ONLY when the ownership manifest proves this
+    # installer installed it. Validates EVERY fixed field (skill/source/wrapper)
+    # before any delete, so a user-authored directory whose name collides with
+    # image-gen — or a manifest tampered with / left stale by another tool — is
+    # never recursively deleted. The wrapper is removed by the USER_SCRIPTS
+    # loop above; here we only handle the Skill directory and the manifest.
+    local ig_manifest="$CLAUDE_DIR/.image-gen-sinedied"
+    if [[ -f "$ig_manifest" ]]; then
+        if _image_gen_dir_owned "$CLAUDE_DIR/skills/image-gen" "$ig_manifest"; then
+            if [[ -d "$CLAUDE_DIR/skills/image-gen" ]]; then
+                rm -rf "$CLAUDE_DIR/skills/image-gen" && ok "Removed image-gen Skill (installer-owned)"
+            fi
+            rm -f "$ig_manifest" && ok "Removed image-gen ownership manifest"
+        else
+            warn "image-gen: ownership proof incomplete (valid manifest + augmentation markers both required) — leaving ~/.claude/skills/image-gen untouched and removing only the stale manifest"
+            rm -f "$ig_manifest" 2>/dev/null || true
+        fi
     fi
 
     rm -f "$CLAUDE_DIR/lessons.md" && ok "Removed lessons.md"
@@ -3796,13 +4253,11 @@ main() {
         fi
     fi
 
-    # Check if anything was selected
-    if ! $INSTALL_CLAUDE_MD && ! $INSTALL_SETTINGS && ! $INSTALL_RULES && \
-       ! $INSTALL_SKILLS && ! $INSTALL_AGENTS && ! $INSTALL_MATTPOCOCK && ! $INSTALL_LESSONS && ! $INSTALL_STATUSLINE && \
-       ! $INSTALL_SHELL_WRAPPER && ! $INSTALL_PLUGINS && ! $INSTALL_MCP && ! $INSTALL_LARK && ! $INSTALL_DEEPXIV; then
-        warn "Nothing selected to install."
-        exit 0
-    fi
+    # image-gen (sinedied/agent-skills) is an always-installed component with
+    # no selectable flag and no menu item, so there is no "nothing selected"
+    # early exit: even when every selectable item is off, the installer still
+    # proceeds to install maintenance scripts and the image-gen Skill. A user
+    # who interactively deselects everything still gets the always-on floor.
 
     echo ""
     echo "========================================="
@@ -3822,7 +4277,10 @@ main() {
         info "Upgrading from $installed_ver -> $(get_source_version)"
     fi
 
-    mkdir -p "$CLAUDE_DIR"
+    # In dry-run, perform NO filesystem writes at all (no mkdir, no cp, no
+    # chmod) so the run is fully side-effect-free and previewable from an empty
+    # HOME. Each install_* function also guards its own writes on $DRY_RUN.
+    $DRY_RUN || mkdir -p "$CLAUDE_DIR"
 
     $INSTALL_CLAUDE_MD && install_claude_md
     $INSTALL_SETTINGS && install_settings
@@ -3830,6 +4288,10 @@ main() {
     $INSTALL_SKILLS && install_skills
     $INSTALL_AGENTS && install_agents
     install_scripts
+    # image-gen is always-installed (no flag gate). Runs after install_scripts
+    # so the wrapper (a USER_SCRIPT) is already in place when augmentation and
+    # the ownership-manifest write check for it.
+    install_image_gen
     $INSTALL_MATTPOCOCK && install_mattpocock_skills
     $INSTALL_LESSONS && install_lessons
     $INSTALL_STATUSLINE && install_statusline

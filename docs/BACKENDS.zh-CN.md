@@ -253,6 +253,64 @@ export ANTHROPIC_DEFAULT_OPUS_MODEL='gpt-5.5(high)'
 非 Claude 模型」*。真出了问题，两家厂商都不会帮你，而且它随时可能因为某个版本更新
 而失效。`claude` 和 `glm` 这两个 profile 完全没有这些风险。
 
+### 图像生成 —— `sinedied/agent-skills:image-gen`
+
+本仓库**不内置任何图像生成代码**。`image-gen` Skill 由两个安装器通过网络拉取，且**始终安装** —— 它没有菜单项，即便所有可选项都被取消勾选也会安装：
+
+```bash
+npx -y skills@latest add sinedied/agent-skills --global --agent claude-code --copy --yes --skill image-gen
+```
+
+`DO_NOT_TRACK=1` 关闭 `skills` CLI 的匿名遥测；`--copy` 写真实文件（非 symlink）以便 `--uninstall` 能删除。缺少 `npx` 或网络失败是非致命的：记一条警告后继续，版本戳和其余安装照常完成。Skill 落在 `~/.claude/skills/image-gen/`（全局 `$HOME` 路径）；本仓库**不**追踪上游的 `image_gen.py`、提示词、示例或 license。仓库自有的包装器安装到 `~/.claude/scripts/image-gen-cliproxyapi.sh`，下载下来的 `SKILL.md` 会被幂等地注入一段受管指令块。
+
+#### 模型、版本、端点
+
+| | |
+|---|---|
+| 图像模型 | `gpt-image-2`（确切名称，绝不写成 `image2`） |
+| 最低 CLIProxyAPI | `v7.2.17`（仅稳定版；**所有**预发布后缀 `-rc`/`-beta`/`-alpha`/`-pre`/`-dev`/… 都被拒绝） |
+| Base URL | `http://127.0.0.1:8317/v1`（确切常量；绝不从 health URL 推导） |
+| 存活探针 | `GET /healthz` —— 200 只代表监听端口起来了，**与鉴权无关** |
+| 能力就绪 | 鉴权过的 `GET /v1/models`，要求精确匹配 `data[].id == "gpt-image-2"`（仅子串匹配不算）；超时内（默认 25 秒，可覆盖）无法证明则 fail-closed |
+| 图像路由 | `/v1/images/generations` 与 `/v1/images/edits`（由上游 `image_gen.py` 向环回 base URL 发起） |
+
+包装器先用 `/healthz` 决定启动还是复用，再执行鉴权过的 `/v1/models` 能力检查，通过后才委派。若无法证明能力，它会打印一条净化过的诊断（`OAuth/login may be inactive - run \`cliproxyapi --codex-login\` and retry`）并退出、**不**委派，避免配置错误的代理伪装成就绪。
+
+#### 本地代理 key 与 OAuth —— 无需 OpenAI Platform key
+
+包装器**绝不**索要 OpenAI Platform API key。鉴权有两层，都已在上面 `gpt` 后端配好：
+
+1. **本地 client key** —— `~/.cli-proxy-api/config.yaml` 里 `api-keys:` 的第一个条目，安全读取，**绝不**打印、日志或放进 argv（仅 `export` 进委派子进程的环境；读取前后会禁用 xtrace，Authorization 头通过 curl `--config -` stdin 传入）。
+2. **ChatGPT/Codex OAuth** —— 上面 `gpt` 一节描述的一次性 `cliproxyapi --codex-login`。若登录已失效，能力探针会 fail-closed 并给出上面的诊断。
+
+升级已有的 CLIProxyAPI：
+
+```bash
+brew upgrade cliproxyapi        # 之后用 cl_gpt 重启，以便拾取新二进制
+```
+
+包装器与启动器 profile 维护的是**各自独立**的候选列表，不要用一个去推断另一个。包装器自己的 `IMAGE_GEN_BIN_NAMES` 依次尝试 `cliproxyapi`、`cli-proxy-api`、`cliproxy-api`；启动器的 `profiles/gpt.json` 里 `service.bins` 依次尝试 `cli-proxy-api`、`cliproxyapi`、`CLIProxyAPI`（两个列表及顺序都不同）。二进制缺失或低于 `v7.2.17` 时，包装器会同时给出 `brew install cliproxyapi` 与 `brew upgrade cliproxyapi` 作为修复指引。
+
+#### 所有启动器共享同一组路径
+
+`claude.zsh` 经过 grep 审计，**不含**任何 image-gen / `OPENAI_*` 耦合。每个 `cl`、`cl_claude`、`cl_glm`、`cl_gpt`、`cl_ccr` 以及生成的 `cl_<name>_auto` 都流经 `_cl_profile_run` → `_cl_run` → `claude`，后者只管理 `ANTHROPIC_*` 环境与 `claude` 二进制。Skill 与包装器位于全局 `$HOME` 路径，启动器从不触碰，因此图像生成可在任意后端下工作。恶意或不兼容的 `ANTHROPIC_BASE_URL` 永远不会改变子进程的 `OPENAI_BASE_URL`（始终是上面的环回常量）—— 图像流量直接走 `:8317`，绕过当前启动器拉起的那个代理（包括 `cl_gpt` 本身，这没问题：CLIProxyAPI 在自己的端口上接受请求）。
+
+#### 所有权安全的卸载
+
+安装器只有在包装器存在、上游布局（`SKILL.md` + `image_gen.py`）校验通过、且注入成功后，才写入模式 600 的清单 `~/.claude/.image-gen-sinedied`：
+
+```text
+skill=image-gen
+source=sinedied/agent-skills
+wrapper=image-gen-cliproxyapi.sh
+```
+
+`--uninstall` 仅在**三者同时满足**时才删除 `~/.claude/skills/image-gen`：逐字节匹配的标准清单、目录布局、**以及** `SKILL.md` 中格式正确的注入标记。同名但用户自建的目录、有清单但无标记的植入/残留、以及清单有效但目录缺失的情况，都会被保留（仅清理过期清单）。包装器本身通过管理 `cleanup-claude-data.sh` 的同一个 `USER_SCRIPTS` 循环移除。已拥有的旧版本在 `npx` 运行前会被备份，任何后续失败都按字节恢复；恢复失败时备份会保留并打印其路径。
+
+#### 不支持原生 Windows
+
+包装器是 Bash 脚本，CLIProxyAPI 服务生命周期仅支持 Bash/Zsh。`install.ps1` 在 Windows 上会安装网络 Skill 和包装器资产，但 `cl_*` / CLIProxyAPI 的图像生成路径在原生 Windows 上**不**受支持。请在 **WSL 内**运行 Bash 安装器，使其落到 WSL 的 `~/.claude` —— WSL 不会把 `%USERPROFILE%\.claude` 当作 `~/.claude`，而 Git Bash 的 `~/.claude` → `%USERPROFILE%\.claude` 映射取决于具体安装。本次会话**未**验证真实的 PowerShell 运行时行为（`pwsh` 不存在时行为测试套件会干净地 SKIP）；pwsh-equipped 的 Windows 机器需自行确认解析器、`cmd.exe /d /s /c` 调用 `npx.cmd`、字节级 `SKILL.md` 注入、以及清单原子性。
+
 ### `ccr` —— 跨多个供应商的统一 `/model` 列表
 
 [claude-code-router](https://github.com/musistudio/claude-code-router) v3 把多个供应商

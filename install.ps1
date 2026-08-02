@@ -78,6 +78,7 @@ function Invoke-Retry {
 
 $script:SCRIPT_DIR = ""
 $script:REMOTE_MODE = $false
+$script:REMOTE_DRY_RUN = $false
 $script:InstallWarnings = 0
 $script:InstallCritical = 0
 
@@ -89,8 +90,20 @@ function Initialize-ScriptDir {
         return
     }
 
-    # Remote mode: download zip to temp dir
+    # Remote mode: would download zip to temp dir. In DryRun, short-circuit
+    # BEFORE any network/temp write: print a sanitized planned-source message
+    # and leave source enumeration to Main's remote-dry-run plan. Neither
+    # USERPROFILE nor temp is touched.
     $script:REMOTE_MODE = $true
+    if ($DryRun) {
+        $ver = if ($env:VERSION) { $env:VERSION } else { $script:REPO_BRANCH }
+        $zipUrl = "$($script:REPO_URL)/archive/refs/heads/$ver.zip"
+        if ($ver -match '^v\d') { $zipUrl = "$($script:REPO_URL)/archive/refs/tags/$ver.zip" }
+        $script:REMOTE_DRY_RUN = $true
+        Write-Info "Remote DryRun: would download $ver from $zipUrl (no network/temp write)"
+        return
+    }
+
     $tmpdir = Join-Path ([System.IO.Path]::GetTempPath()) "claude-config-$(Get-Random)"
     New-Item -ItemType Directory -Path $tmpdir -Force | Out-Null
 
@@ -918,7 +931,7 @@ function Install-Rules {
 
     Write-Info "Installing rules..."
     $rulesDir = Join-Path $CLAUDE_DIR "rules"
-    New-Item -ItemType Directory -Path $rulesDir -Force | Out-Null
+    if (-not $DryRun) { New-Item -ItemType Directory -Path $rulesDir -Force | Out-Null }
 
     # Always install common rules
     $commonSrc = Join-Path $SCRIPT_DIR "rules\common"
@@ -992,7 +1005,7 @@ function Install-Skills {
     param([string[]]$SelectedSkills = @())
     Write-Info "Installing custom skills..."
     $skillsDir = Join-Path $CLAUDE_DIR "skills"
-    New-Item -ItemType Directory -Path $skillsDir -Force | Out-Null
+    if (-not $DryRun) { New-Item -ItemType Directory -Path $skillsDir -Force | Out-Null }
 
     # Migration: remove renamed/deleted skills from previous installs.
     # NOTE: handoff/teach are intentionally NOT removed here — they were vendored in
@@ -1073,7 +1086,7 @@ function Install-Skills {
 function Install-Agents {
     Write-Info "Installing custom agents..."
     $agentDir = Join-Path $CLAUDE_DIR "agents"
-    if (-not (Test-Path $agentDir)) { New-Item -ItemType Directory -Path $agentDir -Force | Out-Null }
+    if (-not $DryRun -and -not (Test-Path $agentDir)) { New-Item -ItemType Directory -Path $agentDir -Force | Out-Null }
     Get-ChildItem (Join-Path $SCRIPT_DIR "agents") -Filter "*.md" | ForEach-Object {
         if ($DryRun) {
             Write-Info "Would copy: agents/$($_.Name) -> $agentDir\$($_.Name)"
@@ -1084,14 +1097,19 @@ function Install-Agents {
     }
 }
 
-$USER_SCRIPTS = @("cleanup-claude-data.sh")
+# image-gen-cliproxyapi.sh is the always-installed CLIProxyAPI delegation wrapper
+# consumed by the network-installed sinedied/agent-skills:image-gen Skill (see
+# Install-ImageGen). Installed as a user script so uninstall removes it. It is a
+# Bash script; native Windows cl_*/CLIProxyAPI service lifecycle is unsupported.
+$USER_SCRIPTS = @("cleanup-claude-data.sh", "image-gen-cliproxyapi.sh")
 
 function Install-Scripts {
     Write-Info "Installing maintenance scripts..."
     $srcDir = Join-Path $SCRIPT_DIR "scripts"
     if (-not (Test-Path $srcDir)) { Write-Info "No scripts/ directory in source, skipping"; return }
     $destDir = Join-Path $CLAUDE_DIR "scripts"
-    if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+    # DryRun writes nothing — no directory creation (keeps USERPROFILE side-effect-free).
+    if (-not $DryRun -and -not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
     foreach ($script in $USER_SCRIPTS) {
         $src = Join-Path $srcDir $script
         if (-not (Test-Path $src)) { Write-Warn "Expected script missing in source: $script"; continue }
@@ -1179,6 +1197,575 @@ function Install-MattpocockSkills {
     }
 }
 
+# ============================================================
+# image-gen (sinedied/agent-skills) always-installed network Skill.
+# PowerShell parity with install.sh install_image_gen.
+#
+# The upstream Skill is fetched with the same `skills` CLI as
+# mattpocock/skills — never vendored. After a successful download the
+# installer augments the downloaded SKILL.md with an idempotent managed
+# instructions block pointing Claude Code at the repository-owned wrapper,
+# then writes an ownership manifest so uninstall deletes only an
+# installer-owned image-gen directory (never a user-authored one).
+#
+# Always installed: no selectable flag, no menu item. Missing npx or a
+# failed download is non-fatal — it increments $script:InstallWarnings so
+# the summary surfaces it while letting the rest of the install finish.
+#
+# IMPORTANT: the wrapper asset (image-gen-cliproxyapi.sh) is a Bash script.
+# Native Windows cl_*/CLIProxyAPI service lifecycle is NOT supported; the
+# wrapper is installed for WSL / Git-Bash / Bash-compatible environments.
+# ============================================================
+
+# Managed markers wrapping the integration block in the installed SKILL.md.
+$IMAGE_GEN_BEGIN_MARKER = "<!-- BEGIN claude-code-config CLIProxyAPI image-gen integration -->"
+$IMAGE_GEN_END_MARKER = "<!-- END claude-code-config CLIProxyAPI image-gen integration -->"
+
+# Exact canonical ownership manifest content. Validation compares
+# byte-for-byte (order, one trailing newline, no extras/CRLF). Kept as a
+# single literal so it is the only source of truth.
+$IMAGE_GEN_MANIFEST_CANONICAL = "skill=image-gen`nsource=sinedied/agent-skills`nwrapper=image-gen-cliproxyapi.sh"
+
+# Returns the exact `skills add` argument array. Installs globally to
+# ~/.claude/skills/ as real copies for Claude Code, scoped to the single
+# image-gen Skill. Pure: returns an array, no side effects.
+function Get-ImageGenNpxArgs {
+    return @(
+        "-y", "skills@latest", "add", "sinedied/agent-skills",
+        "--global", "--agent", "claude-code", "--copy", "--yes",
+        "--skill", "image-gen"
+    )
+}
+
+# Returns the canonical managed instructions block (the bytes between the
+# markers). Pure: no side effects. Tells Claude Code to invoke the wrapper,
+# forward upstream arguments, avoid requesting an OpenAI Platform API key,
+# and notes the loopback endpoint, model, and the native-Windows limitation.
+# Single-quoted here-string: literal (no `$ expansion, no backtick escapes).
+function Get-ImageGenIntegrationBlock {
+    return @'
+Run image generation through the local CLIProxyAPI wrapper instead of invoking
+`image_gen.py` directly or requesting an OpenAI Platform API key:
+
+    ~/.claude/scripts/image-gen-cliproxyapi.sh <upstream arguments>
+
+Forward all upstream arguments (`generate`, `edit`, prompts, file paths, and
+image options) unchanged. The wrapper starts or reuses CLIProxyAPI on the
+loopback endpoint `http://127.0.0.1:8317/v1`, reads the local client key
+without exposing it, and requests the `gpt-image-2` model. Do not ask the user
+for an OpenAI Platform API key — image generation is covered by the local
+CLIProxyAPI using ChatGPT/Codex OAuth.
+
+Note: native Windows `cl_*`/CLIProxyAPI service lifecycle is not supported.
+The wrapper is a Bash script — run it inside WSL (run the Bash installer inside
+WSL so it lands in the WSL `~/.claude`, NOT the Windows `%USERPROFILE%\.claude`,
+which WSL does not see as `~/.claude`). Git Bash may also work but its
+`~/.claude` -> `%USERPROFILE%\.claude` mapping depends on the install, so WSL
+is the recommended path for a faithful `~/.claude` layout.
+'@
+}
+
+# Strict marker-layout validator. Single source of truth for "does this
+# SKILL.md have a well-formed managed block?" Returns $true iff the file has
+# exactly one exact-line BEGIN, exactly one exact-line END, BEGIN precedes
+# END, and no line carries marker text without being an exact marker line
+# (embedded prose), with no duplicates, nesting, or unterminated state.
+# Ownership and augmentation both consult this so a hand-edited or hostile
+# SKILL.md can never authorize deletion or overwrite.
+function Test-ImageGenMarkersStrict {
+    param([Parameter(Mandatory=$true)][string]$SkillMd)
+    if (-not (Test-Path -LiteralPath $SkillMd)) { return $false }
+    $lines = @(Get-Content -LiteralPath $SkillMd -ErrorAction SilentlyContinue)
+    $begin = 0; $end = 0; $inBlock = $false; $bad = $false; $embedded = $false
+    foreach ($line in $lines) {
+        if ($line -ceq $IMAGE_GEN_BEGIN_MARKER) {
+            if ($inBlock) { $bad = $true }
+            if ($end -gt 0) { $bad = $true }
+            $begin++
+            if ($begin -gt 1) { $bad = $true }
+            $inBlock = $true
+        } elseif ($line -ceq $IMAGE_GEN_END_MARKER) {
+            if (-not $inBlock) { $bad = $true }
+            $end++
+            if ($end -gt 1) { $bad = $true }
+            $inBlock = $false
+        } elseif ($line.Contains($IMAGE_GEN_BEGIN_MARKER) -or $line.Contains($IMAGE_GEN_END_MARKER)) {
+            $embedded = $true
+        }
+    }
+    if ($bad -or $embedded) { return $false }
+    return ($begin -eq 1 -and $end -eq 1)
+}
+
+# Validate that an image-gen ownership manifest is byte-for-byte identical to
+# the canonical content this installer writes: exactly three lines in order,
+# one trailing newline, no duplicates/extras, no CRLF. Byte comparison so a
+# field-by-field parser cannot accept reordering/duplication. Pure.
+function Test-ImageGenManifestValid {
+    param([Parameter(Mandatory=$true)][string]$Manifest)
+    if (-not (Test-Path -LiteralPath $Manifest)) { return $false }
+    try {
+        $actual = [System.IO.File]::ReadAllBytes($Manifest)
+    } catch { return $false }
+    $expected = [System.Text.Encoding]::UTF8.GetBytes($IMAGE_GEN_MANIFEST_CANONICAL + "`n")
+    if ($actual.Length -ne $expected.Length) { return $false }
+    for ($i = 0; $i -lt $actual.Length; $i++) {
+        if ($actual[$i] -ne $expected[$i]) { return $false }
+    }
+    return $true
+}
+
+# Full ownership proof: a directory is installer-owned ONLY when a valid
+# manifest exists AND the installed SKILL.md passes the strict marker
+# validator. A completed install always writes markers before the manifest,
+# so a user-created directory with a planted valid manifest but malformed or
+# absent markers is treated as unowned and never mutated or deleted.
+function Test-ImageGenDirOwned {
+    param(
+        [Parameter(Mandatory=$true)][string]$SkillDir,
+        [Parameter(Mandatory=$true)][string]$Manifest
+    )
+    if (-not (Test-Path -LiteralPath $SkillDir)) { return $false }
+    if (-not (Test-ImageGenManifestValid -Manifest $Manifest)) { return $false }
+    return (Test-ImageGenMarkersStrict -SkillMd (Join-Path $SkillDir "SKILL.md"))
+}
+
+# Write the ownership manifest atomically. The manifest is the sole authority
+# uninstall uses. Written with explicit LF + one trailing newline so the byte
+# comparison in Test-ImageGenManifestValid holds. Atomicity:
+#   - Existing destination: [System.IO.File]::Replace swaps old<->new in one
+#     same-volume operation (the prior bytes go to a backup file we remove).
+#     On ANY Replace failure the old manifest is preserved byte-for-byte and
+#     the temp/backup are cleaned; there is NO Move-Item fallback over an
+#     existing destination (a rename-over is not a guaranteed atomic swap and
+#     has a delete window).
+#   - First install (no destination): same-dir temp + Move-Item (rename), no
+#     delete-first window.
+#   - Any failure returns $false and keeps the old manifest.
+function Write-ImageGenManifest {
+    param([Parameter(Mandatory=$true)][string]$Manifest)
+    $dir = Split-Path -Parent $Manifest
+    if (-not (Test-Path $dir)) { return $false }
+    $leaf = Split-Path -Leaf $Manifest
+    $tmp = Join-Path $dir ("." + $leaf + "." + (Get-Random) + ".tmp")
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($IMAGE_GEN_MANIFEST_CANONICAL + "`n")
+    try {
+        [System.IO.File]::WriteAllBytes($tmp, $bytes)
+    } catch {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        return $false
+    }
+    if (Test-Path -LiteralPath $Manifest) {
+        # Atomic same-volume Replace; backup holds prior bytes until we delete it.
+        # On failure: preserve old manifest, clean temp + backup, return $false.
+        $bak = Join-Path $dir ("." + $leaf + "." + (Get-Random) + ".bak")
+        try {
+            [System.IO.File]::Replace($tmp, $Manifest, $bak)
+        } catch {
+            if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+            if (Test-Path -LiteralPath $bak) { Remove-Item -LiteralPath $bak -Force -ErrorAction SilentlyContinue }
+            return $false
+        }
+        Remove-Item -LiteralPath $bak -Force -ErrorAction SilentlyContinue
+    } else {
+        # First install: rename into place (no delete-first).
+        try {
+            Move-Item -LiteralPath $tmp -Destination $Manifest -Force
+        } catch {
+            if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+            return $false
+        }
+    }
+    return $true
+}
+
+# Idempotently augment the installed image-gen SKILL.md with the managed
+# integration block. TRUE BYTE-OFFSET SPLICE: never UTF-8 decodes/re-encodes the
+# whole file (which would corrupt malformed UTF-8). Instead it reads raw bytes,
+# decodes via the byte-preserving ISO-8859-1 (Latin1) mapping SOLELY to locate
+# ASCII marker lines (char index == byte offset), and emits the OUTSIDE bytes
+# verbatim from the original byte array. The managed block bytes are generated
+# as UTF-8 and joined with the file's detected newline. Preserves: UTF-8 BOM,
+# CRLF/LF/CR newline style, the final-newline state, and EVERY byte outside the
+# managed interval (including malformed UTF-8). Strict malformed-state rejection
+# (embedded/duplicate/one-sided/reversed markers). Atomic same-dir temp +
+# Move-Item -Force. Returns $true on success.
+function Update-ImageGenSkillInstructions {
+    param([string]$SkillsDir = (Join-Path $CLAUDE_DIR "skills"))
+    $skillMd = Join-Path $SkillsDir "image-gen\SKILL.md"
+    $upstream = Join-Path $SkillsDir "image-gen\image_gen.py"
+    if (-not (Test-Path -LiteralPath $skillMd)) {
+        Write-Warn "image-gen: SKILL.md not found at $skillMd - augmentation skipped"
+        return $false
+    }
+    if (-not (Test-Path -LiteralPath $upstream)) {
+        Write-Warn "image-gen: image_gen.py not found at $upstream - augmentation skipped"
+        return $false
+    }
+
+    try { $all = [System.IO.File]::ReadAllBytes($skillMd) } catch {
+        Write-Warn "image-gen: failed to read $skillMd - augmentation skipped"
+        return $false
+    }
+
+    # Preserve a UTF-8 BOM (EF BB BF) if present; exclude from the body scan and
+    # re-emit it verbatim on write.
+    $bomLen = 0
+    if ($all.Length -ge 3 -and $all[0] -eq 0xEF -and $all[1] -eq 0xBB -and $all[2] -eq 0xBF) { $bomLen = 3 }
+
+    # Latin1 decode is byte-preserving (char index == byte offset) for ALL 256
+    # byte values, so malformed UTF-8 outside the markers is never corrupted and
+    # ASCII marker comparison is exact. We use this ONLY to find offsets; outside
+    # bytes are emitted from the ORIGINAL byte array.
+    $latin1 = [System.Text.Encoding]::GetEncoding("ISO-8859-1")
+    $body = $latin1.GetString($all, $bomLen, $all.Length - $bomLen)
+
+    # Detect the file's newline style from its raw bytes (UTF-8 continuation/
+    # lead bytes never equal 0x0A/0x0D, so detection is unambiguous).
+    $nlBytes = [byte[]](0x0A)
+    for ($i = $bomLen; $i -lt $all.Length; $i++) {
+        if ($all[$i] -eq 0x0D) {
+            if (($i + 1) -lt $all.Length -and $all[$i + 1] -eq 0x0A) { $nlBytes = [byte[]](0x0D, 0x0A) }
+            else { $nlBytes = [byte[]](0x0D) }
+            break
+        }
+        if ($all[$i] -eq 0x0A) { $nlBytes = [byte[]](0x0A); break }
+    }
+
+    # Split into alternating (line-content, separator) segments so we can compute
+    # byte offsets of each marker line. Markers are pure ASCII, so -ceq on the
+    # Latin1 string is an exact byte comparison.
+    $segs = [regex]::Split($body, '(\r\n|\r|\n)')
+    $begin = $IMAGE_GEN_BEGIN_MARKER
+    $end = $IMAGE_GEN_END_MARKER
+    $beginContentIdx = -1; $endContentIdx = -1; $embedded = $false
+    for ($i = 0; $i -lt $segs.Length; $i += 2) {
+        $lc = $segs[$i]
+        if ($lc -ceq $begin) {
+            if ($beginContentIdx -ge 0) { $embedded = $true }
+            $beginContentIdx = $i
+        } elseif ($lc -ceq $end) {
+            if ($endContentIdx -ge 0) { $embedded = $true }
+            $endContentIdx = $i
+        } elseif ($lc.Contains($begin) -or $lc.Contains($end)) {
+            $embedded = $true
+        }
+    }
+    if ($embedded) {
+        Write-Warn "image-gen: SKILL.md markers malformed (embedded/duplicate) - augmentation skipped"
+        return $false
+    }
+
+    # Build the managed block bytes: begin + nl + block + nl + end (UTF-8 for the
+    # block, ASCII for markers; ASCII is a strict subset of UTF-8 so concat is
+    # valid UTF-8). The block's INTERNAL newlines are normalized to the file's
+    # detected target style (LF/CRLF/CR) so a CRLF file gets a CRLF block.
+    $beginBytes = [System.Text.Encoding]::ASCII.GetBytes($begin)
+    $endBytes = [System.Text.Encoding]::ASCII.GetBytes($end)
+    $nlStr = if ($nlBytes.Length -eq 2) { "`r`n" } elseif ($nlBytes[0] -eq 0x0D) { "`r" } else { "`n" }
+    $blockStr = Get-ImageGenIntegrationBlock
+    # Normalize the block's internal newlines to the detected target style.
+    $blockStr = $blockStr -replace "`r`n", "`n" -replace "`r", "`n"
+    if ($nlStr -ne "`n") { $blockStr = $blockStr -replace "`n", $nlStr }
+    $blockBytes = [System.Text.Encoding]::UTF8.GetBytes($blockStr)
+
+    $ms = New-Object System.IO.MemoryStream
+    # Helper to append a byte array.
+    $append = [ScriptBlock]::Create('param([byte[]]$b) if ($b -and $b.Length) { $ms.Write($b, 0, $b.Length) }')
+
+    if ($beginContentIdx -ge 0 -and $endContentIdx -ge 0 -and $beginContentIdx -lt $endContentIdx) {
+        # REPLACE: head = everything before the begin marker line's content;
+        # tail BEGINS at the original separator that followed the END marker
+        # line (so that separator + all suffix bytes are preserved exactly).
+        $headEnd = 0
+        for ($i = 0; $i -lt $beginContentIdx; $i++) { $headEnd += $segs[$i].Length }
+        # tailStart = offset of segs[endContentIdx+1] (the separator after end),
+        # i.e. sum through endContentIdx inclusive. Preserves separator + suffix.
+        $tailStart = 0
+        for ($i = 0; $i -le $endContentIdx; $i++) { $tailStart += $segs[$i].Length }
+        if ($bomLen -gt 0) { $ms.Write($all, 0, $bomLen) }
+        & $append $latin1.GetBytes($body.Substring(0, $headEnd))
+        & $append $beginBytes; & $append $nlBytes; & $append $blockBytes; & $append $nlBytes; & $append $endBytes
+        if ($tailStart -lt $body.Length) { & $append $latin1.GetBytes($body.Substring($tailStart)) }
+    } elseif ($beginContentIdx -lt 0 -and $endContentIdx -lt 0) {
+        # APPEND: preserve the original final-newline state.
+        # - Nonempty body WITHOUT a trailing newline: emit a separator before
+        #   BEGIN (so BEGIN starts on its own line) and NO separator after END
+        #   (the file ends at END, matching the original no-final-NL state).
+        # - Terminated body (ends with newline): BEGIN starts on the next line
+        #   (body's trailing separator is already present), and a trailing
+        #   separator after END preserves the terminated state.
+        $terminated = ($body.Length -gt 0) -and ($body -match '[\r\n]$')
+        if ($bomLen -gt 0) { $ms.Write($all, 0, $bomLen) }
+        & $append $latin1.GetBytes($body)
+        if (-not $terminated -and $body.Length -gt 0) { & $append $nlBytes }
+        & $append $beginBytes; & $append $nlBytes; & $append $blockBytes; & $append $nlBytes; & $append $endBytes
+        if ($terminated) { & $append $nlBytes }
+    } else {
+        Write-Warn "image-gen: SKILL.md markers malformed (one-sided/unterminated) - augmentation skipped"
+        return $false
+    }
+    $finalBytes = $ms.ToArray()
+
+    # Atomic write: temp in the SAME directory, verify strict, then Move-Item.
+    $tDir = Split-Path -Parent $skillMd
+    $tLeaf = Split-Path -Leaf $skillMd
+    $tmp = Join-Path $tDir ("." + $tLeaf + ".augment." + (Get-Random) + ".tmp")
+    try {
+        [System.IO.File]::WriteAllBytes($tmp, $finalBytes)
+        if (-not (Test-ImageGenMarkersStrict -SkillMd $tmp)) {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            Write-Warn "image-gen: augmentation produced malformed markers - skipped"
+            return $false
+        }
+        Move-Item -LiteralPath $tmp -Destination $skillMd -Force
+        return $true
+    } catch {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        Write-Warn "image-gen: failed to write SKILL.md"
+        return $false
+    }
+}
+
+# Build the (FileName, Arguments) pair for invoking npx without relying on the
+# `& npx` pipeline. Pure: no process start, no side effects — designed so a test
+# can verify the exact command string for the Windows npx.cmd-under-spaced-path
+# case. Uses the documented robust cmd.exe quoting: `cmd /d /s /c "<cmd>"` where
+# /d disables registry AutoRun, /s strips the outer quote pair, and the inner
+# command quotes the executable path. Every arg token is asserted whitespace-
+# free (constant array, no shell expansion); returns $null on an unrepresentable
+# token (fail closed).
+function Get-ImageGenNpxCommandLine {
+    param([Parameter(Mandatory=$true)][string]$Exe, [Parameter(Mandatory=$true)][string[]]$NpxArgs)
+    foreach ($a in $NpxArgs) {
+        if ($a -match '\s') { return $null }
+    }
+    if ($Exe -like '*.cmd') {
+        # cmd.exe /d /s /c ""exe" arg1 arg2" — /s strips the outer pair, cmd then
+        # sees "exe" arg1 arg2 (the exe path quoted, tolerating spaces).
+        $argStr = '/d /s /c ""' + $Exe + '" ' + ($NpxArgs -join ' ') + '"'
+        return @{ FileName = "cmd.exe"; Arguments = $argStr }
+    } else {
+        return @{ FileName = $Exe; Arguments = ($NpxArgs -join ' ') }
+    }
+}
+
+# Invoke the npx skills command with a DETACHED stdin (immediate EOF so an
+# interactive prompt can never block a non-interactive install), a CONSTANT
+# argument array (no shell expansion; every token is asserted whitespace-free),
+# and exit-code checking. Never relies on the `& npx` pipeline. Windows PS 5.1
+# compatible; npx.cmd launched via the documented `cmd.exe /d /s /c` form.
+# Drains stdout/stderr asynchronously to avoid pipe-buffer deadlock. Returns
+# $true on exit code 0, $false otherwise (incl. unrepresentable tokens).
+function Invoke-ImageGenNpx {
+    param([Parameter(Mandatory=$true)][string[]]$NpxArgs)
+    $npx = Get-Command npx -ErrorAction SilentlyContinue
+    if (-not $npx) { return $false }
+    $cli = Get-ImageGenNpxCommandLine -Exe $npx.Source -NpxArgs $NpxArgs
+    if (-not $cli) { return $false }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $cli.FileName
+    $psi.Arguments = $cli.Arguments
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    try {
+        $proc = New-Object System.Diagnostics.Process
+        $proc.StartInfo = $psi
+        [void]$proc.Start()
+        # Close stdin immediately -> child sees EOF (null/detached stdin).
+        $proc.StandardInput.Close()
+        # Drain stdout/stderr asynchronously to avoid pipe-buffer deadlock when
+        # npx emits progress output larger than the OS pipe buffer.
+        $outTask = $proc.StandardOutput.ReadToEndAsync()
+        $errTask = $proc.StandardError.ReadToEndAsync()
+        $proc.WaitForExit()
+        return ($proc.ExitCode -eq 0)
+    } catch {
+        return $false
+    }
+}
+
+# Coordinator. Always-installed (no flag gate). Transactional upgrade:
+#   - Prior valid ownership (manifest valid AND dir present): the prior skill
+#     directory and manifest are backed up before npx mutation; on ANY later
+#     failure both are restored so on-disk state is exactly the previous good
+#     install.
+#   - Unowned directory present (dir exists but not owned): NEVER overwritten.
+#   - Fresh target (no dir): a stale/foreign manifest is removed first; on
+#     failure after npx the half-installed directory is removed.
+# Failure is non-fatal (increments $script:InstallWarnings, returns).
+function Install-ImageGen {
+    Write-Info "Installing image-gen Skill (sinedied/agent-skills, via npx skills)..."
+    $skillDir = Join-Path $CLAUDE_DIR "skills\image-gen"
+    $manifest = Join-Path $CLAUDE_DIR ".image-gen-sinedied"
+    $npxArgs = Get-ImageGenNpxArgs
+    $cmdPreview = "npx " + ($npxArgs -join " ")
+
+    $priorOwned = Test-ImageGenDirOwned -SkillDir $skillDir -Manifest $manifest
+
+    if ($DryRun) {
+        Write-Info "Would run: `$env:DO_NOT_TRACK='1'; $cmdPreview"
+        if ($priorOwned) { Write-Info "Would upgrade prior installer-owned image-gen (backed up first, restored on failure)" }
+        Write-Info "Would augment $skillDir\SKILL.md with the managed integration block"
+        Write-Info "Would write ownership manifest $manifest"
+        return
+    }
+
+    # Reconcile stale ownership BEFORE every other early return: a valid
+    # manifest with no skill directory is stale ownership of nothing; remove
+    # it so it can never later authorize deletion of a user-created directory.
+    if (-not $priorOwned -and (Test-Path -LiteralPath $manifest) -and (Test-ImageGenManifestValid -Manifest $manifest)) {
+        Remove-Item -LiteralPath $manifest -Force -ErrorAction SilentlyContinue
+        Write-Warn "image-gen: removed stale ownership manifest (no image-gen directory present)"
+    }
+
+    # npx availability check comes AFTER reconciliation so a missing-npx run
+    # still cleans a stale manifest.
+    if (-not (Get-Command npx -ErrorAction SilentlyContinue)) {
+        Write-Warn "npx not found (needs Node.js) - skipping image-gen Skill (always-installed)."
+        Write-Warn "  Install Node.js to get npx: https://nodejs.org"
+        Write-Warn "  Then run: `$env:DO_NOT_TRACK='1'; $cmdPreview"
+        $script:InstallWarnings++
+        return
+    }
+
+    # Unowned directory protection: never overwrite a user-authored/foreign
+    # directory that merely collides with the image-gen name.
+    if ((Test-Path -LiteralPath $skillDir) -and -not $priorOwned) {
+        Write-Warn "image-gen: $skillDir exists but is not installer-owned - skipping to avoid overwriting user content"
+        Write-Warn "  To manage image-gen via this installer, remove the directory manually first, then re-run."
+        $script:InstallWarnings++
+        return
+    }
+
+    # Mandatory upgrade backup: for a prior-owned install, a verified backup
+    # of skill + manifest must exist before npx; any failure aborts the
+    # upgrade with prior bytes intact. Lives outside the skill directory.
+    $backupDir = ""
+    if ($priorOwned) {
+        $backupDir = Join-Path ([System.IO.Path]::GetTempPath()) ("image-gen-prev." + (Get-Random))
+        try {
+            New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+            Copy-Item -LiteralPath $skillDir -Destination (Join-Path $backupDir "image-gen") -Recurse -Force
+            Copy-Item -LiteralPath $manifest -Destination (Join-Path $backupDir "manifest") -Force
+        } catch {
+            Write-Warn "image-gen: failed to build upgrade backup - aborting upgrade (prior install left intact)"
+            if ($backupDir -and (Test-Path $backupDir)) { Remove-Item $backupDir -Recurse -Force -ErrorAction SilentlyContinue }
+            $script:InstallWarnings++
+            return
+        }
+        if (-not (Test-Path (Join-Path $backupDir "manifest")) -or -not (Test-Path (Join-Path $backupDir "image-gen"))) {
+            Write-Warn "image-gen: upgrade backup verification failed - aborting upgrade (prior install left intact)"
+            if ($backupDir -and (Test-Path $backupDir)) { Remove-Item $backupDir -Recurse -Force -ErrorAction SilentlyContinue }
+            $script:InstallWarnings++
+            return
+        }
+    }
+
+    # Restore helper: on verified success returns 0; on failure returns 1 and
+    # the backup is RETAINED so manual recovery is possible. The caller emits
+    # the retained path and increments warnings. Backup is deleted ONLY after a
+    # fully verified restore or a completed successful upgrade.
+    function Restore-ImageGenPrev {
+        if (-not $backupDir) {
+            # Fresh: remove what npx created so no unowned half-install lingers.
+            try {
+                if (Test-Path -LiteralPath $skillDir) { Remove-Item -LiteralPath $skillDir -Recurse -Force }
+                if (Test-Path -LiteralPath $manifest) { Remove-Item -LiteralPath $manifest -Force -ErrorAction SilentlyContinue }
+            } catch { return 1 }
+            if (Test-Path -LiteralPath $skillDir) { return 1 }
+            return 0
+        }
+        try {
+            if (Test-Path -LiteralPath $skillDir) { Remove-Item -LiteralPath $skillDir -Recurse -Force }
+            if (Test-Path -LiteralPath $skillDir) { return 1 }
+            $rtmp = Join-Path (Split-Path -Parent $skillDir) (".image-gen-restore." + (Get-Random))
+            New-Item -ItemType Directory -Path $rtmp -Force | Out-Null
+            Copy-Item -LiteralPath (Join-Path $backupDir "image-gen") -Destination (Join-Path $rtmp "image-gen") -Recurse -Force
+            Copy-Item -LiteralPath (Join-Path $backupDir "manifest") -Destination (Join-Path $rtmp "manifest") -Force
+            if (-not (Test-Path (Join-Path $rtmp "image-gen")) `
+                -or -not (Test-Path (Join-Path $rtmp "image-gen\image_gen.py")) `
+                -or -not (Test-ImageGenMarkersStrict -SkillMd (Join-Path $rtmp "image-gen\SKILL.md")) `
+                -or -not (Test-ImageGenManifestValid -Manifest (Join-Path $rtmp "manifest"))) {
+                Remove-Item $rtmp -Recurse -Force -ErrorAction SilentlyContinue
+                return 1
+            }
+            Move-Item -LiteralPath (Join-Path $rtmp "image-gen") -Destination $skillDir -Force
+            Move-Item -LiteralPath (Join-Path $rtmp "manifest") -Destination $manifest -Force
+            Remove-Item $rtmp -Recurse -Force -ErrorAction SilentlyContinue
+            return 0
+        } catch {
+            return 1
+        }
+    }
+
+    # Run npx with DO_NOT_TRACK=1 and restore it in finally (telemetry off).
+    # Invoke-ImageGenNpx detaches stdin (EOF immediately), uses a constant
+    # argument array, handles npx.cmd, and checks the exit code. 3 attempts,
+    # 5s delay, bounded to image-gen.
+    $prevDnt = $env:DO_NOT_TRACK
+    $env:DO_NOT_TRACK = "1"
+    $npxOk = $false
+    try {
+        $npxOk = Invoke-Retry -MaxAttempts 3 -DelaySeconds 5 -Description "image-gen Skill" -Action {
+            $localArgs = $npxArgs
+            if (-not (Invoke-ImageGenNpx -NpxArgs $localArgs)) { throw "npx skills exited non-zero (or failed to start)" }
+        }
+    } finally {
+        $env:DO_NOT_TRACK = $prevDnt
+    }
+
+    if (-not $npxOk) {
+        Write-Warn "Failed to install image-gen Skill via npx (always-installed - install skipped)."
+        Write-Warn "  Retry manually: `$env:DO_NOT_TRACK='1'; $cmdPreview"
+        $rc = Restore-ImageGenPrev
+        if ($rc -ne 0 -and $backupDir) {
+            Write-Warn "image-gen: npx failed - restore FAILED, prior-install backup RETAINED at: $backupDir (manual recovery needed)"
+        }
+        $script:InstallWarnings++
+        return
+    }
+    Write-Ok "image-gen Skill installed (~/.claude/skills/image-gen/)"
+
+    $wrapper = Join-Path $CLAUDE_DIR "scripts\image-gen-cliproxyapi.sh"
+    if (-not (Test-Path -LiteralPath $wrapper)) {
+        Write-Warn "image-gen wrapper not installed at $wrapper - augmentation/manifest skipped"
+        $rc = Restore-ImageGenPrev
+        if ($rc -ne 0 -and $backupDir) {
+            Write-Warn "image-gen: wrapper missing - restore FAILED, prior-install backup RETAINED at: $backupDir (manual recovery needed)"
+        }
+        $script:InstallWarnings++
+        return
+    }
+
+    if (-not (Update-ImageGenSkillInstructions -SkillsDir (Join-Path $CLAUDE_DIR "skills"))) {
+        Write-Warn "image-gen: SKILL.md augmentation failed - ownership manifest NOT written"
+        $rc = Restore-ImageGenPrev
+        if ($rc -ne 0 -and $backupDir) {
+            Write-Warn "image-gen: augment failed - restore FAILED, prior-install backup RETAINED at: $backupDir (manual recovery needed)"
+        }
+        $script:InstallWarnings++
+        return
+    }
+    Write-Ok "image-gen: SKILL.md augmented with managed integration block"
+
+    if (-not (Write-ImageGenManifest -Manifest $manifest)) {
+        Write-Warn "image-gen: failed to write ownership manifest"
+        $rc = Restore-ImageGenPrev
+        if ($rc -ne 0 -and $backupDir) {
+            Write-Warn "image-gen: manifest write failed - restore FAILED, prior-install backup RETAINED at: $backupDir (manual recovery needed)"
+        }
+        $script:InstallWarnings++
+        return
+    }
+    # Successful upgrade: the backup is no longer needed.
+    if ($backupDir -and (Test-Path $backupDir)) { Remove-Item $backupDir -Recurse -Force -ErrorAction SilentlyContinue }
+    Write-Ok "image-gen: ownership manifest written ($manifest)"
+}
+
 function Install-DeepXiv {
     param(
         [string[]]$SelectedDeepXivSkills = @()
@@ -1188,7 +1775,7 @@ function Install-DeepXiv {
 
     Write-Info "Installing DeepXiv skills from github.com/DeepXiv/deepxiv_sdk..."
     $skillsDir = Join-Path $CLAUDE_DIR "skills"
-    New-Item -ItemType Directory -Path $skillsDir -Force | Out-Null
+    if (-not $DryRun) { New-Item -ItemType Directory -Path $skillsDir -Force | Out-Null }
 
     # Pre-flight: git must be available
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -1271,7 +1858,7 @@ function Install-Lessons {
 function Install-Hooks {
     Write-Info "Installing hooks..."
     $hooksDir = Join-Path $CLAUDE_DIR "hooks"
-    New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null
+    if (-not $DryRun) { New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null }
 
     Get-ChildItem (Join-Path $SCRIPT_DIR "hooks") -File | ForEach-Object {
         $fname = $_.Name
@@ -1694,6 +2281,9 @@ function Invoke-Uninstall {
     Write-Host "  - $CLAUDE_DIR\skills\ (installer-managed only)"
     Write-Host "  - $CLAUDE_DIR\agents\ (installer-managed only)"
     Write-Host "  - $CLAUDE_DIR\skills\deepxiv-* (DeepXiv skills)"
+    Write-Host "  - $CLAUDE_DIR\skills\image-gen\ (when installer-owned, via .image-gen-sinedied)"
+    Write-Host "  - $CLAUDE_DIR\scripts\image-gen-cliproxyapi.sh (image-gen wrapper)"
+    Write-Host "  - $CLAUDE_DIR\.image-gen-sinedied (image-gen ownership manifest)"
     Write-Host "  - $CLAUDE_DIR\lessons.md"
     Write-Host "  - $CLAUDE_DIR\hooks\ (installer-managed only)"
     Write-Host "  - Installed plugins (requires claude CLI)"
@@ -1726,7 +2316,11 @@ function Invoke-Uninstall {
     $p = Join-Path $CLAUDE_DIR "rules"
     if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Ok "Removed rules/" }
 
-    # Only remove skills that ship with this repo
+    # Only remove skills that ship with this repo. When the source inventory is
+    # absent we NEVER blanket-delete $CLAUDE_DIR\skills — that would remove
+    # user-authored and installer-managed skills we cannot enumerate. The
+    # image-gen ownership manifest is the sole authority for image-gen (handled
+    # below); everything else is preserved when no inventory exists.
     $skillsSrc = Join-Path $SCRIPT_DIR "skills"
     if (Test-Path $skillsSrc) {
         Get-ChildItem $skillsSrc -Directory | ForEach-Object {
@@ -1734,8 +2328,7 @@ function Invoke-Uninstall {
             if (Test-Path $sp) { Remove-Item $sp -Recurse -Force; Write-Ok "Removed skill: $($_.Name)" }
         }
     } else {
-        $p = Join-Path $CLAUDE_DIR "skills"
-        if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Ok "Removed skills/" }
+        Write-Warn "No source skills inventory ($skillsSrc missing) - leaving $CLAUDE_DIR\skills untouched (installer-managed + user skills preserved; the image-gen manifest governs image-gen only)"
     }
 
     # Only remove agents that ship with this repo
@@ -1765,7 +2358,26 @@ function Invoke-Uninstall {
     Get-ChildItem $deepxivPattern -Directory -ErrorAction SilentlyContinue | ForEach-Object {
         Remove-Item $_.FullName -Recurse -Force; Write-Ok "Removed DeepXiv skill: $($_.Name)"
     }
-}
+
+    # Remove the image-gen Skill ONLY when the ownership manifest proves this
+    # installer installed it. Validates EVERY fixed field via the byte-exact
+    # manifest validator AND the strict augmentation-marker check before any
+    # delete, so a user-authored directory whose name collides with image-gen
+    # is never recursively deleted. The wrapper is removed by the USER_SCRIPTS
+    # loop above; here we only handle the Skill directory and the manifest.
+    $igManifest = Join-Path $CLAUDE_DIR ".image-gen-sinedied"
+    if (Test-Path -LiteralPath $igManifest) {
+        if (Test-ImageGenDirOwned -SkillDir (Join-Path $CLAUDE_DIR "skills\image-gen") -Manifest $igManifest) {
+            $igDir = Join-Path $CLAUDE_DIR "skills\image-gen"
+            if (Test-Path -LiteralPath $igDir) {
+                Remove-Item -LiteralPath $igDir -Recurse -Force; Write-Ok "Removed image-gen Skill (installer-owned)"
+            }
+            Remove-Item -LiteralPath $igManifest -Force; Write-Ok "Removed image-gen ownership manifest"
+        } else {
+            Write-Warn "image-gen: ownership proof incomplete (valid manifest + augmentation markers both required) - leaving ~/.claude/skills/image-gen untouched and removing only the stale manifest"
+            Remove-Item -LiteralPath $igManifest -Force -ErrorAction SilentlyContinue
+        }
+    }
 
     # Remove mattpocock/skills we installed, tracked via the install manifest written at
     # install time — so we never delete a user-authored skill that merely shares a
@@ -1863,6 +2475,26 @@ Examples:
 
 function Main {
     Initialize-ScriptDir
+
+    # Remote DryRun short-circuit: source was NOT downloaded (no network/temp
+    # write), so we cannot enumerate components. Print a sanitized plan and
+    # exit without touching USERPROFILE or temp.
+    if ($script:REMOTE_DRY_RUN) {
+        # Source was NOT downloaded (SCRIPT_DIR is empty), so Get-SourceVersion
+        # must NOT be called (it would read a relative "VERSION" from CWD). Print
+        # a safe planned-source label derived from the known branch/env only.
+        $plannedVer = if ($env:VERSION) { $env:VERSION } else { $script:REPO_BRANCH }
+        Write-Host ""
+        Write-Host "========================================="
+        Write-Host "  Awesome Claude Code Config Installer"
+        Write-Host "  remote DryRun (would fetch: $plannedVer)"
+        Write-Host "========================================="
+        Write-Host ""
+        Write-Warn "DRY RUN (remote) -- source not downloaded; no network, USERPROFILE, or temp writes"
+        Write-Info "Would download $plannedVer from $($script:REPO_URL), then install selected components into $CLAUDE_DIR"
+        if ($All) { Write-Info "Mode: -All (everything)" } else { Write-Info "Mode: interactive selector" }
+        return
+    }
 
     if ($Help) { Show-Help; return }
     if ($Version) { Show-Version; return }
@@ -1988,13 +2620,11 @@ function Main {
         Write-Info "settings.json auto-enabled (required by StatusLine/Lessons/Plugins)"
     }
 
-    # Check if anything was selected
-    if (-not $doClaudeMd -and -not $doSettings -and -not $doRules -and
-        -not $doSkills -and -not $doAgents -and -not $doMattpocock -and -not $doLessons -and -not $doHooks -and
-        -not $doPlugins -and -not $doMcp -and -not $doLark -and -not $doDeepXiv) {
-        Write-Warn "Nothing selected to install."
-        return
-    }
+    # image-gen (sinedied/agent-skills) is an always-installed component with no
+    # selectable flag and no menu item, so the former deselected-everything early
+    # exit is removed: even when every selectable item is off, the installer still
+    # proceeds to install maintenance scripts and the image-gen Skill. A user who
+    # interactively deselects everything still gets the always-on floor.
 
     $sourceVer = Get-SourceVersion
     Write-Host ""
@@ -2014,7 +2644,9 @@ function Main {
         Write-Info "Upgrading from $installedVer -> $sourceVer"
     }
 
-    if (-not (Test-Path $CLAUDE_DIR)) {
+    # In DryRun perform NO filesystem writes at all (no mkdir) so the run is
+    # fully side-effect-free and previewable from an empty USERPROFILE.
+    if (-not $DryRun -and -not (Test-Path $CLAUDE_DIR)) {
         New-Item -ItemType Directory -Path $CLAUDE_DIR -Force | Out-Null
     }
 
@@ -2024,6 +2656,10 @@ function Main {
     if ($doSkills) { Install-Skills -SelectedSkills $selectedSkills }
     if ($doAgents) { Install-Agents }
     Install-Scripts
+    # image-gen is always-installed (no flag gate). Runs after Install-Scripts
+    # so the wrapper (a USER_SCRIPT) is already in place when augmentation and
+    # the ownership-manifest write check for it.
+    Install-ImageGen
     if ($doMattpocock) { Install-MattpocockSkills }
     if ($doLessons) { Install-Lessons }
     if ($doHooks) { Install-Hooks }
@@ -2070,5 +2706,8 @@ function Main {
     Write-Info "GPT backend auto-configuration and the cl_gpt launcher are macOS/Linux only (bash/zsh). Windows has no cl_gpt runtime yet — see docs/BACKENDS.md."
 }
 
-Main
+# Import guard: when CLAUDE_CODE_CONFIG_IMPORT_ONLY=1, define functions/globals
+# but do NOT invoke Main. Tests dot-source install.ps1 with this set (plus an
+# isolated HOME/USERPROFILE/TMPDIR/TMP/TEMP) so the installer never executes.
+if (-not $env:CLAUDE_CODE_CONFIG_IMPORT_ONLY) { Main }
 } @_safeArgs

@@ -1,5 +1,28 @@
 # 更新日志
 
+## [2.17.0] - 2026-08-02
+
+### 新功能
+- **通过网络安装的 `image-gen` Skill（`sinedied/agent-skills`），始终安装。** 两个安装器现在都会通过网络拉取上游 `image-gen` Skill，命令为 `npx -y skills@latest add sinedied/agent-skills --global --agent claude-code --copy --yes --skill image-gen` —— 本仓库**不**追踪上游的 `image_gen.py`、提示词、示例或 license。安装是无条件的：在每种模式下都会运行（交互式、`--all` / `-All`、`--essential` / `-Essential`，即使所有可选项都被取消勾选），且没有为它新增菜单开关。仓库自有的 Bash 包装器（`scripts/image-gen-cliproxyapi.sh`）被安装到 `~/.claude/scripts/` 并注册为用户脚本；下载下来的 `SKILL.md` 会通过受管标记做幂等注入。
+- **安全的 CLIProxyAPI 委派包装器。** `~/.claude/scripts/image-gen-cliproxyapi.sh` 在环回地址 `http://127.0.0.1:8317/v1` 上启动或复用 CLIProxyAPI，要求 **CLIProxyAPI >= v7.2.17**（仅稳定版；所有预发布后缀都被拒绝），从 `~/.cli-proxy-api/config.yaml` 读取本地 client key（**绝不**打印/日志/放进 argv），注入仅作用于子进程的 `OPENAI_*` 变量，然后把原始参数委派给上游 `image_gen.py`。图像模型固定为 `gpt-image-2`。`/healthz` 仅作为存活探针；包装器额外执行一次鉴权过的 `GET /v1/models` 能力探针（key 通过 curl `--config -` stdin 传入，绝不在 argv），要求精确匹配 `data[].id == "gpt-image-2"`，并在超时内无法证明能力时 fail-closed。
+- **所有权安全的安装、升级与卸载。** 只有当包装器存在、上游布局校验通过、且注入成功后，才会写入模式 600 的清单（`~/.claude/.image-gen-sinedied`）。所有权要求三者同时满足：逐字节匹配的标准清单、目录布局、**以及** `SKILL.md` 中格式正确的注入标记。`--uninstall` 仅在所有权完整证明时才删除 `~/.claude/skills/image-gen`；同名但用户自建/残留的目录会被保留，仅清理过期清单。已拥有的旧版本在升级前会被备份（校验非空），任何后续失败都按字节恢复。
+- **启动器独立性。** `claude.zsh` 经过 grep 审计，不含任何 image-gen / `OPENAI_*` 耦合。所有 `cl*` / `cl_*_auto` 启动器都流经同一组全局 `~/.claude/skills/` 和 `~/.claude/scripts/` 路径；恶意或不兼容的 `ANTHROPIC_BASE_URL` 永远不会改变子进程的 `OPENAI_BASE_URL`（始终是环回常量）。图像生成可在任意后端下工作，并绕过当前启动器拉起的那个代理。
+- **双语文档同步更新。** `README.md` / `README.zh-CN.md` 把 image-gen 列为始终安装的网络 Skill（区别于 vendored 的 `skills/`），并补上 `scripts/` 目录树条目。`docs/BACKENDS.md` / `docs/BACKENDS.zh-CN.md` 文档化网络来源、确切的 `gpt-image-2` 模型、最低版本 `v7.2.17`、`/healthz` 存活探针 vs 鉴权过的 `/v1/models` 能力就绪、`/v1/images/generations` + `/v1/images/edits` 路由、包装器/配置路径、本地 key 与 OAuth 的边界、所有启动器行为、直连 8317 端口、手动 `cliproxyapi --codex-login` / `brew upgrade cliproxyapi`、所有权安全的卸载，以及"无需 OpenAI Platform key"的规则。
+
+### 设计理由
+- **网络安装，绝不 vendored。** `npx skills add` 让上游的 `image_gen.py`、提示词和 license 都不进本仓库。`DO_NOT_TRACK=1` 关闭该 CLI 的匿名遥测；`--copy` 写真实文件（非 symlink）以便 `--uninstall` 能删除；`--agent claude-code` 仅安装到 Claude Code。失败（缺 `npx`、网络错误）是非致命的 —— 计一条警告并返回，让版本戳和其余安装继续完成。
+- **Fail-closed 能力探针。** `/healthz` 返回绿色并不能说明 OAuth 已加载或上游可达（监听端口一绑定它就返回 200）。鉴权过的 `/v1/models` 探针补上了这块：若无法证明 `gpt-image-2`，包装器会打印一条净化过的诊断（`OAuth/login may be inactive - run \`cliproxyapi --codex-login\` and retry`）并退出、**不**委派，避免配置错误的代理伪装成就绪。精确 id 匹配（`data[].id == "gpt-image-2"`）可挡住仅子串匹配的响应。
+- **所有权 = 清单 + 布局 + 标记，而不是仅看清单。** 即使用户手建一个 `skills/image-gen/` 目录并塞进一份残留的有效清单，也不会被误删：删除要求 installer 只在注入成功后才写入的标记。逐字节的标准清单校验（单一标准字面量）会拒绝重排、重复/多余行、CRLF 以及缺少末尾换行。
+- **密钥安全与启动器一致。** 代理 key 仅 `export` 进委派子进程的环境；处理机密前后会禁用/恢复 xtrace；Authorization 头通过 curl `--config -`（stdin）传入，故 key 绝不进 argv。模型从一个独立的不可变常量（`IMAGE_GEN_DEFAULT_MODEL`）注入，父 shell 即便 `export IMAGE_GEN_MODEL=...` 也无法污染子进程。
+
+### 注意事项
+- **不支持原生 Windows 运行时。** 包装器是 Bash 脚本，CLIProxyAPI 服务生命周期仅支持 Bash/Zsh。`install.ps1` 在 Windows 上会安装网络 Skill 和包装器资产，但 `cl_*` / CLIProxyAPI 的图像生成在 Windows 上**不**受支持；请在 **WSL 内**运行 Bash 安装器，使其落到 WSL 的 `~/.claude`（WSL 不会把 `%USERPROFILE%\.claude` 当作 `~/.claude`；Git Bash 的 home 映射取决于具体安装）。本次会话**未**验证真实的 PowerShell 运行时行为 —— 当 `pwsh` 不存在时行为测试会干净地 SKIP，pwsh-equipped 的 Windows 机器需自行确认解析器、`cmd.exe /d /s /c` 调用 `npx.cmd`、字节级 `SKILL.md` 注入、以及清单原子性。
+- **能力探针依赖真实的 `/v1/models` 契约。** 精确 id 匹配假设 CLIProxyAPI `>= v7.2.17` 在 `data[].id` 中暴露 `gpt-image-2`；本次会话未对照真实二进制验证（测试环境里没有）。若上游 schema 真的发生变化，探针可能无法定论；Task 9 应予以确认。
+- **清单文件模式仅 Unix 有效。** Windows 没有 `chmod 600`；PowerShell 安装器通过 `[System.IO.File]::WriteAllBytes`（UTF-8、无 BOM、精确 LF）写入清单，所有权以逐字节的内容校验为准，而非文件模式。
+- **`IMAGE_GEN_CLIPROXYAPI_BASE_URL` 是仅测试用的 override**，超出计划原本的五个环境变量；生产环境的 base URL 是确切的常量 `http://127.0.0.1:8317/v1`，绝不从 health URL 推导。
+- **`CHANGELOG.zh-CN.md` 缺 2.14–2.16。** 本条目是在已经滞后的中文更新日志（最后一条为 2.13.0）之上新增 2.17.0。回填 2.14–2.16 的中文条目不在 Task 8 范围内，留给单独的一次处理。
+- **不提交、不分支、不推送、不创建 worktree。** 编辑直接叠加到 `main` 的工作树。
+
 ## [2.13.0] - 2026-07-31
 
 ### 新功能

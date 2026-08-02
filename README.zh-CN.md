@@ -6,7 +6,7 @@
 
 ![Statusline](assets/statusline.png)
 
-[Claude Code](https://claude.com/claude-code) 的生产级配置。一条命令安装：全局指令、多语言编码规则（Python / TypeScript / Go）、10 个 marketplace 下的 25 个精选插件、5 个内置 skill（外加通过 npx 安装的 [mattpocock/skills](https://github.com/mattpocock/skills) 集合）、渐变状态栏，以及能跨会话记住纠正的自我改进回路。
+[Claude Code](https://claude.com/claude-code) 的生产级配置。一条命令安装：全局指令、多语言编码规则（Python / TypeScript / Go）、10 个 marketplace 下的 25 个精选插件、5 个内置 skill（外加通过 npx 安装的 [mattpocock/skills](https://github.com/mattpocock/skills) 集合与 `sinedied/agent-skills` 的 `image-gen` Skill，二者均通过 npx 安装）、渐变状态栏，以及能跨会话记住纠正的自我改进回路。
 
 ## 示例
 
@@ -160,6 +160,10 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 
 配好之后，`cl_glm` / `cl_gpt` / `cl_ccr` 直接以对应后端启动，`cl_switch <name>` 则把它设为裸 `cl` 的默认后端。每次启动都会打印实际使用的后端与模型。想换模型不必改 JSON —— 直接传 claude 自己的参数（`cl_glm --model glm-5v-turbo`），或用 `CL_MODEL=sonnet` 改这一次的默认。
 
+## 图像生成
+
+[`sinedied/agent-skills`:`image-gen`](https://github.com/sinedied/agent-skills) Skill **始终**通过网络安装（**绝不** vendored），同时安装一个仓库自有的包装器到 `~/.claude/scripts/image-gen-cliproxyapi.sh`。所有 `cl*` / `cl_*_auto` 启动器共享同一组全局 `~/.claude/skills/` 和 `~/.claude/scripts/` 路径，因此图像生成可在任意后端下工作：请求始终直接打到环回地址 `http://127.0.0.1:8317/v1`，绕过当前启动器拉起的那个代理。包装器要求 CLIProxyAPI >= `v7.2.17`，使用 `gpt-image-2` 模型，把 `/healthz` 仅当作存活探针，并在委派给 Skill 的 `image_gen.py`（调用 `/v1/images/generations` 与 `/v1/images/edits`）之前，额外执行一次鉴权过的 `/v1/models` 能力探针。鉴权使用本地 CLIProxyAPI client key，加上一次性的 ChatGPT/Codex OAuth（`cliproxyapi --codex-login`）—— **不需要、也不会请求 OpenAI Platform API key**。`--uninstall` 仅在所有权清单、目录布局与注入标记三者一致时才删除该 Skill。不支持原生 Windows 运行时（请在 WSL 内运行 Bash 安装器）；本次会话未验证真实的 PowerShell 运行时行为。完整契约见 [docs/BACKENDS.md](docs/BACKENDS.md)。
+
 ## 目录结构
 
 ```
@@ -171,7 +175,8 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 ├── hooks/                 # 带渐变进度条的状态栏
 ├── mcp/                   # MCP 服务器配置（Playwright；Lark-MCP 可选）
 ├── plugins/               # 插件目录与安装指南
-├── skills/                # 内置自定义 skill
+├── skills/                # 内置自定义 skill（vendored）
+├── scripts/               # 用户脚本（image-gen-cliproxyapi.sh 包装器 + 辅助脚本）
 ├── docs/                  # 论文摘要、实战示例
 └── install.sh / install.ps1
 ```

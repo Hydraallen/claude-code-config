@@ -6,7 +6,7 @@
 
 ![Statusline](assets/statusline.png)
 
-Production-ready configuration for [Claude Code](https://claude.com/claude-code). One-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 25 curated plugins across 10 marketplaces, five bundled skills (plus the [mattpocock/skills](https://github.com/mattpocock/skills) collection via npx), a gradient status bar, and a self-improvement loop that remembers corrections across sessions.
+Production-ready configuration for [Claude Code](https://claude.com/claude-code). One-command install of global instructions, multi-language coding rules (Python / TypeScript / Go), 25 curated plugins across 10 marketplaces, five bundled skills (plus the [mattpocock/skills](https://github.com/mattpocock/skills) collection and the `image-gen` Skill from `sinedied/agent-skills`, both installed via npx), a gradient status bar, and a self-improvement loop that remembers corrections across sessions.
 
 ## Showcase
 
@@ -160,6 +160,10 @@ The installer writes `~/.claude/profiles/*.json`, but every backend except `clau
 
 Then `cl_glm` / `cl_gpt` / `cl_ccr` launches that backend, and `cl_switch <name>` makes it the default for a bare `cl`. Every launch prints the backend and the model it resolved to. To pick a model without editing JSON, pass claude's own flag — `cl_glm --model glm-5v-turbo` — or set `CL_MODEL=sonnet` for one launch.
 
+## Image Generation
+
+The [`sinedied/agent-skills`:`image-gen`](https://github.com/sinedied/agent-skills) Skill is **always installed** over the network (never vendored), alongside a repository-owned wrapper at `~/.claude/scripts/image-gen-cliproxyapi.sh`. Every `cl*` / `cl_*_auto` launcher shares the same global `~/.claude/skills/` and `~/.claude/scripts/` paths, so image generation works from any backend: requests always hit the loopback endpoint `http://127.0.0.1:8317/v1` directly, bypassing whichever proxy the active launcher started. The wrapper requires CLIProxyAPI >= `v7.2.17`, uses the `gpt-image-2` model, treats `/healthz` as liveness only and additionally runs an authenticated `/v1/models` capability probe before delegating to the Skill's `image_gen.py` (which calls `/v1/images/generations` and `/v1/images/edits`). Authentication is the local CLIProxyAPI client key plus the one-time ChatGPT/Codex OAuth (`cliproxyapi --codex-login`) — **no OpenAI Platform API key is needed or requested**. `--uninstall` removes the Skill only when an ownership manifest, layout, and augmentation markers all agree. Native Windows runtime is unsupported (run the Bash installer inside WSL); real PowerShell runtime behaviour was not verified here. Full contract: [docs/BACKENDS.md](docs/BACKENDS.md).
+
 ## Directory Structure
 
 ```
@@ -171,7 +175,8 @@ Then `cl_glm` / `cl_gpt` / `cl_ccr` launches that backend, and `cl_switch <name>
 ├── hooks/                 # Statusline with gradient progress bars
 ├── mcp/                   # MCP server config (Playwright; Lark-MCP opt-in)
 ├── plugins/               # Plugin catalogue & install guide
-├── skills/                # Bundled custom skills
+├── skills/                # Bundled custom skills (vendored)
+├── scripts/               # User scripts (image-gen-cliproxyapi.sh wrapper + helpers)
 ├── docs/                  # Paper summaries, showcases
 └── install.sh / install.ps1
 ```
