@@ -297,7 +297,7 @@ brew upgrade cliproxyapi        # 之后用 cl_gpt 重启，以便拾取新二�
 
 #### 所有权安全的卸载
 
-安装器只有在包装器存在、上游布局（`SKILL.md` + `image_gen.py`）校验通过、且注入成功后，才写入模式 600 的清单 `~/.claude/.image-gen-sinedied`：
+安装器只有在包装器存在、上游布局（`SKILL.md` + `scripts/image_gen.py`）校验通过、且注入成功后，才写入模式 600 的清单 `~/.claude/.image-gen-sinedied`：
 
 ```text
 skill=image-gen

@@ -48,7 +48,7 @@ IMAGE_GEN_DEFAULT_MODEL="gpt-image-2"
 IMAGE_GEN_DEFAULT_HEALTH_URL="http://127.0.0.1:8317/healthz"
 IMAGE_GEN_DEFAULT_LOG="$HOME/.cli-proxy-api/cliproxyapi.log"
 IMAGE_GEN_DEFAULT_CONFIG="$HOME/.cli-proxy-api/config.yaml"
-IMAGE_GEN_DEFAULT_UPSTREAM="$HOME/.claude/skills/image-gen/image_gen.py"
+IMAGE_GEN_DEFAULT_UPSTREAM="$HOME/.claude/skills/image-gen/scripts/image_gen.py"
 IMAGE_GEN_DEFAULT_TIMEOUT=25
 
 # Candidate binary names, in priority order.
@@ -136,26 +136,58 @@ image_gen_version_meets_floor() {
     image_gen_version_at_least "$triple" "$floor"
 }
 
-# Read the version of an installed binary by trying `version` then
-# `--version`. Prints a normalized version token INCLUDING any pre-release
-# suffix (e.g. "8.0.0-rc1") so floor policy can reject pre-releases. Returns
-# 1 when neither form yields a parseable version.
+# Run "$binary" with a single argument, capture combined stdout+stderr, and
+# bound the run to $seconds. Bash 3.2 (macOS default) has no `timeout`
+# builtin and macOS lacks GNU coreutils `timeout` by default, so we delegate
+# to python3 (already a hard dependency of this wrapper's main path -- the
+# python3 check in image_gen_main runs BEFORE any version probe). On timeout
+# python3 reaps ONLY the child PID it spawned (no pkill). Prints captured
+# output and returns 0; returns 1 if the probe timed out or raised. Exit
+# code of the probed binary is intentionally ignored: callers accept any
+# parseable output regardless of rc (real --help exits 0; --version exits 2
+# but still prints the banner).
+_image_gen_probe_capture() {
+    local binary="$1" flag="$2" seconds="${3:-5}"
+    IMAGE_GEN_PROBE_TIMEOUT="$seconds" python3 -c '
+import os, subprocess, sys
+bin_path, flag = sys.argv[1], sys.argv[2]
+timeout = float(os.environ.get("IMAGE_GEN_PROBE_TIMEOUT", "5"))
+try:
+    p = subprocess.run([bin_path, flag], capture_output=True,
+                       text=True, timeout=timeout)
+    sys.stdout.write(p.stdout)
+    sys.stdout.write(p.stderr)
+except Exception:
+    sys.exit(1)
+' "$binary" "$flag"
+}
+
+# Read the version of an installed binary. NEVER uses the bare `version`
+# subcommand: on real CLIProxyAPI binaries `cliproxyapi version` STARTS THE
+# SERVER AND NEVER EXITS, hanging the wrapper. Real `--help`/`-h` print the
+# version banner and exit 0; `--version` prints but exits 2. We probe
+# `--help` then `-h`, each bounded by a timeout so a misbehaving binary
+# cannot wedge us, and accept the first probe whose output carries a
+# parseable X.Y.Z triple (with any pre-release suffix, e.g. "8.0.0-rc1", so
+# floor policy can reject pre-releases). Two-component forms normalize to
+# X.Y.0. Returns 1 when no probe yields a parseable version.
 image_gen_read_binary_version() {
-    local binary="$1" raw token
+    local binary="$1" raw token flag
     [[ -n "$binary" && -x "$binary" ]] || return 1
-    raw="$("$binary" version 2>/dev/null)" || raw=""
-    if [[ -z "$raw" ]]; then
-        raw="$("$binary" --version 2>/dev/null)" || raw=""
-    fi
-    [[ -n "$raw" ]] || return 1
-    if [[ "$raw" =~ ([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?) ]]; then
-        token="${BASH_REMATCH[1]}"
-    elif [[ "$raw" =~ ([0-9]+\.[0-9]+) ]]; then
-        token="${BASH_REMATCH[1]}.0"
-    else
-        return 1
-    fi
-    printf '%s' "$token"
+    for flag in "--help" "-h"; do
+        raw="$(_image_gen_probe_capture "$binary" "$flag" 5 2>/dev/null)" || raw=""
+        [[ -n "$raw" ]] || continue
+        if [[ "$raw" =~ ([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?) ]]; then
+            token="${BASH_REMATCH[1]}"
+        elif [[ "$raw" =~ ([0-9]+\.[0-9]+) ]]; then
+            token="${BASH_REMATCH[1]}.0"
+        else
+            continue
+        fi
+        printf '%s' "$token"
+        return 0
+    done
+    return 1
 }
 
 # Validate a candidate api-key scalar. Rejects empty, YOUR_* placeholders,

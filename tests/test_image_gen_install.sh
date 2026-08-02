@@ -90,7 +90,7 @@ printf '%s\n' "\$*" > "\$state/argv"
 if [ "\$c" -le "$fail_n" ]; then
     exit 1
 fi
-mkdir -p "\$HOME/.claude/skills/image-gen"
+mkdir -p "\$HOME/.claude/skills/image-gen/scripts"
 cat > "\$HOME/.claude/skills/image-gen/SKILL.md" <<'MD'
 # image-gen
 
@@ -100,7 +100,7 @@ Upstream skill instructions.
 python3 image_gen.py
 \`\`\`
 MD
-cat > "\$HOME/.claude/skills/image-gen/image_gen.py" <<'PY'
+cat > "\$HOME/.claude/skills/image-gen/scripts/image_gen.py" <<'PY'
 #!/usr/bin/env python3
 print("upstream image_gen")
 PY
@@ -278,7 +278,7 @@ fi
 
 make_skill_layout() {
     local root="$1"
-    mkdir -p "$root/image-gen"
+    mkdir -p "$root/image-gen/scripts"
     cat > "$root/image-gen/SKILL.md" <<'MD'
 # image-gen
 
@@ -288,7 +288,7 @@ Upstream instructions line A.
 python3 image_gen.py generate --prompt "a cat"
 ```
 MD
-    echo '#!/usr/bin/env python3' > "$root/image-gen/image_gen.py"
+    echo '#!/usr/bin/env python3' > "$root/image-gen/scripts/image_gen.py"
 }
 
 test_augment_insert() {
@@ -431,6 +431,59 @@ test_manifest_not_written_when_wrapper_missing() {
         echo "FAIL: manifest written despite missing wrapper"; FAIL=$((FAIL + 1))
     fi
 }
+
+# ============================================================
+# Regression: real upstream layout is scripts/image_gen.py
+# The `skills` CLI installs ~/.claude/skills/image-gen/scripts/image_gen.py
+# (a scripts/ subdir), NOT a root image_gen.py. A fake npx that creates the
+# real upstream structure must yield a successful install + manifest + augmented
+# SKILL.md. Failure means the installer/augment still expects root image_gen.py
+# and rejects the real layout, cleaning a successful download.
+# ============================================================
+test_upstream_scripts_layout() {
+    reset_claude_dir
+    install_wrapper
+    # Fake npx creating the REAL upstream layout: scripts/image_gen.py.
+    local bindir="$TMP/bin"
+    mkdir -p "$bindir"
+    cat > "$bindir/npx" <<'NPXEOF'
+#!/usr/bin/env bash
+mkdir -p "$HOME/.claude/skills/image-gen/scripts"
+cat > "$HOME/.claude/skills/image-gen/SKILL.md" <<'MD'
+# image-gen
+
+Upstream skill instructions.
+MD
+cat > "$HOME/.claude/skills/image-gen/scripts/image_gen.py" <<'PY'
+#!/usr/bin/env python3
+print("upstream image_gen")
+PY
+exit 0
+NPXEOF
+    chmod +x "$bindir/npx"
+    rm -rf "$TMP/npx_state"; mkdir -p "$TMP/npx_state"
+    export PATH="$bindir:$PATH"
+    local out rc
+    out=$(DRY_RUN=false install_image_gen 2>&1); rc=$?
+    assert_eq "upstream-scripts-layout: install_image_gen returns 0" "0" "$rc"
+    if [[ -f "$CLAUDE_DIR/.image-gen-sinedied" ]]; then
+        echo "PASS: upstream-scripts-layout: manifest written"; PASS=$((PASS + 1))
+    else
+        echo "FAIL: upstream-scripts-layout: manifest missing (install rejected real layout)"; FAIL=$((FAIL + 1))
+    fi
+    if [[ -f "$CLAUDE_DIR/skills/image-gen/scripts/image_gen.py" ]]; then
+        echo "PASS: upstream-scripts-layout: scripts/image_gen.py present after install"; PASS=$((PASS + 1))
+    else
+        echo "FAIL: upstream-scripts-layout: scripts/image_gen.py cleaned up by failed install"; FAIL=$((FAIL + 1))
+    fi
+    if grep -q 'BEGIN claude-code-config CLIProxyAPI image-gen integration' \
+        "$CLAUDE_DIR/skills/image-gen/SKILL.md" 2>/dev/null; then
+        echo "PASS: upstream-scripts-layout: SKILL.md augmented"; PASS=$((PASS + 1))
+    else
+        echo "FAIL: upstream-scripts-layout: SKILL.md not augmented"; FAIL=$((FAIL + 1))
+    fi
+}
+test_upstream_scripts_layout
 test_manifest_not_written_when_wrapper_missing
 
 test_manifest_not_written_when_augment_fails() {
@@ -537,9 +590,9 @@ else
   echo "no"  >> "\$state/wrapper_at_npx"
 fi
 if printf '%s\n' "\$@" | grep -q 'sinedied/agent-skills'; then
-  mkdir -p "\$HOME/.claude/skills/image-gen"
+  mkdir -p "\$HOME/.claude/skills/image-gen/scripts"
   printf '# image-gen\n\nUpstream content.\n' > "\$HOME/.claude/skills/image-gen/SKILL.md"
-  printf '#!/usr/bin/env python3\n' > "\$HOME/.claude/skills/image-gen/image_gen.py"
+  printf '#!/usr/bin/env python3\n' > "\$HOME/.claude/skills/image-gen/scripts/image_gen.py"
 fi
 exit 0
 NPXEOF
@@ -829,9 +882,9 @@ fi
 # ============================================================
 test_augment_reject_embedded() {
     local root="$TMP/aug_embed/skills"
-    mkdir -p "$root/image-gen"
+    mkdir -p "$root/image-gen/scripts"
     printf '# image-gen\n\nsome text %s more text\n' "$IMAGE_GEN_BEGIN_MARKER" > "$root/image-gen/SKILL.md"
-    echo '#!/usr/bin/env python3' > "$root/image-gen/image_gen.py"
+    echo '#!/usr/bin/env python3' > "$root/image-gen/scripts/image_gen.py"
     local rc
     image_gen_augment_skill "$root" >/dev/null 2>&1; rc=$?
     assert_eq "embedded marker text rejected (returns 1)" "1" "$rc"
@@ -1190,9 +1243,9 @@ _check_prose_not_owned() {
     local label="$1" skill_md_body="$2"
     reset_claude_dir
     install_wrapper
-    mkdir -p "$CLAUDE_DIR/skills/image-gen"
+    mkdir -p "$CLAUDE_DIR/skills/image-gen/scripts"
     printf '%s' "$skill_md_body" > "$CLAUDE_DIR/skills/image-gen/SKILL.md"
-    echo '#!/usr/bin/env python3' > "$CLAUDE_DIR/skills/image-gen/image_gen.py"
+    echo '#!/usr/bin/env python3' > "$CLAUDE_DIR/skills/image-gen/scripts/image_gen.py"
     printf 'skill=image-gen\nsource=sinedied/agent-skills\nwrapper=image-gen-cliproxyapi.sh\n' \
         > "$CLAUDE_DIR/.image-gen-sinedied"
     # Pure ownership check must reject.
@@ -1301,7 +1354,7 @@ test_restore_rm_failure_retains_backup() {
     mkdir -p "$TMP/bin"
     cat > "$TMP/bin/npx" <<'NPXEOF'
 #!/usr/bin/env bash
-rm -f "$HOME/.claude/skills/image-gen/image_gen.py"
+rm -f "$HOME/.claude/skills/image-gen/scripts/image_gen.py"
 echo "# image-gen" > "$HOME/.claude/skills/image-gen/SKILL.md"
 exit 0
 NPXEOF

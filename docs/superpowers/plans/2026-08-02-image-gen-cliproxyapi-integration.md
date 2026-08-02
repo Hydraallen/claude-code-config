@@ -70,7 +70,7 @@ npx -y skills@latest add sinedied/agent-skills --global --agent claude-code --co
 
 **Produces:** `image_gen_find_binary`, `image_gen_parse_version`, `image_gen_version_at_least`, `image_gen_read_binary_version`, `image_gen_extract_config_key`.
 
-- [ ] Write failing tests for three binary names, missing binary, accepted version formats/suffixes, versions below `7.2.17`, malformed output, and `version`/`--version` fallback.
+- [ ] Write failing tests for three binary names, missing binary, accepted version formats/suffixes, versions below `7.2.17`, malformed output, and the `--help`/`-h` bounded version probe (never the bare `version` subcommand, which starts the server and hangs on real CLIProxyAPI binaries).
 - [ ] Run `bash tests/test_image_gen_wrapper.sh`; confirm RED.
 - [ ] Implement Bash 3.2-compatible parsing/comparison without `sort -V`, with one production floor `7.2.17`.
 - [ ] Add failing constrained YAML key-parser tests equivalent to `gpt_extract_config_key`, including nested/placeholder/mapping/alias/anchor/control/whitespace rejection.

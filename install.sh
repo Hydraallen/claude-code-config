@@ -2414,7 +2414,7 @@ EOF
 image_gen_augment_skill() {
     local skills_dir="${1:-$CLAUDE_DIR/skills}"
     local skill_md="$skills_dir/image-gen/SKILL.md"
-    local upstream="$skills_dir/image-gen/image_gen.py"
+    local upstream="$skills_dir/image-gen/scripts/image_gen.py"
 
     if [[ ! -f "$skill_md" ]]; then
         warn "image-gen: SKILL.md not found at $skill_md — augmentation skipped"
@@ -2666,7 +2666,7 @@ install_image_gen() {
     # warning count. The backup is deleted ONLY after a fully verified restore.
     #
     # For a backed-up (prior-owned) install, restore proceeds to a fresh SIBLING
-    # temp path, validates the expected layout (dir + image_gen.py + strict
+    # temp path, validates the expected layout (dir + scripts/image_gen.py + strict
     # markers + canonical manifest), then atomically renames into place — so a
     # crash never leaves a partially overwritten target.
     _image_gen_restore_prev() {
@@ -2695,7 +2695,7 @@ install_image_gen() {
         # Validate the restored layout BEFORE renaming: dir, upstream script,
         # strict marker block, and canonical manifest must all hold.
         if [[ ! -d "$rtmp/image-gen" ]] \
-           || [[ ! -f "$rtmp/image-gen/image_gen.py" ]] \
+           || [[ ! -f "$rtmp/image-gen/scripts/image_gen.py" ]] \
            || ! _image_gen_markers_strict "$rtmp/image-gen/SKILL.md" 2>/dev/null \
            || ! _image_gen_manifest_valid "$rtmp/manifest" 2>/dev/null; then
             rm -rf "$rtmp" 2>/dev/null

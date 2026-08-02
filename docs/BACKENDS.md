@@ -377,7 +377,7 @@ CLIProxyAPI accepts the request on its own port).
 
 The installer writes a mode-600 manifest at `~/.claude/.image-gen-sinedied`
 only after the wrapper exists, the upstream layout (`SKILL.md` +
-`image_gen.py`) validates, and augmentation succeeds:
+`scripts/image_gen.py`) validates, and augmentation succeeds:
 
 ```text
 skill=image-gen

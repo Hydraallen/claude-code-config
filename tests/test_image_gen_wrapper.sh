@@ -5,7 +5,7 @@
 # Covers (Tasks 1-3 + reviewer fix rounds):
 #   - image_gen_find_binary / parse_version / version_at_least
 #   - image_gen_has_prerelease / image_gen_version_meets_floor (reject all rc)
-#   - image_gen_read_binary_version (version / --version fallback)
+#   - image_gen_read_binary_version (--help / -h bounded probe; never `version`)
 #   - image_gen_extract_config_key (closed inline lists; malformed rejected)
 #   - image_gen_service_healthy / image_gen_service_ready (auth capability)
 #   - image_gen_wait_ready / image_gen_start_service (no PID on error path)
@@ -150,24 +150,84 @@ done
 assert_return "meets_floor: 7.2.16 stable rejected (old)"  1 "$(image_gen_version_meets_floor 7.2.16 7.2.17; echo $?)"
 
 # --- image_gen_read_binary_version -----------------------------------------
+# REGRESSION (2026-08-02): the real CLIProxyAPI binary, when invoked as
+# `cliproxyapi version`, STARTS THE SERVER AND NEVER EXITS (hangs the
+# wrapper indefinitely). `--version` prints the version but exits 2; only
+# `--help` / `-h` print the version banner AND exit 0. The probe MUST
+# therefore prefer `--help` then `-h`, NEVER the bare `version` subcommand,
+# and MUST bound each probe so a hanging binary cannot wedge us.
+#
+# (1) Real-style fake: `--help`/`-h` print an actual-style banner; the
+#     `version` subcommand is a trap that records it was called and sleeps.
 FAKE_BIN="$TMP/fakever"
-cat > "$FAKE_BIN" <<'SH'
+FORBID_FLAG="$TMP/fakever-forbidden.flag"
+cat > "$FAKE_BIN" <<SH
 #!/usr/bin/env bash
-case "$1" in version) echo "cliproxyapi version 7.5.0" ;; --version) echo "should-not-be-used" ;; *) exit 2 ;; esac
+case "\$1" in
+  version)
+    echo "FORBIDDEN-CALLED" > "$FORBID_FLAG"
+    exec sleep 600
+    ;;
+  --help|-h)
+    echo "CLIProxyAPI Version: 7.5.0 (darwin-arm64, commit abc123)"
+    exit 0
+    ;;
+  *) exit 2 ;;
+esac
 SH
 chmod +x "$FAKE_BIN"
+rm -f "$FORBID_FLAG"
+t0=$(date +%s)
 out=$(image_gen_read_binary_version "$FAKE_BIN"); rc=$?
-assert_return "read_version: version subcommand exits 0" 0 "$rc"
-assert_eq     "read_version: parsed" "7.5.0" "$out"
+t1=$(date +%s)
+assert_return "read_version: real-style --help exits 0" 0 "$rc"
+assert_eq     "read_version: parsed 7.5.0" "7.5.0" "$out"
+# Must return promptly (well under the trap's 600s sleep); 15s is generous.
+if [[ $((t1-t0)) -le 15 ]]; then pass "read_version: returns promptly (no hang)"; else fail "read_version: hung ($((t1-t0))s)"; fi
+# The forbidden `version` subcommand MUST NEVER be invoked.
+if [[ -e "$FORBID_FLAG" ]]; then fail "read_version: invoked forbidden 'version' subcommand"; else pass "read_version: never invoked 'version' subcommand"; fi
+
+# (2) `-h` fallback when `--help` is unsupported.
 FAKE_BIN2="$TMP/fakedash"
 cat > "$FAKE_BIN2" <<'SH'
 #!/usr/bin/env bash
-case "$1" in version) echo "unknown command"; exit 1 ;; --version) echo "v8.0.1" ;; *) exit 2 ;; esac
+case "$1" in --help) exit 2 ;; -h) echo "CLIProxyAPI Version: 8.0.1"; exit 0 ;; *) exit 2 ;; esac
 SH
 chmod +x "$FAKE_BIN2"
 out=$(image_gen_read_binary_version "$FAKE_BIN2"); rc=$?
-assert_return "read_version: --version fallback exits 0" 0 "$rc"
-assert_eq     "read_version: fallback parsed" "8.0.1" "$out"
+assert_return "read_version: -h fallback exits 0" 0 "$rc"
+assert_eq     "read_version: -h fallback parsed" "8.0.1" "$out"
+
+# (3) Bounded timeout: BOTH `--help` and `-h` hang. Probe MUST return within
+#     a bounded window (not hang) and exit 1, without pkill. We record the
+#     child PID the fake spawns and confirm ONLY that child is reaped.
+FAKE_HANG="$TMP/fakehang"
+HANG_PIDFILE="$TMP/fakehang.pid"
+cat > "$FAKE_HANG" <<SH
+#!/usr/bin/env bash
+echo \$\$ > "$HANG_PIDFILE"
+exec sleep 600
+SH
+chmod +x "$FAKE_HANG"
+rm -f "$HANG_PIDFILE"
+t0=$(date +%s)
+out=$(image_gen_read_binary_version "$FAKE_HANG" 2>/dev/null); rc=$?
+t1=$(date +%s)
+assert_return "read_version: hanging binary exits 1" 1 "$rc"
+assert_eq     "read_version: hanging binary prints nothing" "" "$out"
+# Two probes (--help, -h) each bounded ~5s -> total must be well under 30s.
+if [[ $((t1-t0)) -le 25 ]]; then pass "read_version: bounded timeout returns promptly"; else fail "read_version: bounded timeout too slow ($((t1-t0))s)"; fi
+# Confirm the spawned child was reaped (no orphan) -- without pkill.
+sleep 0.4
+orphan="$(cat "$HANG_PIDFILE" 2>/dev/null)"
+if [[ -n "$orphan" ]] && kill -0 "$orphan" 2>/dev/null; then
+    fail "read_version: bounded timeout left an orphan pid ($orphan)"
+    PIDS="$PIDS $orphan"
+else
+    pass "read_version: bounded timeout reaped its child (no orphan)"
+fi
+
+# (4) No parseable output anywhere -> exit 1, prints nothing.
 FAKE_BAD="$TMP/fakebad"
 cat > "$FAKE_BAD" <<'SH'
 #!/usr/bin/env bash
@@ -499,7 +559,7 @@ assert_return "main: missing binary exits 1" 1 "$rc"
 OLDV_DIR="$TMP/oldv-dir"; mkdir -p "$OLDV_DIR"
 cat > "$OLDV_DIR/cliproxyapi" <<'SH'
 #!/usr/bin/env bash
-case "$1" in version) echo "7.0.0" ;; *) echo "x" ;; esac
+case "$1" in --help|-h) echo "CLIProxyAPI Version: 7.0.0"; exit 0 ;; *) echo "x"; exit 2 ;; esac
 SH
 chmod +x "$OLDV_DIR/cliproxyapi"
 out=$(IMAGE_GEN_CLIPROXYAPI_CONFIG="$cfg_ok" IMAGE_GEN_UPSTREAM_SCRIPT="$PROBE" \
@@ -511,7 +571,7 @@ assert_return "main: old version exits 1" 1 "$rc"
 RCV_DIR="$TMP/rcv-dir"; mkdir -p "$RCV_DIR"
 cat > "$RCV_DIR/cliproxyapi" <<'SH'
 #!/usr/bin/env bash
-case "$1" in version) echo "8.0.0-rc1" ;; *) echo "x" ;; esac
+case "$1" in --help|-h) echo "CLIProxyAPI Version: 8.0.0-rc1"; exit 0 ;; *) echo "x"; exit 2 ;; esac
 SH
 chmod +x "$RCV_DIR/cliproxyapi"
 out=$(IMAGE_GEN_CLIPROXYAPI_CONFIG="$cfg_ok" IMAGE_GEN_UPSTREAM_SCRIPT="$PROBE" \
@@ -523,7 +583,7 @@ assert_return "main: pre-release version exits 1" 1 "$rc"
 GOODV_DIR="$TMP/goodv-dir"; mkdir -p "$GOODV_DIR"
 cat > "$GOODV_DIR/cliproxyapi" <<'SH'
 #!/usr/bin/env bash
-case "$1" in version) echo "9.0.0" ;; *) echo "x" ;; esac
+case "$1" in --help|-h) echo "CLIProxyAPI Version: 9.0.0"; exit 0 ;; *) echo "x"; exit 2 ;; esac
 SH
 chmod +x "$GOODV_DIR/cliproxyapi"
 cfg_nokey="$TMP/cfg-nokey.yaml"; printf 'api-keys: []\n' > "$cfg_nokey"
@@ -628,8 +688,8 @@ image_gen_main --prompt x >/dev/null 2>&1
 # silently clobber the sourced assignment and produce false failures here.
 assert_eq "task7: IMAGE_GEN_BASE_URL is exact loopback /v1" \
     "http://127.0.0.1:8317/v1" "$IMAGE_GEN_BASE_URL"
-assert_eq "task7: IMAGE_GEN_DEFAULT_UPSTREAM is global skill path" \
-    "$HOME/.claude/skills/image-gen/image_gen.py" "$IMAGE_GEN_DEFAULT_UPSTREAM"
+assert_eq "task7: IMAGE_GEN_DEFAULT_UPSTREAM is global skill path (scripts/image_gen.py)" \
+    "$HOME/.claude/skills/image-gen/scripts/image_gen.py" "$IMAGE_GEN_DEFAULT_UPSTREAM"
 if grep -qE '^IMAGE_GEN_MODEL="gpt-image-2"$' "$WRAPPER" 2>/dev/null; then
     pass "task7: wrapper source defines IMAGE_GEN_MODEL=gpt-image-2 constant"
 else
