@@ -315,6 +315,7 @@ INSTALL_CRITICAL=0
 INSTALL_RULES=false
 INSTALL_SKILLS=false
 INSTALL_AGENTS=false
+INSTALL_MATTPOCOCK=false
 INSTALL_LESSONS=false
 INSTALL_STATUSLINE=false
 INSTALL_MCP=false
@@ -363,6 +364,27 @@ INSTALLED_PLUGINS=()
 # Retired Skill ownership tombstones.
 RETIRED_HARNESS_WORKFLOW_SHA256="d897cbfec20f87b553cbbe0f0541a1169f045492881b78b566149d15af1e68ba"
 
+# Curated subset of mattpocock/skills we install via `npx skills` (NOT vendored).
+# THIS ARRAY IS THE SINGLE SOURCE OF TRUTH: install_mattpocock_skills installs
+# exactly these, and cleanup_retired_mattpocock_skills treats every OTHER entry
+# recorded in the ownership manifest as retired and removes it. The 11 skills
+# dropped from the original 17-skill integration duplicate superpowers
+# (test-driven-development / systematic-debugging / writing-plans /
+# writing-skills) and ecc (tdd-workflow / blueprint / skill-* cluster); `triage`
+# additionally hard-depends on `setup-matt-pocock-skills`, which is itself dropped.
+MATTPOCOCK_SKILLS=(
+    "grilling" "grill-me" "teach" "prototype" "handoff" "codebase-design"
+)
+
+# Is $1 a member of the curated keep list?
+is_kept_mattpocock_skill() {
+    local needle="${1-}" s
+    for s in "${MATTPOCOCK_SKILLS[@]}"; do
+        [[ "$s" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
 is_safe_retired_skill_name() {
     local name="${1-}"
     [[ -n "$name" ]] || return 1
@@ -381,21 +403,120 @@ sha256_file() {
     fi
 }
 
+# Ownership manifest path. Format v2, one record per line:
+#     <skill-name>\t<sha256 of the installed SKILL.md>
+# Legacy v1 records are a bare <skill-name> with no tab (the original 17-skill
+# integration wrote these). Both are accepted on read; only v2 is ever written.
+MATTPOCOCK_MANIFEST_NAME=".mattpocock-skills"
+
+# Digest of a skill's SKILL.md, or empty when it cannot be computed.
+mattpocock_skill_digest() {
+    local skill_file="$CLAUDE_DIR/skills/${1-}/SKILL.md"
+    [[ -f "$skill_file" ]] || return 1
+    sha256_file "$skill_file" 2>/dev/null || return 1
+}
+
+# Atomically replace the ownership manifest with the records on stdin.
+# Refuses to write through a symlink (a symlinked manifest would let a normal
+# installer run truncate an arbitrary file), writes a sibling temp file, and
+# reports failure instead of swallowing it — a manifest we failed to persist
+# means a later uninstall cannot purge what we just installed.
+write_mattpocock_manifest() {
+    local manifest="$CLAUDE_DIR/$MATTPOCOCK_MANIFEST_NAME" tmp
+    if [[ -L "$manifest" ]]; then
+        warn "Refusing to write mattpocock ownership manifest through a symlink: $manifest"
+        return 1
+    fi
+    tmp="$(mktemp "${manifest}.tmp.XXXXXX")" || { warn "Could not create temp file for mattpocock ownership manifest"; return 1; }
+    if ! cat > "$tmp"; then
+        rm -f -- "$tmp"
+        warn "Could not write mattpocock ownership manifest"
+        return 1
+    fi
+    chmod 600 "$tmp" 2>/dev/null || true
+    if ! mv -f "$tmp" "$manifest"; then
+        rm -f -- "$tmp"
+        warn "Could not replace mattpocock ownership manifest: $manifest"
+        return 1
+    fi
+    return 0
+}
+
+# Remove manifest-owned mattpocock skills that are no longer in MATTPOCOCK_SKILLS.
+# Pass --all (uninstall path) to treat EVERY manifest entry as retired and drop
+# the manifest entirely. Without --all (install path) the curated keep list
+# survives and the manifest is rewritten to the surviving entries, so repeated
+# installer runs are idempotent instead of flip-flopping with the install step.
+#
+# A manifest NAME alone is not proof of ownership: `teach`, `handoff` and
+# `prototype` are names a user may well have taken for their own skill after we
+# installed ours. So a v2 record is only deleted when the directory's current
+# SKILL.md still hashes to what we recorded at install time — the same
+# content-verified ownership rule cleanup_retired_harness_workflow already uses.
 cleanup_retired_mattpocock_skills() {
-    local manifest="$CLAUDE_DIR/.mattpocock-skills"
+    local purge_all=false
+    [[ "${1-}" == "--all" ]] && purge_all=true
+    local manifest="$CLAUDE_DIR/$MATTPOCOCK_MANIFEST_NAME"
+    if [[ -L "$manifest" ]]; then
+        warn "mattpocock ownership manifest is a symlink; refusing to act on it: $manifest"
+        return 0
+    fi
     [[ -f "$manifest" ]] || return 0
-    local skill_name skill_path
-    while IFS= read -r skill_name || [[ -n "$skill_name" ]]; do
+    local skill_name skill_hash skill_path current_hash
+    local -a survivors=()
+    while IFS=$'\t' read -r skill_name skill_hash || [[ -n "$skill_name" ]]; do
         [[ -n "$skill_name" ]] || continue
         if ! is_safe_retired_skill_name "$skill_name"; then
             warn "Skipping unsafe retired skill manifest entry"
             continue
         fi
+        if ! $purge_all && is_kept_mattpocock_skill "$skill_name"; then
+            survivors+=("$skill_name")
+            continue
+        fi
         skill_path="$CLAUDE_DIR/skills/$skill_name"
         [[ -d "$skill_path" ]] || continue
+        # v2 record: require the recorded content to still be there before deleting.
+        if [[ -n "$skill_hash" ]]; then
+            if ! current_hash="$(mattpocock_skill_digest "$skill_name")"; then
+                warn "Retired skill '$skill_name': cannot verify ownership; preserving directory"
+                continue
+            fi
+            if [[ "$current_hash" != "$skill_hash" ]]; then
+                warn "Retired skill '$skill_name' is modified or user-authored; preserving directory"
+                continue
+            fi
+        fi
         if $DRY_RUN; then info "Would remove retired manifest-owned skill: $skill_name";
         else rm -rf -- "$skill_path"; ok "Removed retired manifest-owned skill: $skill_name"; fi
     done < "$manifest"
+
+    if ((${#survivors[@]} > 0)); then
+        # Keep-list entries remain owned; rewrite the manifest to just those,
+        # re-deriving each digest from what is on disk right now so a skill the
+        # user has since replaced is recorded as theirs, not ours.
+        if $DRY_RUN; then
+            info "Would rewrite mattpocock skill manifest (${#survivors[@]} kept)"
+            return 0
+        fi
+        local -a records=()
+        for skill_name in "${survivors[@]}"; do
+            # No readable SKILL.md means we cannot prove we own it — drop the
+            # record rather than keep a bare name that would later authorise a
+            # deletion we cannot justify.
+            if current_hash="$(mattpocock_skill_digest "$skill_name")"; then
+                records+=("$(printf '%s\t%s' "$skill_name" "$current_hash")")
+            fi
+        done
+        if ((${#records[@]} > 0)); then
+            printf '%s\n' "${records[@]}" | write_mattpocock_manifest || \
+                warn "mattpocock ownership record is stale; a later --uninstall may not purge these skills"
+        else
+            rm -f -- "$manifest"
+        fi
+        return 0
+    fi
+
     if $DRY_RUN; then info "Would remove retired skill manifest: $manifest";
     else rm -f -- "$manifest"; ok "Removed retired skill manifest"; fi
 }
@@ -444,8 +565,10 @@ cleanup_retired_enabled_plugins() {
     fi
 }
 
+# $1 may be --all (uninstall): purge every manifest-owned mattpocock skill,
+# including the curated keep list.
 cleanup_retired_skills() {
-    cleanup_retired_mattpocock_skills
+    cleanup_retired_mattpocock_skills "${1-}"
     cleanup_retired_harness_workflow
 }
 
@@ -646,6 +769,7 @@ Codex CLI|Codex adversarial review (openai/codex)|0|review-codex")
     GROUP_HINTS+=("planning, iteration, code quality, meta-config")
     GROUP_ITEMS+=("andrej-karpathy-skills|Karpathy coding guidelines (Think-First, Simplicity, Surgical)|1|plug-andrej-karpathy-skills
 superpowers|Planning, brainstorming, TDD, debugging|1|plug-superpowers
+mattpocock/skills|6 curated agent skills via npx: grilling, grill-me, teach, prototype, handoff, codebase-design (mattpocock)|1|skill-mattpocock
 feature-dev|Guided feature development|1|plug-feature-dev
 ralph-loop|Automated iteration loop|1|plug-ralph-loop
 commit-commands|git commit / push / PR workflow|1|plug-commit-commands
@@ -1110,6 +1234,7 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
             skill-humanizer)        INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer") ;;
             skill-humanizer-zh)     INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer-zh") ;;
             skill-update-config)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("update-config") ;;
+            skill-mattpocock)       INSTALL_MATTPOCOCK=true ;;
             # DeepXiv
             deepxiv-cli)            INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-cli") ;;
             deepxiv-trending-digest) INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-trending-digest") ;;
@@ -2368,6 +2493,68 @@ cl_commands_hint() {
     return 0
 }
 
+# The exact `skills add` invocation. Scoped to the MATTPOCOCK_SKILLS names via
+# repeated `--skill` flags — `--skill '*'` would pull every SKILL.md in the repo,
+# including personal/in-progress ones we neither track nor uninstall. Installs
+# globally to ~/.claude/skills/ for Claude Code only, as real copies (not
+# symlinks). Returns the command as an array via the global _MP_NPX_CMD.
+_mattpocock_npx_cmd() {
+    _MP_NPX_CMD=(npx -y skills@latest add mattpocock/skills --global --agent claude-code --copy --yes)
+    local s
+    for s in "${MATTPOCOCK_SKILLS[@]}"; do
+        _MP_NPX_CMD+=(--skill "$s")
+    done
+}
+
+_mattpocock_npx() {
+    env DO_NOT_TRACK=1 "${_MP_NPX_CMD[@]}" </dev/null
+}
+
+install_mattpocock_skills() {
+    info "Installing mattpocock/skills (via npx skills)..."
+    _mattpocock_npx_cmd
+    if ! command -v npx &>/dev/null; then
+        warn "npx not found (needs Node.js) — skipping mattpocock/skills (optional)."
+        warn "  Install Node.js to get npx: https://nodejs.org"
+        warn "  e.g. macOS: 'brew install node' · Debian/Ubuntu: 'sudo apt install nodejs npm' · or use nvm (https://github.com/nvm-sh/nvm)"
+        warn "  Then run: DO_NOT_TRACK=1 ${_MP_NPX_CMD[*]}"
+        # Optional add-on: do NOT count as an install warning (would block the version stamp).
+        return 0
+    fi
+    if $DRY_RUN; then
+        info "Would run: DO_NOT_TRACK=1 ${_MP_NPX_CMD[*]}"
+        return 0
+    fi
+    if retry 3 5 "mattpocock/skills" _mattpocock_npx; then
+        ok "mattpocock/skills installed (~/.claude/skills/)"
+        # Record what we installed so uninstall removes only these (provenance), never a
+        # user-authored skill that merely shares a generic name (teach, handoff, …).
+        # Each record carries the SKILL.md digest, so a directory the user later
+        # replaces with their own no longer matches and is preserved. Only skills
+        # actually present on disk are recorded: a partial copy must not leave us
+        # claiming ownership of something npx never wrote.
+        local s digest
+        local -a records=()
+        for s in "${MATTPOCOCK_SKILLS[@]}"; do
+            if digest="$(mattpocock_skill_digest "$s")"; then
+                records+=("$(printf '%s\t%s' "$s" "$digest")")
+            else
+                warn "mattpocock/skills: '$s' not found after install; not recording ownership"
+            fi
+        done
+        if ((${#records[@]} > 0)); then
+            printf '%s\n' "${records[@]}" | write_mattpocock_manifest || \
+                warn "mattpocock/skills installed but ownership was not recorded; '--uninstall' will not remove them"
+        else
+            warn "mattpocock/skills reported success but no skills were found on disk"
+        fi
+    else
+        warn "Failed to install mattpocock/skills via npx (optional — install skipped)."
+        warn "  Retry manually: DO_NOT_TRACK=1 ${_MP_NPX_CMD[*]}"
+        # Optional add-on failure is non-fatal: do NOT block the version stamp.
+    fi
+}
+
 # ============================================================
 # image-gen (sinedied/agent-skills) always-installed network Skill.
 #
@@ -3421,7 +3608,9 @@ uninstall() {
         rm -rf "$deepxiv_skill" && ok "Removed DeepXiv skill: $(basename "$deepxiv_skill")"
     done
 
-    cleanup_retired_skills
+    # --all: uninstall purges every manifest-owned mattpocock skill, including
+    # the curated keep list that a normal install run preserves.
+    cleanup_retired_skills --all
 
     # Remove the image-gen Skill ONLY when the ownership manifest proves this
     # installer installed it. Validates EVERY fixed field (skill/source/wrapper)
@@ -4242,6 +4431,8 @@ main() {
         SELECTED_PROFILES=("glm" "gpt" "ccr")
         # Review defaults for --all: adversarial ON, codex OFF
         REVIEW_ADVERSARIAL=true
+        # Curated mattpocock/skills subset is on by default
+        INSTALL_MATTPOCOCK=true
         if $EXPLICIT_ALL; then
             # Explicit --all: install everything including MCP, DeepXiv, and all plugin groups
             INSTALL_MCP=true
@@ -4305,6 +4496,10 @@ main() {
     # so the wrapper (a USER_SCRIPT) is already in place when augmentation and
     # the ownership-manifest write check for it.
     install_image_gen
+    # Runs AFTER cleanup_retired_skills (above) so the retired-skill prune can
+    # never delete what we just installed, and so the manifest ends the run
+    # holding exactly MATTPOCOCK_SKILLS.
+    $INSTALL_MATTPOCOCK && install_mattpocock_skills
     $INSTALL_LESSONS && install_lessons
     $INSTALL_STATUSLINE && install_statusline
     { $INSTALL_MCP || $INSTALL_LARK; } && install_mcp
