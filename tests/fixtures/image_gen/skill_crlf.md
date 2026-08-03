@@ -1,3 +1,0 @@
-# image-gen
-
-Upstream CRLF.
