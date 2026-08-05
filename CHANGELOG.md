@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.18.0] - 2026-08-05
+
+### Fixed
+- **The installer no longer appears to hang at `Updating 6 marketplace(s)...`.** `update_installed_plugins()` called the bare `claude plugin marketplace update` — one opaque call that refreshes every installed catalog sequentially — wrapped in `retry 3 3` with `2>/dev/null`. The CLI caps each individual marketplace at 120s internally, but nothing bounded the aggregate: six catalogs behind one unreachable remote meant up to 12 minutes per attempt and ~36 minutes across the three retries, with stderr discarded so not a single character of progress reached the terminal. The step is now a loop that refreshes one named marketplace at a time.
+- **`2>/dev/null` removed from every network plugin call.** `marketplace add`, `plugin install`, and the marketplace refresh all keep their stderr now, so git's progress output proves the step is alive. Suppressing it is what turned "slow" into "frozen" — the only user-visible output for the entire refresh was the single `[INFO]` line preceding it.
+
+### Features
+- **`with_timeout <seconds> <command...>` wall-clock guard on all network operations.** Applied to `claude plugin marketplace add`, `claude plugin marketplace update`, `claude plugin install`, and `claude plugin update`. Prefers coreutils `timeout(1)`/`gtimeout(1)` and falls back to a bash watchdog (`TERM`, then `KILL` after 5s), because macOS ships neither — on a stock Mac the fallback is the live path, not a corner case. Returns 124 on timeout to match `timeout(1)`, and passes the command's own exit status through otherwise.
+- **`NET_TIMEOUT` (default 120s) caps any single network operation.** Override for slow links: `NET_TIMEOUT=300 ./install.sh`.
+- **`GIT_HTTP_LOW_SPEED_LIMIT` / `GIT_HTTP_LOW_SPEED_TIME` exported (1024 B/s over 30s).** Aborts a transfer that stalls on a half-dead connection instead of burning the full `NET_TIMEOUT` on a socket moving no bytes. Exported so the git processes the `claude` CLI spawns inherit them; both are overridable from the environment.
+- **Per-marketplace failure isolation and reporting.** A catalog that times out is skipped with an explicit `using cached catalog` warning plus a trailing count of how many failed, instead of silently poisoning the whole refresh. Retries on the refresh drop from 3 to 2, since the per-catalog cap now bounds each attempt.
+
+### Design Rationale
+- **Naming each marketplace is what buys the isolation.** `claude plugin marketplace update` accepts an optional `[name]`; without it the CLI decides the order and the installer cannot tell which remote is stalling. Iterating `~/.claude/plugins/marketplaces/*` and passing the directory name makes the slow one identifiable from the log and keeps one bad remote from delaying the other five.
+- **`temp_<epoch>` directories are skipped by name.** They are the CLI's in-flight scratch clones, not catalogs; they appear and vanish during any concurrent update (including the CLI's own background refresh) and are already swept by `scripts/cleanup-claude-data.sh`.
+- **A bash watchdog rather than requiring coreutils.** Adding a `brew install coreutils` prerequisite to a `curl | bash` installer in order to fix a hang is a worse trade than ~15 lines of `kill`-on-timer, especially when macOS is the primary target.
+- **`--depth 1` was investigated and rejected as a no-op.** Every marketplace clone under `~/.claude/plugins/marketplaces/` is already shallow at exactly 1 commit — the CLI clones that way. The 86 MB of `ecc` is working-tree content, not history, so there is no depth left to trim.
+
+### Notes & Caveats
+- **`install.ps1` is not updated — cross-platform parity remains broken here.** The PowerShell installer still issues the unbounded all-catalog refresh with no timeout wrapper, so Windows users see the original hang unchanged.
+- **This is unverified by automated tests**, as the `tests/` harness was removed in `68f30f8`. Verification for this change was manual: `bash -n`, a four-case unit check of the `with_timeout` fallback (success / failure / timeout-at-124 / exit-code passthrough, confirmed on a machine with neither `timeout` nor `gtimeout`), a `--dry-run --all` pass, and a live end-to-end run of the new refresh loop across all six catalogs (26.8s, 0 failures).
+- **`NET_TIMEOUT` is a per-operation cap, not a total budget.** A full `--all` run installs ~30 plugins; if many time out, the worst case is still `30 × NET_TIMEOUT × retries`. The cap makes each step bounded and legible, not the whole install fast.
+
 ## [2.17.0] - 2026-08-02
 
 ### Re-added

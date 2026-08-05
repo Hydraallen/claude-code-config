@@ -41,6 +41,46 @@ ok()    { echo -e "${GREEN}[OK]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
+# Wall-clock cap for a single network operation (marketplace/plugin fetch).
+# Raise it on slow links: NET_TIMEOUT=300 ./install.sh
+NET_TIMEOUT="${NET_TIMEOUT:-120}"
+
+# Abort a git transfer that stalls under 1 KiB/s for 30s rather than hanging
+# forever on a half-dead connection. Exported so the git processes that the
+# `claude plugin ...` CLI spawns inherit them.
+export GIT_HTTP_LOW_SPEED_LIMIT="${GIT_HTTP_LOW_SPEED_LIMIT:-1024}"
+export GIT_HTTP_LOW_SPEED_TIME="${GIT_HTTP_LOW_SPEED_TIME:-30}"
+
+# with_timeout <seconds> <command...>: run the command, kill it if it outlives
+# <seconds>. Prefers coreutils timeout(1)/gtimeout(1); falls back to a bash
+# watchdog because macOS ships neither. Returns the command's status, or 124 on
+# timeout (matching timeout(1)).
+with_timeout() {
+    local secs="$1"; shift
+    if command -v timeout &>/dev/null; then
+        timeout "$secs" "$@"
+        return $?
+    fi
+    if command -v gtimeout &>/dev/null; then
+        gtimeout "$secs" "$@"
+        return $?
+    fi
+
+    "$@" &
+    local cmd_pid=$!
+    ( sleep "$secs"; kill -TERM "$cmd_pid" 2>/dev/null; sleep 5; kill -KILL "$cmd_pid" 2>/dev/null ) &
+    local watchdog_pid=$!
+    local status=0
+    wait "$cmd_pid" 2>/dev/null || status=$?
+    kill -TERM "$watchdog_pid" 2>/dev/null || true
+    wait "$watchdog_pid" 2>/dev/null || true
+    # A signalled command exits >128; report that as a timeout.
+    if (( status > 128 )); then
+        status=124
+    fi
+    return $status
+}
+
 # Retry wrapper: retry <max_attempts> <delay_seconds> <description> <command...>
 # Returns 0 on success, 1 if all attempts fail.
 retry() {
@@ -3313,7 +3353,8 @@ install_plugins() {
         if $DRY_RUN; then
             info "Would add marketplace: $marketplace (github.com/$repo)"
         else
-            if retry 5 3 "Add marketplace $marketplace" claude plugin marketplace add "https://github.com/$repo" 2>/dev/null; then
+            if retry 5 3 "Add marketplace $marketplace" \
+                with_timeout "$NET_TIMEOUT" claude plugin marketplace add "https://github.com/$repo"; then
                 ok "Marketplace added: $marketplace"
             else
                 warn "Marketplace $marketplace may already exist or could not be added"
@@ -3340,7 +3381,8 @@ install_plugins() {
             if plugin_is_installed "$entry"; then
                 claude plugin uninstall "$entry" 2>/dev/null || true
             fi
-            if retry 5 3 "Install plugin $plugin_name" claude plugin install "${plugin_name}@${marketplace}" 2>/dev/null; then
+            if retry 5 3 "Install plugin $plugin_name" \
+                with_timeout "$NET_TIMEOUT" claude plugin install "${plugin_name}@${marketplace}"; then
                 ok "Plugin installed: $plugin_name"
             else
                 warn "Plugin $plugin_name could not be installed, skipping"
@@ -3473,7 +3515,7 @@ update_installed_plugins() {
     done < <(build_plugin_catalogue)
 
     if $DRY_RUN; then
-        info "Would run: claude plugin marketplace update (all catalogs)"
+        info "Would refresh each marketplace catalog separately (${NET_TIMEOUT}s cap each)"
         if command -v jq &>/dev/null && [[ -f "$list_json" ]]; then
             local pkg
             while IFS= read -r pkg; do
@@ -3485,11 +3527,32 @@ update_installed_plugins() {
         return
     fi
 
-    info "Refreshing marketplace catalogs (official + third-party)..."
-    if retry 3 3 "Refresh marketplaces" claude plugin marketplace update 2>/dev/null; then
-        ok "Marketplace catalogs refreshed"
-    else
-        warn "Could not refresh some marketplace catalogs"
+    # Refresh one catalog at a time rather than via the bare `marketplace
+    # update` (which does all of them in a single opaque call). One unreachable
+    # remote then costs NET_TIMEOUT seconds instead of blocking every other
+    # catalog behind it, the per-marketplace name shows which one is slow, and
+    # stderr is deliberately NOT sent to /dev/null so git's progress output
+    # proves the step is alive instead of looking frozen.
+    local mkt_root="$HOME/.claude/plugins/marketplaces"
+    local mkt_path mkt_name mkt_failed=0
+    info "Refreshing marketplace catalogs (official + third-party, ${NET_TIMEOUT}s cap each)..."
+    if [[ -d "$mkt_root" ]]; then
+        for mkt_path in "$mkt_root"/*; do
+            [[ -d "$mkt_path" ]] || continue
+            mkt_name="$(basename "$mkt_path")"
+            # temp_<epoch> are the CLI's in-flight scratch clones, not catalogs.
+            [[ "$mkt_name" == temp_* ]] && continue
+            if retry 2 3 "Refresh marketplace $mkt_name" \
+                with_timeout "$NET_TIMEOUT" claude plugin marketplace update "$mkt_name"; then
+                ok "Marketplace refreshed: $mkt_name"
+            else
+                warn "Could not refresh marketplace: $mkt_name (skipped, using cached catalog)"
+                mkt_failed=$((mkt_failed + 1))
+            fi
+        done
+    fi
+    if (( mkt_failed > 0 )); then
+        warn "$mkt_failed marketplace catalog(s) could not be refreshed — plugin versions may be stale"
     fi
 
     if ! command -v jq &>/dev/null || [[ ! -f "$list_json" ]]; then
@@ -3507,7 +3570,7 @@ update_installed_plugins() {
         [[ -z "$pkg" ]] && continue
         # Skip installer-managed plugins (already reinstalled or pruned above).
         [[ "$catalogue_set" == *"|$pkg|"* ]] && continue
-        if retry 3 3 "Update plugin $pkg" claude plugin update "$pkg"; then
+        if retry 3 3 "Update plugin $pkg" with_timeout "$NET_TIMEOUT" claude plugin update "$pkg"; then
             ok "Plugin updated: ${pkg%@*}"
         else
             warn "Could not update plugin: $pkg"
