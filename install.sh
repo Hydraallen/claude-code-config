@@ -42,8 +42,9 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
 # Wall-clock cap for a single network operation (marketplace/plugin fetch).
-# Raise it on slow links: NET_TIMEOUT=300 ./install.sh
-NET_TIMEOUT="${NET_TIMEOUT:-120}"
+# Every such call is retried up to 3 times, so a hung remote should cost seconds
+# rather than minutes per attempt. Raise it on slow links: NET_TIMEOUT=180 ./install.sh
+NET_TIMEOUT="${NET_TIMEOUT:-60}"
 
 # Abort a git transfer that stalls under 1 KiB/s for 30s rather than hanging
 # forever on a half-dead connection. Exported so the git processes that the
@@ -51,22 +52,29 @@ NET_TIMEOUT="${NET_TIMEOUT:-120}"
 export GIT_HTTP_LOW_SPEED_LIMIT="${GIT_HTTP_LOW_SPEED_LIMIT:-1024}"
 export GIT_HTTP_LOW_SPEED_TIME="${GIT_HTTP_LOW_SPEED_TIME:-30}"
 
+# Never let git stop to ask for credentials — an unattended installer has no tty
+# to answer with, so a private/renamed repo must fail fast instead of hanging.
+export GIT_TERMINAL_PROMPT="${GIT_TERMINAL_PROMPT:-0}"
+export GIT_ASKPASS="${GIT_ASKPASS:-/bin/true}"
+export GCM_INTERACTIVE="${GCM_INTERACTIVE:-never}"
+
 # with_timeout <seconds> <command...>: run the command, kill it if it outlives
 # <seconds>. Prefers coreutils timeout(1)/gtimeout(1); falls back to a bash
 # watchdog because macOS ships neither. Returns the command's status, or 124 on
-# timeout (matching timeout(1)).
+# timeout (matching timeout(1)). stdin is closed so a child that prompts gets
+# EOF instead of blocking forever on a tty.
 with_timeout() {
     local secs="$1"; shift
     if command -v timeout &>/dev/null; then
-        timeout "$secs" "$@"
+        timeout "$secs" "$@" </dev/null
         return $?
     fi
     if command -v gtimeout &>/dev/null; then
-        gtimeout "$secs" "$@"
+        gtimeout "$secs" "$@" </dev/null
         return $?
     fi
 
-    "$@" &
+    "$@" </dev/null &
     local cmd_pid=$!
     ( sleep "$secs"; kill -TERM "$cmd_pid" 2>/dev/null; sleep 5; kill -KILL "$cmd_pid" 2>/dev/null ) &
     local watchdog_pid=$!
@@ -3259,10 +3267,24 @@ plugin_is_installed() {
     jq -e --arg k "$pkg" '.plugins | has($k)' "$list_json" >/dev/null 2>&1
 }
 
+# 0 if the marketplace cache dir holds a usable catalog. A bare `.git` is not
+# enough: `git clone` creates it within the first moments, so an interrupted
+# clone leaves one behind. The manifest only lands once the checkout completes.
+marketplace_dir_is_valid() {
+    local dir="$1"
+    [[ -n "$dir" && -d "$dir" ]] || return 1
+    [[ -f "$dir/.claude-plugin/marketplace.json" ]]
+}
+
 install_plugins() {
     if ! command -v claude &>/dev/null; then
         error "Claude Code CLI not found. Install it first: https://claude.com/claude-code"
         return 1
+    fi
+
+    if ! command -v git &>/dev/null; then
+        warn "git not found — skipping plugin installation (marketplaces are git clones)"
+        return 0
     fi
 
     # Collect plugins from both SELECTED_PLUGINS and group-based collection
@@ -3338,27 +3360,33 @@ install_plugins() {
     done
 
     # Step 1: Add required marketplaces
-    info "Adding marketplaces..."
+    info "Adding marketplaces (${NET_TIMEOUT}s cap per attempt, 3 attempts each)..."
     for entry in "${marketplace_list[@]}"; do
         local marketplace="${entry%%|*}"
         local repo="${entry##*|}"
         [[ "$needed_marketplaces" != *"|$marketplace|"* ]] && continue
 
-        # Skip if already installed
-        if [[ -d "$HOME/.claude/plugins/marketplaces/$marketplace" ]]; then
+        local mkt_dir="$HOME/.claude/plugins/marketplaces/$marketplace"
+        if marketplace_dir_is_valid "$mkt_dir"; then
             ok "Marketplace already exists: $marketplace"
             continue
         fi
 
         if $DRY_RUN; then
             info "Would add marketplace: $marketplace (github.com/$repo)"
+            continue
+        fi
+
+        if [[ -d "$mkt_dir" ]]; then
+            warn "Marketplace $marketplace has no catalog manifest — re-adding"
+            warn "If it keeps failing, remove $mkt_dir by hand and re-run."
+        fi
+
+        if retry 3 3 "Add marketplace $marketplace" \
+            with_timeout "$NET_TIMEOUT" claude plugin marketplace add "https://github.com/$repo"; then
+            ok "Marketplace added: $marketplace"
         else
-            if retry 5 3 "Add marketplace $marketplace" \
-                with_timeout "$NET_TIMEOUT" claude plugin marketplace add "https://github.com/$repo"; then
-                ok "Marketplace added: $marketplace"
-            else
-                warn "Marketplace $marketplace may already exist or could not be added"
-            fi
+            warn "Marketplace $marketplace may already exist or could not be added"
         fi
     done
 
@@ -3381,7 +3409,7 @@ install_plugins() {
             if plugin_is_installed "$entry"; then
                 claude plugin uninstall "$entry" 2>/dev/null || true
             fi
-            if retry 5 3 "Install plugin $plugin_name" \
+            if retry 3 3 "Install plugin $plugin_name" \
                 with_timeout "$NET_TIMEOUT" claude plugin install "${plugin_name}@${marketplace}"; then
                 ok "Plugin installed: $plugin_name"
             else
@@ -3542,6 +3570,7 @@ update_installed_plugins() {
             mkt_name="$(basename "$mkt_path")"
             # temp_<epoch> are the CLI's in-flight scratch clones, not catalogs.
             [[ "$mkt_name" == temp_* ]] && continue
+            marketplace_dir_is_valid "$mkt_path" || continue
             if retry 2 3 "Refresh marketplace $mkt_name" \
                 with_timeout "$NET_TIMEOUT" claude plugin marketplace update "$mkt_name"; then
                 ok "Marketplace refreshed: $mkt_name"

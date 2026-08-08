@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.18.1] - 2026-08-09
+
+### Fixed
+- **The installer no longer stalls at `Adding marketplaces...` on a fresh machine.** `with_timeout` ran its child with the caller's stdin still attached, and `README`'s recommended `bash <(curl -fsSL ...)` form leaves that stdin on a tty. A first-run `claude` CLI that stops to ask anything — onboarding, trust dialog — therefore blocked silently until the timeout killed it, once per attempt, once per marketplace. All three `with_timeout` branches now redirect the child's stdin from `/dev/null`, so a prompting child gets EOF and fails immediately instead of hanging. The script already used this exact pattern for its `npx` calls; the `claude plugin` calls were the ones that missed it.
+- **`GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=/bin/true`, `GCM_INTERACTIVE=never` exported.** The `GIT_HTTP_LOW_SPEED_*` guards do nothing for a git process that is parked on a credential prompt moving no bytes. A renamed or newly-private marketplace repo now fails fast instead of burning a full timeout.
+- **`marketplace add` is no longer skipped on the strength of a bare directory.** The "already exists" fast path tested only `-d`. A clone killed at any point — the timeout, a `Ctrl-C`, a closed laptop — leaves that directory behind, so the next run declared the marketplace present and every later `plugin install` failed against a catalog that was never there. The check now requires `.claude-plugin/marketplace.json`, which only lands once the checkout completes; a directory without it is reported and re-added. The same check gates the refresh loop.
+- **`git` is now a checked precondition of the plugin step.** Marketplaces are git clones; without git the step is skipped with one warning rather than N timeouts.
+
+### Changed
+- **`NET_TIMEOUT` default drops 120s → 60s and marketplace/plugin retries drop 5 → 3.** Worst case per marketplace falls from 612s to 186s. Raise it on slow links: `NET_TIMEOUT=180 ./install.sh`.
+
+### Design Rationale
+- **stdin belongs closed in `with_timeout`, not at each call site.** All six callers are non-interactive network commands; none has a legitimate use for stdin, and a timed command that silently waits on a tty is the bug class this helper exists to prevent.
+- **A first draft of this fix was rejected in review and cut back.** It also carried a `curl`-based github.com preflight, a `PLUGIN_PHASE_BUDGET` wall-clock cap on the marketplace step, and an `rm -rf` purge of partial clones. Three adversarial reviewers converged on the same verdict: the preflight false-negatives wherever git has proxy/CA/credential config that curl does not share — and then skipped the entire plugin step while still reporting "Installation complete"; the budget was not a real cap (a marketplace starting at second 299 still ran its full 189s, overshooting the advertised 300s by ~46%) and, worse, a budget-skipped marketplace still had its plugins uninstalled-then-reinstalled in Step 2, turning a working install into a broken one; and the purge ran *before* the `--dry-run` guard, so a preview invocation deleted real cache directories. Each was a new failure mode introduced by the fix. They are gone. The remaining ~29 lines are the two-line root cause plus the checks that make its failure legible.
+- **Exponential backoff was reverted to fixed backoff.** It had been added to the shared `retry` helper, which has 11 call sites; the source-tarball download's backoff would have gone 12s → 45s to shorten one unrelated step's budget. Retry *count* is a per-call-site argument already, so the budget was cut there instead.
+- **`PLUGIN_NET_TIMEOUT` was folded back into `NET_TIMEOUT`.** Introducing a second knob left the documented `NET_TIMEOUT=300` advice pointing at a variable with no remaining consumers. One knob, the name users already know, a lower default.
+
+### Notes & Caveats
+- **`install.ps1` is not updated — cross-platform parity remains broken.** The PowerShell installer has no stdin redirection and no git-noninteractive env, so Windows users can still hit the original hang.
+- **Unverified by automated tests** (`tests/` was removed in `68f30f8`). Verification was manual: `bash -n` under system bash 3.2.57, a `--dry-run` and a `--dry-run --all` pass confirming the manifest-based "already exists" path recognizes all six installed marketplaces and that dry-run performs no filesystem mutation.
+- **The macOS `with_timeout` fallback still signals only the direct child.** A `git` process forked by `claude` can outlive the kill. This predates the change and is untouched by it; the removed purge logic would have made it worse by deleting a directory that an orphan was still writing to.
+- **A `claude` CLI that genuinely needs onboarding now fails fast rather than hanging** — but the message is still the generic `may already exist or could not be added`. Running `claude` once interactively before the installer remains the fix; surfacing that as an explicit hint is follow-up work.
+
 ## [2.18.0] - 2026-08-05
 
 ### Fixed
