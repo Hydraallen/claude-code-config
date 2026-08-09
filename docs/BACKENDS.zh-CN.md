@@ -64,8 +64,11 @@ cl_glm
 ```
 
 Coding Plan 只覆盖 **`glm-5.2`（1M 输入 / 128K 输出）、`glm-5-turbo`（200K）、
-`glm-4.7`（200K）** 这三个模型 —— opus 和 sonnet 都路由到 `glm-5.2`，haiku 路由到
-`glm-5-turbo`（`glm-4.7` 计划内覆盖，但不绑定到任何槽位）。
+`glm-4.7`（200K）** 这三个模型 —— opus、sonnet 和 fable 都路由到 `glm-5.2`，haiku
+路由到 `glm-5-turbo`（`glm-4.7` 计划内覆盖，但不绑定到任何槽位）。
+`fable` 是 Claude Code 的后台槽位（compact、会话标题、配额探测）。它和其他别名一样可以
+显式选择，但客户端还会拿它发**你没主动发起**的请求 —— 所以留空会在这些请求上失败，
+字面量 `claude-fable-5` 直接发出去然后 400。
 `glm-5` 和 `glm-5.1` 在上游会被自动路由到 `glm-5.2`，所以不要固定写它们。
 视觉模型 **`glm-5v-turbo`（200K）** 没有自己的槽位；用
 `cl_glm --model glm-5v-turbo` 访问。
@@ -411,7 +414,7 @@ cl_ccr
 #### 第 5 步 —— 让安装脚本填模型槽位
 
 网关起来、key 填好之后，重跑一次 `./install.sh`。它会查询 `GET /v1/models`，并让你把
-`opus` / `sonnet` / `haiku` 映射到真实的网关 id：
+`opus` / `sonnet` / `haiku` / `fable` 映射到真实的网关 id：
 
 ```
 [OK]   gateway published 12 model(s)
@@ -425,9 +428,15 @@ cl_ccr
 不是往 `profiles/ccr.json` 里多塞几个静态键的原因。你选定的值会落进该 profile 的
 `credentialKeys`，因此之后再跑 `./install.sh` 都会保留。
 
-跳过也没问题。槽位为空时，`cl_ccr` 会**故意不传 `--model`**，由你进去用 `/model` 按会话
-挑选 —— 因为对一个发布 `provider/model` 形式 id 的网关来说，`--model opus` 指的是一个它
-从没听说过的模型。
+`opus` / `sonnet` / `haiku` 跳过也没问题。这三个槽位为空时，`cl_ccr` 会**故意不传
+`--model`**，由你进去用 `/model` 按会话挑选 —— 因为对一个发布 `provider/model` 形式 id
+的网关来说，`--model opus` 指的是一个它从没听说过的模型。
+
+> **`fable` 是例外，别跳过。** Claude Code 不会把 fable 放进 `/model` 列表，它是后台专用
+> 槽位（`/compact`、会话标题、配额探测）。槽位为空时，这些请求会直接以字面量
+> `claude-fable-5` 发给网关，而网关只认 `provider/model` 形式的 id，于是每一条都在模型
+> 解析阶段返回 `400 All target providers failed`。前台模型是好的，所以症状是会话时不时
+> 冒出一个没有任何上下文的 `API Error: 400`，非常难查。指一个便宜模型给它就行。
 
 > **`CLAUDE_CODE_MAX_CONTEXT_TOKENS` 在这里是必填项，不是调优选项。** CCR 上报的每个
 > 模型都是 `context_length: null`，所以模型发现从来不会给出上下文窗口，Claude Code 只能

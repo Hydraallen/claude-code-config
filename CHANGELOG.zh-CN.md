@@ -1,5 +1,30 @@
 # 更新日志
 
+> **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
+
+## [2.19.0] - 2026-08-10
+
+### 修复
+- **所有非 Anthropic 后端的后台请求一直在静默 400，因为本仓库从来不知道 `fable` 这个模型槽位的存在。** Claude Code 解析的是五个槽位而不是四个：除 `opus` / `sonnet` / `haiku` 外还有 `ANTHROPIC_DEFAULT_FABLE_MODEL`（已对照发行版二进制确认，该变量及其 `_NAME` / `_DESCRIPTION` / `_SUPPORTED_CAPABILITIES` 兄弟变量都在）。没有任何 profile 设过它，`claude.zsh` 的槽位表里也没有它，于是客户端对所有后台请求（`/compact`、会话标题、配额探测）都退回到字面量 id `claude-fable-5`。网关发布的是 `provider/model` 形式的 id，Anthropic 兼容的厂商端点发布的是自己的目录，两者都没有 `claude-fable-5`，所以这些请求全部在模型解析阶段失败。实测一天的 CCR 请求日志：**53 条 4xx 里有 48 条**是这个原因，报文都是 `{"message":"All target providers failed.","attempts":[{"stage":"model_resolution","message":"Model \"claude-fable-5\" is not configured for target provider openai. Allowed models: glm-5.2, glm-4.7, glm-5-turbo"}]}`。
+- **`profiles/glm.json` 的 fable 映射到 `glm-5.2`，`profiles/gpt.json` 映射到 `gpt-5.6-luna`。** 两者都补齐了其他槽位已有的 `_NAME` / `_DESCRIPTION` / `_SUPPORTED_CAPABILITIES` 三件套，`/model` 里的描述保持一致。
+- **`claude.zsh` 认识这个槽位了。** `fable` 加入了 `slot_var` 查表和已解析模型的输出，`--model fable` 现在和其他三个别名行为一致，而不是被原样透传。
+
+### 新功能
+- **ccr 槽位选择器会询问 `fable`。** `configure_ccr_profile` 从三个槽位变成四个，`ANTHROPIC_DEFAULT_FABLE_MODEL` 也加进了 `profiles/ccr.json` 的 `credentialKeys`，因此安装脚本写入的值能像其他三个一样在后续模板刷新中保留。
+- **非原生后端上槽位为空时，启动阶段会警告。** 当 `ANTHROPIC_BASE_URL` 已设而 `ANTHROPIC_DEFAULT_FABLE_MODEL` 为空时，`cl_*` 会打印一行提示 —— 否则这个故障在会话内部根本无法诊断。
+
+### 设计理由
+- **`fable` 的提示语和其他三个不同，"跳过也没问题"那段话不再覆盖它。** `opus` 留空是可恢复的：`claude.zsh` 会故意不传 `--model`，用户进去用 `/model` 从发现列表里挑。fable 没有这个退路 —— Claude Code 根本不会把它放进 `/model`，所以 fable 留空不是"待会儿再选"，而是每一条后台请求都必定 400。提示语标注了 `NOT recommended`，跳过时会警告而不是静默通过。
+- **槽位列表现在是推导出来的，不再是逐个列举。** `claude.zsh` 只保留一个 `_CL_MODEL_SLOTS` 数组，用 `ANTHROPIC_DEFAULT_${(U)slot}_MODEL` 推导变量名，替换掉原来两处并行的 `case`；`configure_ccr_profile` 把环境变量名放进和槽位并行的 `slot_vars` 数组，`jq` 过滤器在循环里拼出来，而不是每个槽位手写一个 `--arg`。漏掉某个 `case` 分支正是 fable 槽位潜伏三个版本的原因，现在加第六个槽位在每个文件里都只是改一个词。
+
+### 注意事项
+- **变量确实决定出站 model id，这一点已证明；它专门修好"后台请求"则仍是推断。** 直接证据：槽位映射好之后，`claude -p --model fable` 打到 CCR 网关，产生的那条请求 `requested_model` 是 `Zhipu AI (China) - Coding Plan/glm-5.2`，状态 200 —— 说明 `ANTHROPIC_DEFAULT_FABLE_MODEL` 确实把 `fable` 别名解析成了映射后的 id，而不是 `claude-fable-5`。这一轮没有直接覆盖到的是后台路径：`claude -p` 根本不产生后台流量（已验证，整轮只有一条前台请求），而 CCR 在诊断和修复之间轮转了请求日志表，原来的前后对比无法重跑。推断依据是：后台请求和显式 `--model fable` 走的是同一套槽位解析。**收尾方法：用 `cl_ccr` 跑一个交互会话，触发 `/compact`，确认产生的后台请求用的是映射后的 id。**
+- **`fable` 确实是一个可解析的 `--model` 别名** —— 上面那轮已证实，所以启动器槽位查表里的 `fable` 分支是活代码，不是死代码。本条目的早期草稿写的是 Claude Code"永远不会把 fable 放进 `/model`"，那是说过头了，全文已更正。准确的说法、也是这个槽位仍然必须映射的原因是：Claude Code 会在**用户从未选择它**的情况下拿 fable 槽位发后台请求，所以留空是在你没主动发起的流量上失败。
+- **无自动化测试覆盖**（`tests/` 已在 `68f30f8` 移除）。手工验证覆盖到的：把选择循环从 `configure_ccr_profile` 逐字抽出，在系统 bash 3.2.57 下跑了全选 / 跳过 fable / 首个提示处 EOF / 前导零四种输入；`jq` 写入用真实 `profiles/ccr.json` 试过，id 里带空格、斜杠、内嵌双引号和中日韩字符，全部逐字节还原。这个过程发现并修掉了两个真实缺陷：裸 `read` 会让 Ctrl-D 在 `set -e` 下直接中止整个安装脚本（现改为 `|| choice=""`），以及像 `08` 这样的前导零输入会先打印一条原始 bash 算术错误再走友好警告（现改为 `10#$choice`）。这两个缺陷早于本版本，原来的三个槽位同样中招。`bash -n install.sh`、`zsh -n claude.zsh`、四个 profile 的 `jq -e .`、`install.sh --dry-run`（exit 0）全部通过；zsh 的槽位推导对 `opus`/`sonnet`/`haiku`/`fable`/未知别名/空串六种输入与旧 `case` 逐一比对，行为一致。
+- **从 pre-baseline 安装升级时，会出现一条误导性的"hand-edited fields, now reset"警告**，点名 `env.ANTHROPIC_DEFAULT_FABLE_MODEL`。在 `profiles/.baseline/` 出现之前装的 `glm.json` / `gpt.json` 会和新模板比对，而新模板多了用户副本没有的 fable 键。数据不会丢（会写备份，合并结果也正确），但警告本身是误报。
+- **同一批日志里还有另一个无关的故障模式，本次并未修复。** 有 5 条 400 来自 CCR 的 Anthropic→Responses 转换，它生成了 `content` 数组非空的 `reasoning` item —— `Invalid 'input[1].content': array too long. Expected an array with maximum length 0` —— 发生在历史里带着 `thinking` 块、但对目标模型没有有效 encrypted reasoning 载荷的时候。那是 claude-code-router 的 bug，不是本仓库的；profile 层面没有任何设置能规避。
+- **`install.ps1` 根本不填模型槽位**，所以这次不需要改它 —— 但这也意味着 Windows 路径从来就没有、现在也依然没有 ccr 槽位映射这一步。
+
 ## [2.17.0] - 2026-08-02
 
 ### 移除

@@ -2214,8 +2214,13 @@ ccr_manual_slot_hint() {
     echo "       3. edit ${f/#$HOME/~}  ->  .env.ANTHROPIC_AUTH_TOKEN"
     echo "       4. curl -s -H 'Authorization: Bearer <that key>' $base/v1/models | jq -r '.data[].id'"
     echo "       5. put one of those ids into .env.ANTHROPIC_DEFAULT_OPUS_MODEL"
-    echo "     Until then cl_ccr simply starts without --model and you pick with /model — also fine."
-    echo "     在此之前 cl_ccr 不传 --model，进去用 /model 选即可，同样能用。"
+    echo "       6. put a cheap id into .env.ANTHROPIC_DEFAULT_FABLE_MODEL — not optional: while it"
+    echo "          is empty, every background request (compact, titles, quota probes) goes out as"
+    echo "          the literal id 'claude-fable-5' and comes back 400. You never issue those"
+    echo "          requests yourself, so picking a model at runtime does not cover them."
+    echo "          fable 是后台槽位，这些请求不是你主动发的，运行时选模型覆盖不到，留空必定 400。"
+    echo "     Slots 1-5 are safe to skip: cl_ccr then starts without --model and you pick with /model."
+    echo "     opus/sonnet/haiku 跳过没问题，cl_ccr 不传 --model，进去用 /model 选即可。"
 }
 
 # Fill the ccr profile's model slots from the live gateway.
@@ -2259,12 +2264,13 @@ configure_ccr_profile() {
     fi
 
     # Show what's currently mapped so the user has context when re-filling.
-    local cur_o cur_s cur_h
+    local cur_o cur_s cur_h cur_b
     cur_o=$(jq -r '.env.ANTHROPIC_DEFAULT_OPUS_MODEL // empty' "$f" 2>/dev/null)
     cur_s=$(jq -r '.env.ANTHROPIC_DEFAULT_SONNET_MODEL // empty' "$f" 2>/dev/null)
     cur_h=$(jq -r '.env.ANTHROPIC_DEFAULT_HAIKU_MODEL // empty' "$f" 2>/dev/null)
-    if [[ -n "$cur_o$cur_s$cur_h" ]]; then
-        info "  current: opus=${cur_o:-<empty>} sonnet=${cur_s:-<empty>} haiku=${cur_h:-<empty>}"
+    cur_b=$(jq -r '.env.ANTHROPIC_DEFAULT_FABLE_MODEL // empty' "$f" 2>/dev/null)
+    if [[ -n "$cur_o$cur_s$cur_h$cur_b" ]]; then
+        info "  current: opus=${cur_o:-<empty>} sonnet=${cur_s:-<empty>} haiku=${cur_h:-<empty>} fable=${cur_b:-<empty>}"
     fi
 
     if ! command -v curl &>/dev/null; then
@@ -2315,42 +2321,78 @@ configure_ccr_profile() {
     echo "     Map claude's aliases onto these ids. Enter = leave that slot empty."
     echo "     把 claude 的模型别名映射到上面的 id。直接回车 = 该槽位留空。"
 
-    # Slot names spelled out in both cases rather than via ${s,,}: that expansion
-    # is bash 4 only and macOS still ships 3.2.
-    local -a slots=(opus sonnet haiku)
-    local -a picked=("" "" "")
-    local s idx choice
+    # Slot names spelled out rather than derived via ${s^^}: that expansion is
+    # bash 4 only and macOS still ships 3.2. The env var travels alongside the slot
+    # in a parallel array instead of being re-derived at the write, so reordering
+    # this list can never write one slot's model into another slot's variable.
+    local -a slots=(opus sonnet haiku fable)
+    local -a slot_vars=(
+        ANTHROPIC_DEFAULT_OPUS_MODEL
+        ANTHROPIC_DEFAULT_SONNET_MODEL
+        ANTHROPIC_DEFAULT_HAIKU_MODEL
+        ANTHROPIC_DEFAULT_FABLE_MODEL
+    )
+    local -a picked=("" "" "" "")
+    local s idx choice prompt any_picked=""
     idx=0
     for s in "${slots[@]}"; do
         choice=""
-        if [[ -t 0 ]]; then
-            echo -n "     $s [1-${#ids[@]}, Enter=skip]: "
-            read -r choice
-        else
-            echo -n "     $s [1-${#ids[@]}, Enter=skip]: " > /dev/tty
-            read -r choice </dev/tty
+        prompt="     $s [1-${#ids[@]}, Enter=skip]: "
+        # Skipping fable is not the same class of decision as skipping opus, so the
+        # prompt has to carry the consequence in both languages — "NOT recommended"
+        # with no reason attached is worse than no warning at all. It also has to
+        # travel with the prompt rather than being echoed separately: in the piped
+        # branch the prompt goes to /dev/tty and stdout is not where the user looks.
+        if [[ "$s" == fable ]]; then
+            prompt="     fable = the background slot (compact / titles / quota probes); leaving it
+     empty 400s every one of them, and you never issue those requests yourself.
+     fable 是后台槽位，这些请求不是你主动发的：留空必定 400。建议选一个便宜的模型。
+     fable [1-${#ids[@]}, Enter=skip — NOT recommended]: "
         fi
-        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ids[@]} )); then
-            picked[$idx]="${ids[$((choice - 1))]}"
+        # `|| choice=""` matters: the script runs under `set -e`, so an EOF on stdin
+        # (Ctrl-D, or a piped installer whose input is exhausted) would otherwise
+        # abort the whole run here — skipping the version stamp and every later step.
+        if [[ -t 0 ]]; then
+            printf '%s' "$prompt"
+            read -r choice || choice=""
+        else
+            printf '%s' "$prompt" > /dev/tty
+            read -r choice </dev/tty || choice=""
+        fi
+        # 10# forces base 10: a leading-zero answer like 08 is a valid match for the
+        # regex but an invalid octal literal, and would abort with a raw arithmetic
+        # error instead of the friendly warning below.
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( 10#$choice >= 1 && 10#$choice <= ${#ids[@]} )); then
+            picked[$idx]="${ids[$((10#$choice - 1))]}"
+            any_picked=1
         elif [[ -n "$choice" ]]; then
             warn "     not a number in range — leaving $s empty"
         fi
         idx=$((idx + 1))
     done
 
-    if [[ -z "${picked[0]}${picked[1]}${picked[2]}" ]]; then
-        info "  all slots left empty — cl_ccr will start without --model (pick with /model)"
+    if [[ -z "$any_picked" ]]; then
+        warn "  all slots empty — cl_ccr starts without --model (pick with /model), but fable has"
+        warn "  is used for requests you never issue and will 400 on all of them until it is set"
         return 0
     fi
 
+    # One --arg per *picked* slot, keyed by the slot's own variable name, so the
+    # filter and the values cannot drift apart the way four hand-written lines can.
+    local -a jq_args=()
+    local jq_filter=".env |= (."
+    idx=0
+    while [[ $idx -lt ${#slots[@]} ]]; do
+        if [[ -n "${picked[$idx]}" ]]; then
+            jq_args+=(--arg "v$idx" "${picked[$idx]}")
+            jq_filter="$jq_filter + {${slot_vars[$idx]}: \$v$idx}"
+        fi
+        idx=$((idx + 1))
+    done
+    jq_filter="$jq_filter)"
+
     local updated
-    updated=$(jq \
-        --arg o "${picked[0]}" --arg s "${picked[1]}" --arg h "${picked[2]}" '
-        .env |= (.
-            + (if $o != "" then {ANTHROPIC_DEFAULT_OPUS_MODEL:   $o} else {} end)
-            + (if $s != "" then {ANTHROPIC_DEFAULT_SONNET_MODEL: $s} else {} end)
-            + (if $h != "" then {ANTHROPIC_DEFAULT_HAIKU_MODEL:  $h} else {} end))
-        ' "$f" 2>/dev/null)
+    updated=$(jq "${jq_args[@]}" "$jq_filter" "$f" 2>/dev/null)
 
     if [[ -z "$updated" ]]; then
         warn "  jq failed to write the slots — profile left untouched"
@@ -2359,9 +2401,15 @@ configure_ccr_profile() {
     fi
 
     printf '%s\n' "$updated" > "$f"
-    [[ -n "${picked[0]}" ]] && ok "  opus   -> ${picked[0]}"
-    [[ -n "${picked[1]}" ]] && ok "  sonnet -> ${picked[1]}"
-    [[ -n "${picked[2]}" ]] && ok "  haiku  -> ${picked[2]}"
+    idx=0
+    while [[ $idx -lt ${#slots[@]} ]]; do
+        if [[ -n "${picked[$idx]}" ]]; then
+            ok "  ${slots[$idx]} -> ${picked[$idx]}"
+        elif [[ "${slots[$idx]}" == fable ]]; then
+            warn "  fable -> <empty> — background requests (compact, titles) will 400 until this is set"
+        fi
+        idx=$((idx + 1))
+    done
     return 0
 }
 

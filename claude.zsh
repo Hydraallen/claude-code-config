@@ -497,6 +497,14 @@ _cl_profile_env_pairs() {
   ' "$1" 2>&1
 }
 
+# The model aliases claude resolves through ANTHROPIC_DEFAULT_<SLOT>_MODEL. Kept as
+# one list because the variable name is derived from it in two places below; adding
+# the next upstream slot is a one-word change here rather than four edits scattered
+# across the function. 'fable' is Claude Code's background slot (compact, session
+# titles, quota probes): a selectable alias like the rest, but also used for requests
+# the user never issues, which is why leaving it unmapped fails invisibly.
+typeset -ga _CL_MODEL_SLOTS=(opus sonnet haiku fable)
+
 # Usage: _cl_run <tag> <skip_permissions> [args...]
 _cl_run() {
   local tag="$1"
@@ -538,12 +546,12 @@ _cl_run() {
   local -a extra_args=()
   if [[ -z "$model" ]]; then
     model="${CL_MODEL:-opus}"
+    # One list, two uses (here and the report below). Deriving the variable name
+    # instead of spelling out a case arm per slot is what makes the next upstream
+    # slot a one-word change — missing one arm is exactly how the fable slot went
+    # unmapped for three releases.
     local slot_var=""
-    case "$model" in
-      opus)   slot_var=ANTHROPIC_DEFAULT_OPUS_MODEL ;;
-      sonnet) slot_var=ANTHROPIC_DEFAULT_SONNET_MODEL ;;
-      haiku)  slot_var=ANTHROPIC_DEFAULT_HAIKU_MODEL ;;
-    esac
+    (( ${_CL_MODEL_SLOTS[(Ie)$model]} )) && slot_var="ANTHROPIC_DEFAULT_${(U)model}_MODEL"
     if [[ -n "${CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY:-}" && -n "$slot_var" && -z "${(P)slot_var:-}" ]]; then
       print -u2 "$tag: gateway backend has no $slot_var — starting without --model; pick one with /model"
       model=""
@@ -559,14 +567,25 @@ _cl_run() {
   # exported by the time we get here; on the native path these are unset and the
   # alias is printed as-is.
   local shown="$model"
-  case "$model" in
+  if [[ -z "$model" ]]; then
     # The suppressed-default case above; claude picks, so there is nothing to report.
-    "")     shown="(claude's own default — choose with /model)" ;;
-    opus)   [[ -n "${ANTHROPIC_DEFAULT_OPUS_MODEL:-}"   ]] && shown="$model -> $ANTHROPIC_DEFAULT_OPUS_MODEL" ;;
-    sonnet) [[ -n "${ANTHROPIC_DEFAULT_SONNET_MODEL:-}" ]] && shown="$model -> $ANTHROPIC_DEFAULT_SONNET_MODEL" ;;
-    haiku)  [[ -n "${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}"  ]] && shown="$model -> $ANTHROPIC_DEFAULT_HAIKU_MODEL" ;;
-  esac
+    shown="(claude's own default — choose with /model)"
+  elif (( ${_CL_MODEL_SLOTS[(Ie)$model]} )); then
+    local _shown_var="ANTHROPIC_DEFAULT_${(U)model}_MODEL"
+    [[ -n "${(P)_shown_var:-}" ]] && shown="$model -> ${(P)_shown_var}"
+  fi
   print -u2 "$tag: model $shown"
+
+  # Claude Code fires background work (compact, session titles, quota probes) at the
+  # literal id 'claude-fable-5' whenever the fable slot is unset, and a gateway that
+  # publishes 'provider/model' ids cannot resolve that — every one of those requests
+  # 400s while the foreground model keeps working, so the only symptom is a sporadic
+  # context-free "API Error: 400". Gated on the same discovery flag the slot
+  # suppression above uses, so a plain vendor endpoint that may well accept the id
+  # is not nagged, and silenceable because we cannot prove it applies everywhere.
+  if [[ -n "${CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY:-}" && -z "${ANTHROPIC_DEFAULT_FABLE_MODEL:-}" && -z "${CL_NO_FABLE_WARN:-}" ]]; then
+    print -u2 "$tag: ANTHROPIC_DEFAULT_FABLE_MODEL unset — background requests will 400 (set it in the profile; CL_NO_FABLE_WARN=1 silences this)"
+  fi
 
   # Build system prompt from system-prompt.txt
   local system_prompt=""

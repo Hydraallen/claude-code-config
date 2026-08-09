@@ -69,8 +69,12 @@ cl_glm
 ```
 
 Coding Plan covers **`glm-5.2` (1M in / 128K out), `glm-5-turbo` (200K),
-`glm-4.7` (200K)** only — opus and sonnet both route to `glm-5.2`, haiku routes
-to `glm-5-turbo` (`glm-4.7` is covered by the plan but wired to no slot).
+`glm-4.7` (200K)** only — opus, sonnet and fable all route to `glm-5.2`, haiku
+routes to `glm-5-turbo` (`glm-4.7` is covered by the plan but wired to no slot).
+`fable` is Claude Code's background slot (compact, session titles, quota probes).
+It is a selectable alias like the others, but the client also uses it for requests
+you never issue — so leaving it unmapped fails on traffic you did not ask for, with
+the literal id `claude-fable-5` going out and 400ing.
 `glm-5` and `glm-5.1` are auto-routed to `glm-5.2` upstream, so don't pin them.
 The vision model **`glm-5v-turbo` (200K)** has no slot of its own; reach it with
 `cl_glm --model glm-5v-turbo`.
@@ -515,7 +519,8 @@ cl_ccr
 #### Step 5 — let the installer fill the model slots
 
 Re-run `./install.sh` once the gateway is up and the key is in place. It queries
-`GET /v1/models` and offers to map `opus` / `sonnet` / `haiku` onto real ids:
+`GET /v1/models` and offers to map `opus` / `sonnet` / `haiku` / `fable` onto
+real ids:
 
 ```
 [OK]   gateway published 12 model(s)
@@ -530,10 +535,19 @@ the only source of truth. That is why this is a step rather than more static key
 in `profiles/ccr.json`. Whatever you pick lands in the profile's
 `credentialKeys`, so later `./install.sh` runs preserve it.
 
-Skipping is fine. With the slots empty, `cl_ccr` deliberately passes **no
-`--model`** and you choose per session with `/model` — because `--model opus`
-against a gateway that publishes `provider/model` ids would name a model it has
-never heard of.
+Skipping `opus` / `sonnet` / `haiku` is fine. With those slots empty, `cl_ccr`
+deliberately passes **no `--model`** and you choose per session with `/model` —
+because `--model opus` against a gateway that publishes `provider/model` ids
+would name a model it has never heard of.
+
+> **`fable` is the exception — do not skip it.** Claude Code never lists fable
+> under `/model`; it is the background slot (`/compact`, session titles, quota
+> probes). While it is empty those requests go out as the literal id
+> `claude-fable-5`, which a gateway publishing `provider/model` ids cannot
+> resolve, so every one of them comes back `400 All target providers failed`.
+> The foreground model still works, so the symptom is an occasional context-free
+> *"API Error: 400"* mid-session and nothing pointing at the cause. Map it to a
+> cheap model.
 
 > **`CLAUDE_CODE_MAX_CONTEXT_TOKENS` is mandatory here, not a tuning knob.** CCR
 > reports every model with `context_length: null`, so discovery never supplies a
