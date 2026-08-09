@@ -42,9 +42,13 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
 # Wall-clock cap for a single network operation (marketplace/plugin fetch).
-# Every such call is retried up to 3 times, so a hung remote should cost seconds
-# rather than minutes per attempt. Raise it on slow links: NET_TIMEOUT=180 ./install.sh
-NET_TIMEOUT="${NET_TIMEOUT:-60}"
+# This is a backstop, not the primary bound: the `claude` CLI caps its own clone
+# and cache refresh at 120s. Staying above that lets the CLI hit its limit first
+# and clean up its own child `git`, which a kill from here cannot reach.
+# Attempt counts are 2 rather than 3 to keep the worst case bounded despite the
+# higher cap: 2 x 180 + 3 = 363s per marketplace, ~243s in practice since the
+# CLI's own 120s fires first. Raise it on very slow links: NET_TIMEOUT=300
+NET_TIMEOUT="${NET_TIMEOUT:-180}"
 
 # Abort a git transfer that stalls under 1 KiB/s for 30s rather than hanging
 # forever on a half-dead connection. Exported so the git processes that the
@@ -59,12 +63,31 @@ export GIT_ASKPASS="${GIT_ASKPASS:-/bin/true}"
 export GCM_INTERACTIVE="${GCM_INTERACTIVE:-never}"
 
 # with_timeout <seconds> <command...>: run the command, kill it if it outlives
-# <seconds>. Prefers coreutils timeout(1)/gtimeout(1); falls back to a bash
-# watchdog because macOS ships neither. Returns the command's status, or 124 on
-# timeout (matching timeout(1)). stdin is closed so a child that prompts gets
-# EOF instead of blocking forever on a tty.
+# <seconds>. Returns the command's status, or 124 on timeout (matching
+# timeout(1)). stdin is closed so a child that prompts gets EOF instead of
+# blocking forever on a tty.
+#
+# Order of preference is coreutils timeout(1)/gtimeout(1), then perl, then a
+# bash watchdog. macOS ships neither coreutils binary but always ships perl,
+# whose alarm(2) gives a timer inside the waiting process itself — nothing to
+# orphan. The bash watchdog is last because its timer is a `sleep` in a forked
+# subshell: killing the subshell orphans the `sleep`, which then holds the
+# caller's inherited stdout/stderr open until it expires. Any reader waiting for
+# EOF (a pipe, `$(...)`, a log capture) stalls for the full <seconds> even when
+# the command succeeded immediately.
+# Which branch of with_timeout is live here. Printed once so a stalled install
+# reported from someone else's machine can be diagnosed from its log alone.
+timeout_backend() {
+    if command -v timeout &>/dev/null; then echo "timeout(1)"
+    elif command -v gtimeout &>/dev/null; then echo "gtimeout(1)"
+    elif command -v perl &>/dev/null; then echo "perl"
+    else echo "bash watchdog"
+    fi
+}
+
 with_timeout() {
     local secs="$1"; shift
+    local status=0
     if command -v timeout &>/dev/null; then
         timeout "$secs" "$@" </dev/null
         return $?
@@ -73,12 +96,46 @@ with_timeout() {
         gtimeout "$secs" "$@" </dev/null
         return $?
     fi
+    if command -v perl &>/dev/null; then
+        # Waits in the parent and exits 124 itself rather than letting SIGALRM
+        # kill it, so the caller sees a clean status and no `Alarm clock`
+        # message. Indirect-object exec never routes through a shell, so
+        # command words containing spaces or metacharacters stay literal.
+        perl -e '
+            my $t = shift;
+            my $pid = fork;
+            exit 127 unless defined $pid;
+            if ($pid == 0) { exec {$ARGV[0]} @ARGV; exit 127 }
+            $SIG{ALRM} = sub {
+                my $reaped = $?;
+                # -1 means the main waitpid below already collected it: the
+                # command finished on the same instruction boundary the alarm
+                # fired on. Report its real status, not a timeout.
+                if (waitpid($pid, 1) == -1) {   # 1 == WNOHANG
+                    exit(($reaped & 127) ? 128 + ($reaped & 127) : $reaped >> 8);
+                }
+                kill "TERM", $pid;
+                for (1 .. 50) {
+                    last if waitpid($pid, 1) != 0;
+                    select undef, undef, undef, 0.1;
+                }
+                kill "KILL", $pid;
+                exit 124;
+            };
+            alarm $t;
+            waitpid $pid, 0;
+            alarm 0;
+            exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
+        ' "$secs" "$@" </dev/null || status=$?
+        return $status
+    fi
 
     "$@" </dev/null &
     local cmd_pid=$!
-    ( sleep "$secs"; kill -TERM "$cmd_pid" 2>/dev/null; sleep 5; kill -KILL "$cmd_pid" 2>/dev/null ) &
+    # The watchdog's own output goes to /dev/null: if it outlives this call its
+    # orphaned `sleep` must not keep the caller's pipe open.
+    ( sleep "$secs"; kill -TERM "$cmd_pid" 2>/dev/null; sleep 5; kill -KILL "$cmd_pid" 2>/dev/null ) >/dev/null 2>&1 &
     local watchdog_pid=$!
-    local status=0
     wait "$cmd_pid" 2>/dev/null || status=$?
     kill -TERM "$watchdog_pid" 2>/dev/null || true
     wait "$watchdog_pid" 2>/dev/null || true
@@ -3360,7 +3417,7 @@ install_plugins() {
     done
 
     # Step 1: Add required marketplaces
-    info "Adding marketplaces (${NET_TIMEOUT}s cap per attempt, 3 attempts each)..."
+    info "Adding marketplaces (${NET_TIMEOUT}s cap per attempt via $(timeout_backend), 2 attempts each)..."
     for entry in "${marketplace_list[@]}"; do
         local marketplace="${entry%%|*}"
         local repo="${entry##*|}"
@@ -3382,7 +3439,7 @@ install_plugins() {
             warn "If it keeps failing, remove $mkt_dir by hand and re-run."
         fi
 
-        if retry 3 3 "Add marketplace $marketplace" \
+        if retry 2 3 "Add marketplace $marketplace" \
             with_timeout "$NET_TIMEOUT" claude plugin marketplace add "https://github.com/$repo"; then
             ok "Marketplace added: $marketplace"
         else
@@ -3409,7 +3466,7 @@ install_plugins() {
             if plugin_is_installed "$entry"; then
                 claude plugin uninstall "$entry" 2>/dev/null || true
             fi
-            if retry 3 3 "Install plugin $plugin_name" \
+            if retry 2 3 "Install plugin $plugin_name" \
                 with_timeout "$NET_TIMEOUT" claude plugin install "${plugin_name}@${marketplace}"; then
                 ok "Plugin installed: $plugin_name"
             else

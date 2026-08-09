@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.18.2] - 2026-08-09
+
+### Fixed
+- **The bash timeout watchdog held the caller's output pipe open for the full timeout after the command had already succeeded.** `with_timeout`'s fallback forked `( sleep "$secs"; kill ... ) &`, a subshell inheriting the installer's stdout and stderr. When the wrapped command finished early, `kill -TERM "$watchdog_pid"` killed only the subshell — the `sleep` it had already forked was reparented to init and ran to completion, still holding the inherited pipe's write end. Any reader waiting for EOF (`| tee`, `$(...)`, a CI log capture, an agent's shell tool) therefore stalled for exactly `NET_TIMEOUT` seconds per call, regardless of how fast the command returned. Measured on a fast-returning command: 20s stall under the old code, 0s under the new. On a bare tty there is no EOF-waiting reader, which is why this never reproduced interactively.
+- **A perl branch now sits between `gtimeout(1)` and the bash watchdog.** macOS ships neither coreutils binary but always ships perl, whose `alarm` puts the timer inside the waiting process — there is nothing left over to orphan. It forks, waits, and exits with the child's real status, or 124 on timeout after a TERM-then-KILL escalation that polls for exit instead of sleeping a flat 5s. The bash watchdog remains as a last resort and now sends its own output to `/dev/null`, so even there an orphaned `sleep` cannot hold the caller's pipe.
+- **A command finishing on the same instruction boundary the alarm fires on is no longer misreported as a timeout.** The main `waitpid` can reap the child before perl dispatches the pending `SIGALRM`; the handler's `waitpid` then returns -1 (ECHILD) and the old loop, testing only `> 0`, would spin its full 5s grace and `exit 124` over a command that had succeeded. The handler now saves `$?` on entry and returns the real status when the child is already gone.
+
+### Changed
+- **`NET_TIMEOUT` 60s → 180s, and marketplace/plugin attempts 3 → 2.** The `claude` CLI caps its own clone and cache refresh at 120s; the previous 60s sat *below* that, so this script fired first and killed the CLI without reaching the `git` it had forked — leaving an orphan writing the marketplace directory while `retry` started the next attempt against the same path. The cap is now a backstop above the CLI's own limit, letting the CLI hit its bound first and clean up after itself. Dropping to 2 attempts keeps the worst case bounded despite the 3× cap: 363s per marketplace, ~243s in practice.
+- **The `Adding marketplaces` line now names the active timeout backend** (`timeout(1)`, `gtimeout(1)`, `perl`, or `bash watchdog`). A stall reported from someone else's machine is diagnosable from the log alone — the four branches have materially different failure modes.
+
+### Design Rationale
+- **perl forks and waits rather than `alarm` + `exec`.** `alarm(2)` does survive `exec(2)`, making the one-liner `perl -e 'alarm shift; exec @ARGV'` tempting. But `exec` resets signal handlers, so `SIGALRM` kills the process by default action and bash prints `Alarm clock: 14` to stderr on every timeout. Forking costs one extra process and buys a clean `exit 124` plus the TERM-before-KILL grace the old watchdog had.
+- **Indirect-object `exec {$ARGV[0]} @ARGV` never routes through a shell**, so command words containing spaces or metacharacters stay literal. Verified with `printf '[%s]\n' 'a b' 'c;d'`.
+
+### Notes & Caveats
+- **The 120s figure is an assumption about the `claude` CLI recorded only in a comment.** Nothing validates it at runtime. If a future CLI raises its internal cap above 180s, the orphan-`git` race returns.
+- **Killing still does not reach grandchildren.** Neither branch puts the command in its own process group, so a `git` forked by `claude` can outlive the kill. Process-group signalling would fix it but would also detach the command from the terminal, so a `Ctrl-C` on the installer would stop reaching it. The `NET_TIMEOUT` > CLI-internal-timeout ordering is the mitigation instead.
+- **Unverified by automated tests** (`tests/` was removed in `68f30f8`). Verification was manual under system bash 3.2.57: exit-code passthrough (0/1/7), 124 on timeout, 8s total for a TERM-ignoring process under a 3s cap (3 + 5s grace), stderr passthrough, stdin at EOF, literal argument passing, a 30-iteration run against the alarm boundary confirming no 5s spin, an end-to-end `claude plugin marketplace update` through a pipe (1s, was 180s worst case), and `--dry-run --all`.
+
 ## [2.18.1] - 2026-08-09
 
 ### Fixed
