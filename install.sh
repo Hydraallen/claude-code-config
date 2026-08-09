@@ -75,11 +75,65 @@ export GCM_INTERACTIVE="${GCM_INTERACTIVE:-never}"
 # caller's inherited stdout/stderr open until it expires. Any reader waiting for
 # EOF (a pipe, `$(...)`, a log capture) stalls for the full <seconds> even when
 # the command succeeded immediately.
+#
+# `--foreground` is mandatory on the coreutils branches, not cosmetic. Without
+# it timeout(1) calls setpgid(2) before forking, so the command runs in a
+# process group that is not the terminal's foreground group. `claude` is an Ink
+# TUI: it calls tcsetattr(3) on the tty during startup, and a tcsetattr from a
+# background process group raises SIGTTOU, whose default action stops the
+# process. The command freezes within seconds — after printing, since writes
+# from a background group are allowed while TOSTOP is off — and timeout only
+# reaps the stopped process at expiry, so every attempt burns its full cap
+# having done no work. In foreground mode timeout signals only the direct
+# child rather than a whole group, so `--kill-after` restores the
+# TERM-then-KILL escalation the perl branch does by hand, with the same 5s
+# grace so every backend agrees on how long a TERM-ignoring child gets.
+#
+# Only GNU coreutils understands those flags. The busybox applet of the same
+# name rejects them outright, and it has no need for them either — it does not
+# setpgid, so it never had the freeze. `command -v timeout` cannot tell the two
+# apart, so each binary is probed once with the exact flag set that will be
+# used, and the verdict cached in a plain scalar (bash 3.2 has no associative
+# arrays). A binary that fails the probe is skipped entirely and the next
+# backend takes over; falling back to a flag-less timeout(1) is not an option,
+# because on a GNU system that is exactly the freeze described above.
+_TIMEOUT_FOREGROUND_OK=""
+_GTIMEOUT_FOREGROUND_OK=""
+
+timeout_supports_foreground() {
+    case "$1" in
+        timeout)
+            if [[ -z "${_TIMEOUT_FOREGROUND_OK:-}" ]]; then
+                if timeout --foreground --kill-after=5 1 true >/dev/null 2>&1; then
+                    _TIMEOUT_FOREGROUND_OK=yes
+                else
+                    _TIMEOUT_FOREGROUND_OK=no
+                fi
+            fi
+            [[ "$_TIMEOUT_FOREGROUND_OK" == yes ]]
+            ;;
+        gtimeout)
+            if [[ -z "${_GTIMEOUT_FOREGROUND_OK:-}" ]]; then
+                if gtimeout --foreground --kill-after=5 1 true >/dev/null 2>&1; then
+                    _GTIMEOUT_FOREGROUND_OK=yes
+                else
+                    _GTIMEOUT_FOREGROUND_OK=no
+                fi
+            fi
+            [[ "$_GTIMEOUT_FOREGROUND_OK" == yes ]]
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 # Which branch of with_timeout is live here. Printed once so a stalled install
-# reported from someone else's machine can be diagnosed from its log alone.
+# reported from someone else's machine can be diagnosed from its log alone. The
+# probe is part of the test so the label names the branch actually taken.
 timeout_backend() {
-    if command -v timeout &>/dev/null; then echo "timeout(1)"
-    elif command -v gtimeout &>/dev/null; then echo "gtimeout(1)"
+    if command -v timeout &>/dev/null && timeout_supports_foreground timeout; then
+        echo "timeout(1) --foreground"
+    elif command -v gtimeout &>/dev/null && timeout_supports_foreground gtimeout; then
+        echo "gtimeout(1) --foreground"
     elif command -v perl &>/dev/null; then echo "perl"
     else echo "bash watchdog"
     fi
@@ -88,13 +142,18 @@ timeout_backend() {
 with_timeout() {
     local secs="$1"; shift
     local status=0
-    if command -v timeout &>/dev/null; then
-        timeout "$secs" "$@" </dev/null
-        return $?
+    if command -v timeout &>/dev/null && timeout_supports_foreground timeout; then
+        timeout --foreground --kill-after=5 "$secs" "$@" </dev/null || status=$?
+        # A child that ignores TERM is reaped by the follow-up KILL, which
+        # timeout reports as 137. Report it as the timeout it was, so all
+        # branches agree on 124.
+        if (( status == 137 )); then status=124; fi
+        return $status
     fi
-    if command -v gtimeout &>/dev/null; then
-        gtimeout "$secs" "$@" </dev/null
-        return $?
+    if command -v gtimeout &>/dev/null && timeout_supports_foreground gtimeout; then
+        gtimeout --foreground --kill-after=5 "$secs" "$@" </dev/null || status=$?
+        if (( status == 137 )); then status=124; fi
+        return $status
     fi
     if command -v perl &>/dev/null; then
         # Waits in the parent and exits 124 itself rather than letting SIGALRM
@@ -3439,6 +3498,7 @@ install_plugins() {
             warn "If it keeps failing, remove $mkt_dir by hand and re-run."
         fi
 
+        info "Adding marketplace: $marketplace (github.com/$repo)"
         if retry 2 3 "Add marketplace $marketplace" \
             with_timeout "$NET_TIMEOUT" claude plugin marketplace add "https://github.com/$repo"; then
             ok "Marketplace added: $marketplace"
@@ -3466,6 +3526,7 @@ install_plugins() {
             if plugin_is_installed "$entry"; then
                 claude plugin uninstall "$entry" 2>/dev/null || true
             fi
+            info "Installing plugin: $plugin_name from $marketplace"
             if retry 2 3 "Install plugin $plugin_name" \
                 with_timeout "$NET_TIMEOUT" claude plugin install "${plugin_name}@${marketplace}"; then
                 ok "Plugin installed: $plugin_name"
@@ -3628,6 +3689,7 @@ update_installed_plugins() {
             # temp_<epoch> are the CLI's in-flight scratch clones, not catalogs.
             [[ "$mkt_name" == temp_* ]] && continue
             marketplace_dir_is_valid "$mkt_path" || continue
+            info "Refreshing marketplace: $mkt_name"
             if retry 2 3 "Refresh marketplace $mkt_name" \
                 with_timeout "$NET_TIMEOUT" claude plugin marketplace update "$mkt_name"; then
                 ok "Marketplace refreshed: $mkt_name"
