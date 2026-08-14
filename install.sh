@@ -898,7 +898,7 @@ interactive_menu() {
     GROUP_ITEMS+=("CLAUDE.md|Global instructions template|1|claude-md
 settings.json|Smart-merged Claude Code settings|1|settings
 Common rules|Coding style, git, security, testing|1|rules-common
-StatusLine|Gradient progress bar & usage display|1|statusline
+StatusLine|Gradient bars + Anthropic/GLM 5h quota|1|statusline
 Lessons|lessons.md template + SessionStart hook|1|lessons
 Search agent|Jeff read-only web search agent|1|agents
 Shell wrapper|cl/cl_auto zsh functions + system prompt|1|shell-wrapper

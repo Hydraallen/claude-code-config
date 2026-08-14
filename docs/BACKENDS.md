@@ -106,12 +106,19 @@ and it would go out on the wire.
 
 Docs: <https://docs.bigmodel.cn/cn/coding-plan/tool/claude>
 
+The statusline reads this backend's 5h quota too — see
+[Quota in the statusline](#quota-in-the-statusline) below.
+
 ### `gpt` — ChatGPT Plus/Pro subscription
 
 Backed by [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), which
 exposes an Anthropic-compatible `/v1/messages` on `127.0.0.1:8317`.
 
 > **Read the risk section at the end of this subsection before you start.**
+
+> This backend exposes no quota endpoint, so the statusline renders **no quota
+> segment** on a `gpt` terminal. Every other segment is unaffected. See
+> [Quota in the statusline](#quota-in-the-statusline).
 
 #### Step 1 — install
 
@@ -419,6 +426,11 @@ several providers behind one gateway. With
 `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` (already in the profile), Claude
 Code's `/model` lists every provider's models as `provider/model`.
 
+> This backend exposes no quota endpoint, so the statusline renders **no quota
+> segment** on a `ccr` terminal — whichever provider the gateway routes to. Every
+> other segment is unaffected. See
+> [Quota in the statusline](#quota-in-the-statusline).
+
 **Two ports, and mixing them up is the most common mistake:**
 
 | Port | What it is | Who talks to it |
@@ -580,6 +592,51 @@ enhanced route**), a **Routing** page of ordered custom rules, and optional
 Node.js script rules. Subagent routing works by injecting
 `<CCR-SUBAGENT-MODEL>provider/model</CCR-SUBAGENT-MODEL>`, and only activates
 once at least one model has a **Description** filled in on the **Models** page.
+
+## Quota in the statusline
+
+`hooks/statusline.sh` renders a 5-hour quota bar for the backend the terminal is
+actually on. It picks the backend from `$ANTHROPIC_BASE_URL`, which the launcher
+exports per shell, so two terminals on two backends show two different numbers at
+the same time without interfering:
+
+| `$ANTHROPIC_BASE_URL`            | Label    | Source                                              | Refresh |
+| -------------------------------- | -------- | --------------------------------------------------- | ------- |
+| unset (the `claude` profile)     | `5h`     | `api.anthropic.com/api/oauth/usage`, OAuth token     | 60s     |
+| `*bigmodel.cn*` / `*z.ai*`       | `glm 5h` | `{host}/api/monitor/usage/quota/limit`, `$ANTHROPIC_AUTH_TOKEN` | 600s |
+| anything else (`gpt`, `ccr`, …)  | —        | no quota endpoint; the segment is not rendered       | —       |
+
+The bar shows the **used** percentage, and the trailing time is when the window
+resets. GLM's window is rolling — it resets five hours after the request that
+opened it, not on a clock boundary — so the reset time comes from the API rather
+than being computed locally.
+
+Notes:
+
+- **GLM is polled at 1/10th the rate of the native API.** The statusline fires on
+  every render, and Zhipu applies undisclosed rate-limit and risk-control rules,
+  so a 600s TTL keeps an active session well clear of them. The cost is that the
+  first render in a fresh terminal usually has no quota segment; the next one does.
+- **Every backend gets its own cache file** under `$TMPDIR`, and on GLM every
+  credential does too (`claude-usage-cache-anthropic.json`,
+  `claude-usage-cache-glm-<checksum>.json`). Running the mainland and
+  international GLM keys side by side is therefore safe. The checksum is of the
+  token; the token itself is never written to disk. **The native Anthropic path
+  is not split per credential** — its fingerprint is just `anthropic`, because
+  the OAuth token is read from the keychain inside the background fetch and is
+  not available when the filename is computed. Two Anthropic accounts on one
+  machine share `claude-usage-cache-anthropic.json`, so after switching accounts
+  the bar can show the previous account's figure for up to one refresh interval.
+- **Credentials are never passed to `curl` on the command line.** Both fetch
+  paths hand their headers to `curl -K -` on stdin, so no token appears in `ps`
+  output for other users on the machine.
+- **`export CL_NO_USAGE=1` disables quota entirely** — no fetch on any backend,
+  no quota segment. It must be exported from `~/.zshrc`; a one-shot
+  `CL_NO_USAGE=1 cl_glm` prefix does not reach the statusline's process.
+- **The network fetch never blocks a render.** The statusline only ever reads the
+  cache; a stale cache triggers a background refresh for the *next* render. Any
+  failure — no credential, unreachable host, unexpected schema — silently drops
+  the quota segment and leaves every other segment intact.
 
 ## Adding your own backend
 

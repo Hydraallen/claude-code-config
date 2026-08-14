@@ -56,7 +56,7 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | CLAUDE.md | Global instructions template | on |
 | settings.json | Smart-merged Claude Code settings | on |
 | Common rules | `rules/common/` — coding style, git, security, testing | on |
-| StatusLine | Gradient progress bar & 5h usage (`hooks/statusline.sh`) | on |
+| StatusLine | Gradient bars + Anthropic/GLM 5h quota (`hooks/statusline.sh`) | on |
 | Lessons | `lessons.md` template + `SessionStart` hook | on |
 
 **Language Rules (3)** — off by default, enable only what your projects use.
@@ -183,7 +183,7 @@ The [`sinedied/agent-skills`:`image-gen`](https://github.com/sinedied/agent-skil
 ## Key Mechanisms
 
 - **Layered rules** — `rules/common/` (universal) extended by per-language directories. Each file references a deeper skill for patterns, testing, security.
-- **Statusline** — model, directory, venv, git branch, context window (gradient bar), 5-hour usage countdown. Script at `hooks/statusline.sh`.
+- **Statusline** — model, directory, venv, git branch, context window (gradient bar), and the 5-hour quota of whichever backend the terminal is on: native Anthropic or GLM, with backends that have no quota endpoint (`gpt`, `ccr`) simply omitting the segment. Script at `hooks/statusline.sh`; details in [docs/BACKENDS.md](docs/BACKENDS.md#quota-in-the-statusline).
 - **Self-improvement loop** — corrections route to `~/.claude/lessons.md` (cross-project) or project `MEMORY.md` (local). `SessionStart` hooks re-inject them on startup and after context compaction.
 - **Plugin catalogue & marketplace URLs** — full list with install commands: [plugins/README.md](plugins/README.md).
 

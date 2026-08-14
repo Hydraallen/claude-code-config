@@ -56,7 +56,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 | CLAUDE.md | 全局指令模板 | 开启 |
 | settings.json | 智能合并 Claude Code 设置 | 开启 |
 | Common rules | `rules/common/` — 编码风格、git、安全、测试 | 开启 |
-| StatusLine | 渐变进度条 & 5 小时用量（`hooks/statusline.sh`） | 开启 |
+| StatusLine | 渐变进度条 + Anthropic/GLM 5 小时额度（`hooks/statusline.sh`） | 开启 |
 | Lessons | `lessons.md` 模板 + `SessionStart` hook | 开启 |
 
 **Language Rules (3)** — 默认全部关闭，仅启用项目用到的语言。
@@ -183,7 +183,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 ## 核心机制
 
 - **分层规则** — `rules/common/`（通用）被各语言目录扩展，每个文件引用一个更深的 skill（模式、测试、安全）。
-- **状态栏** — 模型、目录、venv、git 分支、上下文窗口（渐变条）、5 小时用量倒计时。脚本在 `hooks/statusline.sh`。
+- **状态栏** — 模型、目录、venv、git 分支、上下文窗口（渐变条），以及当前终端所用后端的 5 小时额度：原生 Anthropic 或 GLM；没有额度端点的后端（`gpt`、`ccr`）则整段不渲染。脚本在 `hooks/statusline.sh`，详见 [docs/BACKENDS.zh-CN.md](docs/BACKENDS.zh-CN.md#状态栏里的额度)。
 - **自我改进回路** — 纠正按范围路由到 `~/.claude/lessons.md`（跨项目）或项目 `MEMORY.md`（本地）。`SessionStart` hook 在启动与压缩后自动注入。
 - **插件目录与 marketplace 地址** — 完整列表和安装命令见 [plugins/README.md](plugins/README.md)。
 

@@ -343,7 +343,7 @@ function Show-InteractiveMenu {
             @{ Label = "CLAUDE.md";       Desc = "Global instructions template";      Default = $true;  Id = "claude-md" }
             @{ Label = "settings.json";   Desc = "Smart-merged Claude Code settings"; Default = $true;  Id = "settings" }
             @{ Label = "Common rules";    Desc = "Coding style, git, security, testing"; Default = $true; Id = "rules-common" }
-            @{ Label = "StatusLine";      Desc = "Gradient progress bar & usage display"; Default = $true; Id = "hooks" }
+            @{ Label = "StatusLine";      Desc = "Gradient bars + Anthropic/GLM 5h quota"; Default = $true; Id = "hooks" }
             @{ Label = "Lessons";         Desc = "lessons.md template + SessionStart hook"; Default = $true; Id = "lessons" }
             @{ Label = "Search agent";    Desc = "Jeff read-only web search agent"; Default = $true; Id = "agents" }
         )}

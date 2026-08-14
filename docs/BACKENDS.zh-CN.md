@@ -96,12 +96,17 @@ Coding Plan 只覆盖 **`glm-5.3`（1M 输入 / 128K 输出）、`glm-5-turbo`�
 
 文档：<https://docs.bigmodel.cn/cn/coding-plan/tool/claude>
 
+状态栏也会读这个后端的 5h 额度，见下方[状态栏里的额度](#状态栏里的额度)。
+
 ### `gpt` —— ChatGPT Plus/Pro 订阅
 
 底层是 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)，它在
 `127.0.0.1:8317` 上暴露一个 Anthropic 兼容的 `/v1/messages`。
 
 > **动手之前，先读完本小节末尾的风险说明。**
+
+> 该后端没有额度端点，因此 `gpt` 终端的状态栏**不渲染额度段**，其余各段不受影响。
+> 详见[状态栏里的额度](#状态栏里的额度)。
 
 #### 第 1 步 —— 安装
 
@@ -321,6 +326,9 @@ wrapper=image-gen-cliproxyapi.sh
 （profile 里已经有了），Claude Code 的 `/model` 会以 `provider/model` 的形式列出每个
 供应商的模型。
 
+> 该后端没有额度端点，因此 `ccr` 终端的状态栏**不渲染额度段** —— 无论网关最终路由到
+> 哪个供应商。其余各段不受影响。详见[状态栏里的额度](#状态栏里的额度)。
+
 **两个端口，搞混它们是最常见的错误：**
 
 | 端口 | 是什么 | 谁在跟它通信 |
@@ -464,6 +472,42 @@ v3 的路由**不再是**老 v1 那套 `default` / `background` / `think` / `lon
 规则。子代理路由的实现方式是注入
 `<CCR-SUBAGENT-MODEL>provider/model</CCR-SUBAGENT-MODEL>`，并且只有在 **Models**
 （模型）页面上至少有一个模型填了 **Description**（描述）之后才会生效。
+
+## 状态栏里的额度
+
+`hooks/statusline.sh` 会渲染当前终端**实际所用后端**的 5 小时额度条。后端由
+`$ANTHROPIC_BASE_URL` 推导，而这个变量是启动器按 shell 导出的，所以两个终端跑两个
+后端时会同时显示各自的数字，互不干扰：
+
+| `$ANTHROPIC_BASE_URL`           | 标签      | 数据来源                                                        | 刷新间隔 |
+| ------------------------------- | -------- | -------------------------------------------------------------- | ------- |
+| 未设置（`claude` profile）       | `5h`     | `api.anthropic.com/api/oauth/usage`，OAuth token                | 60 秒   |
+| `*bigmodel.cn*` / `*z.ai*`      | `glm 5h` | `{host}/api/monitor/usage/quota/limit`，`$ANTHROPIC_AUTH_TOKEN` | 600 秒  |
+| 其他（`gpt`、`ccr` 等）          | —        | 没有可用的额度端点，整段不渲染                                    | —       |
+
+进度条显示的是**已用**百分比，后面的时间是窗口重置时刻。GLM 的窗口是滚动的 —— 从开启
+窗口的那次请求起五小时后重置，而不是按整点 —— 所以重置时间取自接口返回值，不在本地推算。
+
+说明：
+
+- **GLM 的轮询频率是原生 API 的十分之一。** 状态栏每次渲染都会触发，而智谱有未公开的
+  限流与风控规则，600 秒的 TTL 能让活跃会话离阈值足够远。代价是新开终端的第一次渲染
+  通常没有额度段，下一次才有。
+- **每个后端各有自己的缓存文件**（位于 `$TMPDIR`），GLM 后端还会再按凭据细分
+  （`claude-usage-cache-anthropic.json`、`claude-usage-cache-glm-<校验和>.json`）。
+  因此国内版和国际版两个 GLM key 并排使用是安全的。校验和取自 token，token 本身不落盘。
+  **但原生 Anthropic 路径不按凭据细分** —— 它的指纹恒为 `anthropic`，因为 OAuth token
+  是在后台抓取内部才从钥匙串读出的，计算文件名时拿不到。同一台机器上的两个 Anthropic
+  账号会共用 `claude-usage-cache-anthropic.json`，所以切换账号后，额度条最多会有一个
+  刷新周期仍显示上一个账号的数字。
+- **凭据绝不经命令行传给 `curl`。** 两条抓取路径都把请求头经 stdin 交给 `curl -K -`，
+  因此同机其他用户的 `ps` 输出里不会出现任何 token。
+- **`export CL_NO_USAGE=1` 可彻底关闭额度功能** —— 任何后端都不再抓取、也不渲染额度段。
+  它必须在 `~/.zshrc` 里 `export`；写成 `CL_NO_USAGE=1 cl_glm` 这样的一次性前缀赋值
+  传不到状态栏进程。
+- **网络请求绝不阻塞渲染。** 状态栏只读缓存；缓存过期时会拉起一次后台刷新，供**下一次**
+  渲染使用。任何失败 —— 没有凭据、域名不可达、schema 不符 —— 都只会静默去掉额度段，
+  其余各段照常显示。
 
 ## 添加你自己的后端
 
