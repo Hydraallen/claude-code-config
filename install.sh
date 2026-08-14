@@ -2226,7 +2226,7 @@ ccr_manual_slot_hint() {
 # Fill the ccr profile's model slots from the live gateway.
 #
 # CCR model ids embed the provider display name the user typed into the web UI —
-# "Zhipu AI (China) - Coding Plan/glm-5.2" is a real one — so no template can ship
+# "Zhipu AI (China) - Coding Plan/glm-5.3" is a real one — so no template can ship
 # them and no installer can guess them. GET /v1/models on the running gateway is the
 # only source of truth, which is why this step exists at all rather than being more
 # static keys in profiles/ccr.json.
@@ -2692,7 +2692,7 @@ cl_commands_hint() {
     echo "      | 命令             | 后端 / Backend              | /model 列表                  |"
     echo "      |------------------|----------------------------|------------------------------|"
     echo "      | cl_claude /_auto | 官方 Claude 订阅            | Opus / Sonnet / Haiku        |"
-    echo "      | cl_glm    /_auto | 智谱 GLM (BigModel)        | glm-5.2 / glm-5-turbo / 4.7  |"
+    echo "      | cl_glm    /_auto | 智谱 GLM (BigModel)        | glm-5.3 / glm-5-turbo / 4.7  |"
     echo "      | cl_gpt    /_auto | ChatGPT 订阅 (CLIProxyAPI) | GPT / Codex (代理暴露的模型) |"
     echo "      | cl_ccr    /_auto | CCR gateway                | GLM + GPT 合并成一个列表     |"
     echo "      | cl / cl_auto     | 默认 profile (cl_switch 设) | 同上                         |"

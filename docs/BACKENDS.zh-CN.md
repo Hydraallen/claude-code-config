@@ -30,7 +30,7 @@ Claude Code 只会说 Anthropic 协议。因此每一个非 Claude 模型都必�
 
 每次启动都会打印所用的后端和最终解析出的模型，例如
 `cl_glm: backend 'glm' (https://open.bigmodel.cn/api/anthropic, 20 vars)`，随后
-`cl_glm: model opus -> glm-5.2`。
+`cl_glm: model opus -> glm-5.3`。
 
 ### 不改 JSON 也能选模型
 
@@ -63,33 +63,33 @@ CL_MODEL=sonnet cl_glm          # change the default alias for one launch
 cl_glm
 ```
 
-Coding Plan 只覆盖 **`glm-5.2`（1M 输入 / 128K 输出）、`glm-5-turbo`（200K）、
-`glm-4.7`（200K）** 这三个模型 —— opus、sonnet 和 fable 都路由到 `glm-5.2`，haiku
+Coding Plan 只覆盖 **`glm-5.3`（1M 输入 / 128K 输出）、`glm-5-turbo`（200K）、
+`glm-4.7`（200K）** 这三个模型 —— opus、sonnet 和 fable 都路由到 `glm-5.3`，haiku
 路由到 `glm-5-turbo`（`glm-4.7` 计划内覆盖，但不绑定到任何槽位）。
 `fable` 是 Claude Code 的后台槽位（compact、会话标题、配额探测）。它和其他别名一样可以
 显式选择，但客户端还会拿它发**你没主动发起**的请求 —— 所以留空会在这些请求上失败，
 字面量 `claude-fable-5` 直接发出去然后 400。
-`glm-5` 和 `glm-5.1` 在上游会被自动路由到 `glm-5.2`，所以不要固定写它们。
+`glm-5` 和 `glm-5.1` 在上游会被自动路由到 `glm-5.3`，所以不要固定写它们。
 视觉模型 **`glm-5v-turbo`（200K）** 没有自己的槽位；用
 `cl_glm --model glm-5v-turbo` 访问。
 
-#### 解锁 glm-5.2 的 1M 上下文
+#### 解锁 glm-5.3 的 1M 上下文
 
 对于任何它不认识的模型 id，Claude Code 都会硬编码 200K 的上下文上限，而它的注册表里
 没有任何 `glm-*` id —— 所以不做处理的话，客户端会在 200K 就压缩上下文，并把输出限制在
-默认的 32K，白白浪费掉 glm-5.2 实际能接受额度的五分之四。因此 profile 设置了：
+默认的 32K，白白浪费掉 glm-5.3 实际能接受额度的五分之四。因此 profile 设置了：
 
 | 变量 | 值 | 原因 |
 |---|---|---|
 | `CLAUDE_CODE_MAX_CONTEXT_TOKENS` | `1000000` | 客户端只对非 `claude-*` 的模型 id 认这个值；这就是官方留的逃生口 |
 | `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | `1000000` | 压缩窗口取 `min(contextLimit, thisVar)`，所以单独设它是空操作 —— 两个都必须设 |
-| `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | `128000` | glm-5.2 输出上限是 128K；`131072` 会被客户端截断，它最多只接受 `128000` |
+| `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | `128000` | glm-5.3 输出上限是 128K；`131072` 会被客户端截断，它最多只接受 `128000` |
 
 服务端不需要任何额外配置 —— 不用加 header，模型 id 后面也不用加 `[1m]` 后缀。
-**不要**把模型名改成 `glm-5.2[1m]`：那不是一个 Z.ai 模型代号，而且它会被原样发到线上。
+**不要**把模型名改成 `glm-5.3[1m]`：那不是一个 Z.ai 模型代号，而且它会被原样发到线上。
 
 > **注意 —— 一个上限，三个模型。** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 是一个客户端级别的
-> 全局值，不是按槽位区分的。它是按 glm-5.2 配的，glm-5.2 同时占 opus 和 sonnet 两个槽位、
+> 全局值，不是按槽位区分的。它是按 glm-5.3 配的，glm-5.3 同时占 opus 和 sonnet 两个槽位、
 > 也是启动器的默认模型。只有 **haiku（`glm-5-turbo`，200K）** 偏小：切到它时客户端会放任
 > 上下文涨过服务端能接受的长度，而自动压缩救不了你。haiku 会话请控制在 200K 以内，或者
 > `cl_switch` 到一个尺寸匹配的后端。
@@ -361,7 +361,7 @@ v3 的命令是 `ccr start`、`ccr ui`、`ccr stop`、`ccr serve`（前台运行
 | `https://open.bigmodel.cn/api/anthropic` | **Anthropic Messages** |
 
 选 Anthropic Messages 那个。把你的 BigModel key 粘进 **API key**，然后用
-**Search models**（搜索模型）或 **Custom models**（自定义模型）选上 `glm-5.2`、
+**Search models**（搜索模型）或 **Custom models**（自定义模型）选上 `glm-5.3`、
 `glm-5-turbo`、`glm-4.7`。
 
 如果还想把本地的 CLIProxyAPI 也挂进来，再加第二个供应商：**Other / custom
@@ -419,7 +419,7 @@ cl_ccr
 ```
 [OK]   gateway published 12 model(s)
       1) Codex API/gpt-5.6-sol
-     10) Zhipu AI (China) - Coding Plan/glm-5.2
+     10) Zhipu AI (China) - Coding Plan/glm-5.3
      opus [1-12, Enter=skip]:
 ```
 
@@ -441,7 +441,7 @@ cl_ccr
 > **`CLAUDE_CODE_MAX_CONTEXT_TOKENS` 在这里是必填项，不是调优选项。** CCR 上报的每个
 > 模型都是 `context_length: null`，所以模型发现从来不会给出上下文窗口，Claude Code 只能
 > 退回一个很小的默认值 —— 配上庞大的启动上下文，那就是开机即
-> *"Context limit reached"*。profile 里预置 `1000000` 以匹配 `glm-5.2`。它是
+> *"Context limit reached"*。profile 里预置 `1000000` 以匹配 `glm-5.3`。它是
 > **一个客户端全局值，不分槽位**：Codex 系列模型（`gpt-5.6-*`，约 272K）和 `glm-4.7` /
 > `glm-5-turbo`（200K）都小得多，路由到这些模型的会话会把上下文涨过服务端能接受的上限、
 > 中途失败 —— auto-compact 救不回来。如果你经常路由到它们，把这个值降到 `200000`。

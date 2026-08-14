@@ -33,7 +33,7 @@ directory — adding a backend never requires editing `claude.zsh`.
 
 Every launch prints the backend and the model it resolved to, e.g.
 `cl_glm: backend 'glm' (https://open.bigmodel.cn/api/anthropic, 20 vars)` then
-`cl_glm: model opus -> glm-5.2`.
+`cl_glm: model opus -> glm-5.3`.
 
 ### Picking a model without editing JSON
 
@@ -68,36 +68,36 @@ Paste your BigModel API key into `.env.ANTHROPIC_AUTH_TOKEN` of
 cl_glm
 ```
 
-Coding Plan covers **`glm-5.2` (1M in / 128K out), `glm-5-turbo` (200K),
-`glm-4.7` (200K)** only — opus, sonnet and fable all route to `glm-5.2`, haiku
+Coding Plan covers **`glm-5.3` (1M in / 128K out), `glm-5-turbo` (200K),
+`glm-4.7` (200K)** only — opus, sonnet and fable all route to `glm-5.3`, haiku
 routes to `glm-5-turbo` (`glm-4.7` is covered by the plan but wired to no slot).
 `fable` is Claude Code's background slot (compact, session titles, quota probes).
 It is a selectable alias like the others, but the client also uses it for requests
 you never issue — so leaving it unmapped fails on traffic you did not ask for, with
 the literal id `claude-fable-5` going out and 400ing.
-`glm-5` and `glm-5.1` are auto-routed to `glm-5.2` upstream, so don't pin them.
+`glm-5` and `glm-5.1` are auto-routed to `glm-5.3` upstream, so don't pin them.
 The vision model **`glm-5v-turbo` (200K)** has no slot of its own; reach it with
 `cl_glm --model glm-5v-turbo`.
 
-#### Unlocking glm-5.2's 1M context
+#### Unlocking glm-5.3's 1M context
 
 Claude Code hardcodes a 200K context limit for any model id it does not
 recognise, and no `glm-*` id is in its registry — so without help the client
 compacts at 200K and caps output at its 32K default, wasting four fifths of what
-glm-5.2 actually accepts. The profile therefore sets:
+glm-5.3 actually accepts. The profile therefore sets:
 
 | Var | Value | Why |
 |---|---|---|
 | `CLAUDE_CODE_MAX_CONTEXT_TOKENS` | `1000000` | The client honours this only for non-`claude-*` model ids; it is the intended escape hatch |
 | `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | `1000000` | The compact window is `min(contextLimit, thisVar)`, so setting it alone is a no-op — both are needed |
-| `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | `128000` | glm-5.2 tops out at 128K output; `131072` would be clamped by the client, which accepts at most `128000` |
+| `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | `128000` | glm-5.3 tops out at 128K output; `131072` would be clamped by the client, which accepts at most `128000` |
 
 Nothing extra is needed server-side — no header, no `[1m]` suffix on the model
-id. Do **not** rename the model to `glm-5.2[1m]`: that is not a Z.ai model code
+id. Do **not** rename the model to `glm-5.3[1m]`: that is not a Z.ai model code
 and it would go out on the wire.
 
 > **Caveat — one limit, three models.** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is a
-> single client-wide value, not per-slot. It matches glm-5.2, which fills both
+> single client-wide value, not per-slot. It matches glm-5.3, which fills both
 > the opus and sonnet slots and is the launcher default. Only **haiku
 > (`glm-5-turbo`, 200K)** is undersized: if you route to it the client will let
 > the context grow past what the server accepts and auto-compact will not save
@@ -464,7 +464,7 @@ Plan** outside China). Each coding-plan preset ships two endpoints:
 | `https://open.bigmodel.cn/api/anthropic` | **Anthropic Messages** |
 
 Pick the Anthropic Messages one. Paste your BigModel key into **API key**, then
-use **Search models** or **Custom models** to select `glm-5.2`, `glm-5-turbo`,
+use **Search models** or **Custom models** to select `glm-5.3`, `glm-5-turbo`,
 `glm-4.7`.
 
 To also front your local CLIProxyAPI, add a second provider: **Other / custom
@@ -525,7 +525,7 @@ real ids:
 ```
 [OK]   gateway published 12 model(s)
       1) Codex API/gpt-5.6-sol
-     10) Zhipu AI (China) - Coding Plan/glm-5.2
+     10) Zhipu AI (China) - Coding Plan/glm-5.3
      opus [1-12, Enter=skip]:
 ```
 
@@ -553,7 +553,7 @@ would name a model it has never heard of.
 > reports every model with `context_length: null`, so discovery never supplies a
 > context window and Claude Code falls back to a small default — which, with a
 > large startup context, is an instant *"Context limit reached"*. The profile
-> ships `1000000` to match `glm-5.2`. It is **one client-wide value, not
+> ships `1000000` to match `glm-5.3`. It is **one client-wide value, not
 > per-slot**: the Codex models (`gpt-5.6-*`, ~272K) and `glm-4.7` /
 > `glm-5-turbo` (200K) are far smaller, and a session routed to those will grow
 > past what the server accepts and fail mid-run — auto-compact will not rescue
