@@ -2,6 +2,22 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [3.0.1] - 2026-08-15
+
+### 修复
+- **修复：stale manifest 清理会删掉仍然有效的所有权凭证。** `install_image_gen` 只要 `prior_owned` 为 false 就删除 manifest，而 `prior_owned` 为 false 有**两个**完全不同的来源 —— skill 目录不存在，或者目录明明还在、只是 marker 校验没通过。注释和 warn 文案都写着"no image-gen directory present"，但判断条件里从来没有测过目录是否存在。于是只要用户的 `SKILL.md` marker 不再匹配（手工编辑、写入被截断、升级中途中断），下一次安装就会把完全合法的 manifest 删掉；而且**不可逆**：manifest 一没，该目录就永远通不过所有权校验，之后每一次运行都会跳过它。现在条件里补上了 `[[ ! -d "$skill_dir" ]]`，也就是那条注释一直以来声称的语义。`install.ps1` 有逐字对应的同一 bug，做了同样的修复。该缺陷自 `e1cfff6`（2026-08-02）引入 image-gen 起就存在，与 3.0.0 的 OpenRouter 迁移无关 —— 迁移只是让后果浮出水面。
+- **修复：manifest 一旦丢失，目录就再也无法被安装器修复。** "exists but is not installer-owned" 那条分支在 `image_gen_augment_skill` 之前就 return 了，所以 manifest 没了之后，目录被永久判成用户自建内容并一直跳过。现在所有权多了一条独立证据：一段**逐字节合法**、能通过严格布局校验的 managed marker 块（当前版或 OpenRouter 之前的旧版）本身就证明这个文件是本安装器写的 —— 这些 marker 是整行精确匹配的字面量，只有 `image_gen_augment_skill` 会输出。这样的目录现在会被"收养"：走正常升级路径，成功后补写一份新的 manifest。已中招的机器在下次安装时自动恢复，不必手动 `rm -rf ~/.claude/skills/image-gen`。
+- **修复：两个 bug 叠加会产出自相矛盾的安装状态。** `install_scripts` 无条件删除所有 `SUPERSEDED_USER_SCRIPTS` 条目，且完全不知道本次运行稍后会做出的 image-gen 所有权判定。当 image-gen 被跳过时，结果就是 `~/.claude/scripts/image-gen-cliproxyapi.sh` 已被删除，而 `~/.claude/skills/image-gen/SKILL.md` 仍在指示 Claude 去调用它 —— 图像生成在一条死路径上失败，而输出里没有任何一句话解释原因。**这正是受影响用户实际看到的症状。** 现在发生跳过时，安装器会检查被跳过的 `SKILL.md` 是否仍然引用了某个已废弃的 wrapper；如果是，就明确打印出坏在哪里，以及两条具体的修法（重装，或那一行手工替换），而不是只把 warning 计数加一。
+
+### 设计考量
+- **收养判定只放宽了一个维度，而且是刻意选的那一个。** 自愈路径的风险在于把用户自己的目录误判成 installer-owned 并覆盖掉。marker 块之所以是安全的证据，恰恰因为严格校验器毫不宽容：有且仅有一个整行精确的 BEGIN、有且仅有一个整行精确的 END、BEGIN 在 END 之前，且不允许任何一行携带 marker 文本却不是精确 marker 行。用户自己写 image-gen skill 不会碰巧写出这种结构。`_image_gen_dir_owned` 本身保持严格（manifest **且** markers）而没有被放宽，因为卸载路径也调用它，而删除操作应当继续要求更强的证据；收养是一条独立的判定，只在安装路径上被查询。两条证据都不成立的目录仍然被跳过、绝不触碰，并且有一条专门的回归测试断言这一点。
+- **备份路径必须学会"manifest 可能不存在"。** 被收养的安装，按定义就是 manifest 缺失或不可用的那种；而原先 npx 之前的强制备份要求目录和 manifest 两者都复制成功、缺一就拒绝继续 —— 那会让每一次收养都被挡下。现在备份与恢复共用一个 `backup_manifest` 标志：目录那一半始终必须成功，manifest 那一半只在确实存在可用 manifest 时才备份和校验。因此收养失败时的回滚会逐字节还原原来的 `SKILL.md`，且不会凭空造出 manifest —— 这由测试 V8f 断言。
+
+### 注意事项
+- 测试断言从 25 条扩到 55 条。旧套件看不见的三格现在被直接覆盖 —— `manifest=none + markers=legacy`（真机的确切状态）、`manifest=none + markers=current`，以及 `目录存在 + manifest 合法 + markers 不匹配`（自毁场景，现在断言 manifest 必须**存活**）—— 另加一格防止放宽过头：两条证据都没有的目录仍判 not owned。用修复前的安装器跑，新增断言里有 13 条失败；用修复后的跑，55 条全绿。
+- 新测试是在临时 `CLAUDE_DIR` 上、用打桩的 `npx` 端到端驱动真正的 `install_image_gen`，而不是孤立地测辅助函数。**孤立测辅助函数正是原 bug 漏网的原因**：每个 helper 单独看都正确，而协调函数从头到尾就没调用过迁移逻辑。
+- `install.ps1` 做了同样的四处改动（目录缺失前提、`Test-ImageGenDirAdoptable`、废弃 wrapper 提示、可选 manifest 的备份/恢复）。**这些改动未经验证**：编写时的机器上没有 PowerShell 运行时，PowerShell 侧只是对照 Bash 原文逐条静态移植并人工复核，没有实际执行过。
+
 ## [3.0.0] - 2026-08-15
 
 ### 新功能

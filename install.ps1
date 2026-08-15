@@ -1353,6 +1353,20 @@ function Test-ImageGenDirOwned {
     return (Test-ImageGenMarkersStrictAny -SkillMd (Join-Path $SkillDir "SKILL.md"))
 }
 
+# Adoption proof for a directory whose manifest was lost or corrupted. A
+# strictly well-formed managed marker block (current or pre-OpenRouter layout)
+# is itself evidence this installer wrote the file: the markers are exact-line
+# literals emitted only by Update-ImageGenSkillInstructions, and the strict
+# validator rejects duplicates, nesting, and embedded prose. Such a directory
+# is upgraded (and its manifest rewritten) instead of being frozen out forever.
+# A directory with neither a valid manifest nor a well-formed block stays
+# unowned and is never touched.
+function Test-ImageGenDirAdoptable {
+    param([Parameter(Mandatory=$true)][string]$SkillDir)
+    if (-not (Test-Path -LiteralPath $SkillDir)) { return $false }
+    return (Test-ImageGenMarkersStrictAny -SkillMd (Join-Path $SkillDir "SKILL.md"))
+}
+
 # Write the ownership manifest atomically. The manifest is the sole authority
 # uninstall uses. Written with explicit LF + one trailing newline so the byte
 # comparison in Test-ImageGenManifestValid holds. Atomicity:
@@ -1651,7 +1665,10 @@ function Invoke-ImageGenNpx {
 #     directory and manifest are backed up before npx mutation; on ANY later
 #     failure both are restored so on-disk state is exactly the previous good
 #     install.
-#   - Unowned directory present (dir exists but not owned): NEVER overwritten.
+#   - Adoptable directory (dir present with a strictly well-formed managed
+#     block but no usable manifest): treated as owned, backed up the same way,
+#     upgraded, and given a fresh manifest on success.
+#   - Unowned directory present (neither proof holds): NEVER overwritten.
 #   - Fresh target (no dir): a stale/foreign manifest is removed first; on
 #     failure after npx the half-installed directory is removed.
 # Failure is non-fatal (increments $script:InstallWarnings, returns).
@@ -1663,10 +1680,13 @@ function Install-ImageGen {
     $cmdPreview = "npx " + ($npxArgs -join " ")
 
     $priorOwned = Test-ImageGenDirOwned -SkillDir $skillDir -Manifest $manifest
+    $adoptOwned = $false
+    if (-not $priorOwned) { $adoptOwned = Test-ImageGenDirAdoptable -SkillDir $skillDir }
 
     if ($DryRun) {
         Write-Info "Would run: `$env:DO_NOT_TRACK='1'; $cmdPreview"
         if ($priorOwned) { Write-Info "Would upgrade prior installer-owned image-gen (backed up first, restored on failure)" }
+        if ($adoptOwned) { Write-Info "Would adopt image-gen (managed block present, manifest missing/invalid), upgrade it, and rewrite the manifest" }
         Write-Info "Would augment $skillDir\SKILL.md with the managed integration block"
         Write-Info "Would write ownership manifest $manifest"
         return
@@ -1675,7 +1695,11 @@ function Install-ImageGen {
     # Reconcile stale ownership BEFORE every other early return: a valid
     # manifest with no skill directory is stale ownership of nothing; remove
     # it so it can never later authorize deletion of a user-created directory.
-    if (-not $priorOwned -and (Test-Path -LiteralPath $manifest) -and (Test-ImageGenManifestValidAny -Manifest $manifest)) {
+    # The absent-directory test is the whole premise: when the directory IS
+    # present the manifest is live ownership evidence, even if the marker check
+    # happens to be failing, and deleting it would destroy the only proof this
+    # installer has.
+    if (-not (Test-Path -LiteralPath $skillDir) -and (Test-Path -LiteralPath $manifest) -and (Test-ImageGenManifestValidAny -Manifest $manifest)) {
         Remove-Item -LiteralPath $manifest -Force -ErrorAction SilentlyContinue
         Write-Warn "image-gen: removed stale ownership manifest (no image-gen directory present)"
     }
@@ -1692,9 +1716,28 @@ function Install-ImageGen {
 
     # Unowned directory protection: never overwrite a user-authored/foreign
     # directory that merely collides with the image-gen name.
-    if ((Test-Path -LiteralPath $skillDir) -and -not $priorOwned) {
-        Write-Warn "image-gen: $skillDir exists but is not installer-owned - skipping to avoid overwriting user content"
-        Write-Warn "  To manage image-gen via this installer, remove the directory manually first, then re-run."
+    if ((Test-Path -LiteralPath $skillDir) -and -not $priorOwned -and -not $adoptOwned) {
+        Write-Warn "image-gen: $skillDir exists but is not installer-owned (no valid manifest, no well-formed managed block) - skipping to avoid overwriting user content"
+        # Install-Scripts already deleted every superseded wrapper unconditionally,
+        # with no knowledge of this ownership decision. When the skipped SKILL.md
+        # still names one, the two stages have left the user with instructions
+        # pointing at a file that no longer exists, so say so in actionable terms.
+        $skillMd = Join-Path $skillDir "SKILL.md"
+        $staleRef = ""
+        if (Test-Path -LiteralPath $skillMd) {
+            $skillMdText = Get-Content -LiteralPath $skillMd -Raw -ErrorAction SilentlyContinue
+            foreach ($staleScript in $SUPERSEDED_USER_SCRIPTS) {
+                if ($skillMdText -and $skillMdText.Contains($staleScript)) { $staleRef = $staleScript; break }
+            }
+        }
+        if ($staleRef) {
+            Write-Warn "  BROKEN: $skillMd still calls $staleRef, which this installer has already removed from $CLAUDE_DIR\scripts."
+            Write-Warn "  Image generation will fail with a missing-file error until you do one of:"
+            Write-Warn "    (a) delete '$skillDir' and '$manifest', then re-run this installer for a clean managed install"
+            Write-Warn "    (b) edit $skillMd by hand and replace $staleRef with $CLAUDE_DIR\scripts\image-gen-openrouter.py"
+        } else {
+            Write-Warn "  To manage image-gen via this installer, remove the directory manually first, then re-run."
+        }
         $script:InstallWarnings++
         return
     }
@@ -1702,20 +1745,27 @@ function Install-ImageGen {
     # Mandatory upgrade backup: for a prior-owned install, a verified backup
     # of skill + manifest must exist before npx; any failure aborts the
     # upgrade with prior bytes intact. Lives outside the skill directory.
+    # An adopted install has no manifest worth preserving (that is why it needed
+    # adopting), so $backupManifest records whether the manifest half of the
+    # backup exists; restore consults the same flag.
     $backupDir = ""
-    if ($priorOwned) {
+    $backupManifest = $false
+    if ($priorOwned -or $adoptOwned) {
         $backupDir = Join-Path ([System.IO.Path]::GetTempPath()) ("image-gen-prev." + (Get-Random))
         try {
             New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
             Copy-Item -LiteralPath $skillDir -Destination (Join-Path $backupDir "image-gen") -Recurse -Force
-            Copy-Item -LiteralPath $manifest -Destination (Join-Path $backupDir "manifest") -Force
+            if ((Test-Path -LiteralPath $manifest) -and (Test-ImageGenManifestValidAny -Manifest $manifest)) {
+                Copy-Item -LiteralPath $manifest -Destination (Join-Path $backupDir "manifest") -Force
+                $backupManifest = $true
+            }
         } catch {
             Write-Warn "image-gen: failed to build upgrade backup - aborting upgrade (prior install left intact)"
             if ($backupDir -and (Test-Path $backupDir)) { Remove-Item $backupDir -Recurse -Force -ErrorAction SilentlyContinue }
             $script:InstallWarnings++
             return
         }
-        if (-not (Test-Path (Join-Path $backupDir "manifest")) -or -not (Test-Path (Join-Path $backupDir "image-gen"))) {
+        if (-not (Test-Path (Join-Path $backupDir "image-gen")) -or ($backupManifest -and -not (Test-Path (Join-Path $backupDir "manifest")))) {
             Write-Warn "image-gen: upgrade backup verification failed - aborting upgrade (prior install left intact)"
             if ($backupDir -and (Test-Path $backupDir)) { Remove-Item $backupDir -Recurse -Force -ErrorAction SilentlyContinue }
             $script:InstallWarnings++
@@ -1743,16 +1793,23 @@ function Install-ImageGen {
             $rtmp = Join-Path (Split-Path -Parent $skillDir) (".image-gen-restore." + (Get-Random))
             New-Item -ItemType Directory -Path $rtmp -Force | Out-Null
             Copy-Item -LiteralPath (Join-Path $backupDir "image-gen") -Destination (Join-Path $rtmp "image-gen") -Recurse -Force
-            Copy-Item -LiteralPath (Join-Path $backupDir "manifest") -Destination (Join-Path $rtmp "manifest") -Force
+            if ($backupManifest) {
+                Copy-Item -LiteralPath (Join-Path $backupDir "manifest") -Destination (Join-Path $rtmp "manifest") -Force
+            }
             if (-not (Test-Path (Join-Path $rtmp "image-gen")) `
                 -or -not (Test-Path (Join-Path $rtmp "image-gen\scripts\image_gen.py")) `
-                -or -not (Test-ImageGenMarkersStrictAny -SkillMd (Join-Path $rtmp "image-gen\SKILL.md")) `
-                -or -not (Test-ImageGenManifestValidAny -Manifest (Join-Path $rtmp "manifest"))) {
+                -or -not (Test-ImageGenMarkersStrictAny -SkillMd (Join-Path $rtmp "image-gen\SKILL.md"))) {
+                Remove-Item $rtmp -Recurse -Force -ErrorAction SilentlyContinue
+                return 1
+            }
+            if ($backupManifest -and -not (Test-ImageGenManifestValidAny -Manifest (Join-Path $rtmp "manifest"))) {
                 Remove-Item $rtmp -Recurse -Force -ErrorAction SilentlyContinue
                 return 1
             }
             Move-Item -LiteralPath (Join-Path $rtmp "image-gen") -Destination $skillDir -Force
-            Move-Item -LiteralPath (Join-Path $rtmp "manifest") -Destination $manifest -Force
+            if ($backupManifest) {
+                Move-Item -LiteralPath (Join-Path $rtmp "manifest") -Destination $manifest -Force
+            }
             Remove-Item $rtmp -Recurse -Force -ErrorAction SilentlyContinue
             return 0
         } catch {

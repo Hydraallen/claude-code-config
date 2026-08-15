@@ -3120,12 +3120,30 @@ _image_gen_dir_owned() {
     return 0
 }
 
+# Adoption proof for a directory whose manifest was lost or corrupted. A
+# strictly well-formed managed marker block (current or pre-OpenRouter layout)
+# is itself evidence this installer wrote the file: the markers are exact-line
+# literals emitted only by image_gen_augment_skill, and the strict validator
+# rejects duplicates, nesting, and embedded prose. A directory that carries one
+# is therefore upgraded (and its manifest rewritten) instead of being frozen out
+# forever. A directory with neither a valid manifest nor a well-formed block
+# stays unowned and is never touched.
+_image_gen_dir_adoptable() {
+    local skill_dir="$1"
+    [[ -d "$skill_dir" ]] || return 1
+    _image_gen_markers_strict_any "$skill_dir/SKILL.md" || return 1
+    return 0
+}
+
 # Coordinator. Always-installed (no flag gate). Transactional upgrade semantics:
 #   - Prior valid ownership (manifest valid AND dir present): the prior skill
 #     directory and manifest are backed up before npx mutation; on ANY later
 #     failure (npx, wrapper, augment, manifest write) both are restored, so the
 #     on-disk state is exactly the previous good install.
-#   - Unowned directory present (dir exists but no valid manifest): the user's
+#   - Adoptable directory (dir present with a strictly well-formed managed
+#     block but no usable manifest): treated as owned, backed up the same way,
+#     upgraded, and given a fresh manifest on success.
+#   - Unowned directory present (dir exists with neither proof): the user's
 #     directory is NEVER overwritten. The run warns and skips.
 #   - Fresh target (no dir): any stale/foreign manifest is removed first (a
 #     failed run never claims ownership of nothing); on failure after npx, the
@@ -3142,10 +3160,15 @@ install_image_gen() {
     if _image_gen_dir_owned "$skill_dir" "$manifest"; then
         prior_owned=true
     fi
+    local adopt_owned=false
+    if ! $prior_owned && _image_gen_dir_adoptable "$skill_dir"; then
+        adopt_owned=true
+    fi
 
     if $DRY_RUN; then
         info "Would run: DO_NOT_TRACK=1 ${_IMAGE_GEN_NPX_CMD[*]}"
         $prior_owned && info "Would upgrade prior installer-owned image-gen (backed up first, restored on failure)"
+        $adopt_owned && info "Would adopt image-gen (managed block present, manifest missing/invalid), upgrade it, and rewrite the manifest"
         info "Would augment ~/.claude/skills/image-gen/SKILL.md with the managed integration block"
         info "Would write ownership manifest $manifest (mode 600)"
         return 0
@@ -3154,8 +3177,12 @@ install_image_gen() {
     # Reconcile stale ownership BEFORE every other early return (review #1).
     # A valid manifest with no skill directory is stale ownership of nothing;
     # remove it so it can never later authorize deletion of a directory the
-    # user creates themselves. (Dry-run returned above, so this write is safe.)
-    if ! $prior_owned && [[ -f "$manifest" ]] && _image_gen_manifest_valid_any "$manifest"; then
+    # user creates themselves. The absent-directory test is the whole premise:
+    # when the directory IS present the manifest is live ownership evidence,
+    # even if the marker check happens to be failing, and deleting it would
+    # destroy the only proof this installer has. (Dry-run returned above, so
+    # this write is safe.)
+    if [[ ! -d "$skill_dir" ]] && [[ -f "$manifest" ]] && _image_gen_manifest_valid_any "$manifest"; then
         rm -f "$manifest"
         warn "image-gen: removed stale ownership manifest (no image-gen directory present)"
     fi
@@ -3175,9 +3202,28 @@ install_image_gen() {
     # Unowned directory protection: never overwrite a user-authored/foreign
     # directory that merely collides with the image-gen name. A stale manifest
     # was already invalidated above, so it cannot authorize overwriting this.
-    if [[ -d "$skill_dir" ]] && ! $prior_owned; then
-        warn "image-gen: $skill_dir exists but is not installer-owned (no valid manifest) — skipping to avoid overwriting user content"
-        warn "  To manage image-gen via this installer, remove the directory manually first, then re-run."
+    if [[ -d "$skill_dir" ]] && ! $prior_owned && ! $adopt_owned; then
+        warn "image-gen: $skill_dir exists but is not installer-owned (no valid manifest, no well-formed managed block) — skipping to avoid overwriting user content"
+        # install_scripts already deleted every superseded wrapper unconditionally,
+        # with no knowledge of this ownership decision. When the skipped SKILL.md
+        # still names one, the two stages have left the user with instructions
+        # pointing at a file that no longer exists, so say so in actionable terms
+        # rather than only bumping the warning counter.
+        local stale_script stale_ref=""
+        for stale_script in "${SUPERSEDED_USER_SCRIPTS[@]}"; do
+            if [[ -f "$skill_dir/SKILL.md" ]] && grep -qF -- "$stale_script" "$skill_dir/SKILL.md" 2>/dev/null; then
+                stale_ref="$stale_script"
+                break
+            fi
+        done
+        if [[ -n "$stale_ref" ]]; then
+            warn "  BROKEN: $skill_dir/SKILL.md still calls $stale_ref, which this installer has already removed from $CLAUDE_DIR/scripts."
+            warn "  Image generation will fail with a missing-file error until you do one of:"
+            warn "    (a) rm -rf '$skill_dir' && rm -f '$manifest'   then re-run this installer for a clean managed install"
+            warn "    (b) edit $skill_dir/SKILL.md by hand and replace $stale_ref with $CLAUDE_DIR/scripts/image-gen-openrouter.py"
+        else
+            warn "  To manage image-gen via this installer, remove the directory manually first, then re-run."
+        fi
         (( INSTALL_WARNINGS++ )) || true
         return 0
     fi
@@ -3186,24 +3232,36 @@ install_image_gen() {
     # backup of skill+manifest MUST exist before npx is invoked; any failure
     # aborts the upgrade with prior bytes intact. The backup lives outside the
     # skill directory so the npx overwrite cannot disturb it.
-    local backup_dir=""
-    if $prior_owned; then
+    # An adopted install has no manifest worth preserving (that is why it needed
+    # adopting), so backup_manifest records whether the manifest half of the
+    # backup exists; restore consults the same flag.
+    local backup_dir="" backup_manifest=false
+    if $prior_owned || $adopt_owned; then
         backup_dir=$(mktemp -d "${TMPDIR:-/tmp}/image-gen-prev.XXXXXX" 2>/dev/null)
         if [[ -z "$backup_dir" ]]; then
             warn "image-gen: failed to create upgrade backup — aborting upgrade (prior install left intact)"
             (( INSTALL_WARNINGS++ )) || true
             return 0
         fi
-        if ! cp -a "$skill_dir" "$backup_dir/image-gen" 2>/dev/null \
-           || ! cp -a "$manifest" "$backup_dir/manifest" 2>/dev/null; then
+        if ! cp -a "$skill_dir" "$backup_dir/image-gen" 2>/dev/null; then
             rm -rf "$backup_dir" 2>/dev/null
             warn "image-gen: failed to copy prior install to backup — aborting upgrade (prior install left intact)"
             (( INSTALL_WARNINGS++ )) || true
             return 0
         fi
-        # Verified copies: both the manifest file and the skill directory must
-        # be present and non-empty before we are willing to mutate the target.
-        if [[ ! -s "$backup_dir/manifest" ]] || [[ ! -d "$backup_dir/image-gen" ]]; then
+        if [[ -f "$manifest" ]] && _image_gen_manifest_valid_any "$manifest"; then
+            if ! cp -a "$manifest" "$backup_dir/manifest" 2>/dev/null; then
+                rm -rf "$backup_dir" 2>/dev/null
+                warn "image-gen: failed to copy prior install to backup — aborting upgrade (prior install left intact)"
+                (( INSTALL_WARNINGS++ )) || true
+                return 0
+            fi
+            backup_manifest=true
+        fi
+        # Verified copies: the skill directory, and the manifest file when one
+        # was backed up, must be present and non-empty before we are willing to
+        # mutate the target.
+        if [[ ! -d "$backup_dir/image-gen" ]] || { $backup_manifest && [[ ! -s "$backup_dir/manifest" ]]; }; then
             rm -rf "$backup_dir" 2>/dev/null
             warn "image-gen: upgrade backup verification failed — aborting upgrade (prior install left intact)"
             (( INSTALL_WARNINGS++ )) || true
@@ -3239,17 +3297,24 @@ install_image_gen() {
         local parent rtmp
         parent=$(dirname "$skill_dir")
         rtmp=$(mktemp -d "${parent}/.image-gen-restore.XXXXXX" 2>/dev/null) || return 1
-        if ! cp -a "$backup_dir/image-gen" "$rtmp/image-gen" 2>/dev/null \
-           || ! cp -a "$backup_dir/manifest" "$rtmp/manifest" 2>/dev/null; then
+        if ! cp -a "$backup_dir/image-gen" "$rtmp/image-gen" 2>/dev/null; then
+            rm -rf "$rtmp" 2>/dev/null
+            return 1
+        fi
+        if $backup_manifest && ! cp -a "$backup_dir/manifest" "$rtmp/manifest" 2>/dev/null; then
             rm -rf "$rtmp" 2>/dev/null
             return 1
         fi
         # Validate the restored layout BEFORE renaming: dir, upstream script,
-        # strict marker block, and canonical manifest must all hold.
+        # strict marker block, and — when a manifest was backed up — a valid
+        # manifest must all hold.
         if [[ ! -d "$rtmp/image-gen" ]] \
            || [[ ! -f "$rtmp/image-gen/scripts/image_gen.py" ]] \
-           || ! _image_gen_markers_strict_any "$rtmp/image-gen/SKILL.md" 2>/dev/null \
-           || ! _image_gen_manifest_valid_any "$rtmp/manifest" 2>/dev/null; then
+           || ! _image_gen_markers_strict_any "$rtmp/image-gen/SKILL.md" 2>/dev/null; then
+            rm -rf "$rtmp" 2>/dev/null
+            return 1
+        fi
+        if $backup_manifest && ! _image_gen_manifest_valid_any "$rtmp/manifest" 2>/dev/null; then
             rm -rf "$rtmp" 2>/dev/null
             return 1
         fi
@@ -3258,11 +3323,13 @@ install_image_gen() {
             rm -rf "$rtmp" 2>/dev/null
             return 1
         fi
-        if ! mv -f "$rtmp/manifest" "$manifest" 2>/dev/null; then
-            rm -rf "$rtmp" 2>/dev/null
-            return 1
+        if $backup_manifest; then
+            if ! mv -f "$rtmp/manifest" "$manifest" 2>/dev/null; then
+                rm -rf "$rtmp" 2>/dev/null
+                return 1
+            fi
+            chmod 600 "$manifest" 2>/dev/null || true
         fi
-        chmod 600 "$manifest" 2>/dev/null || true
         rm -rf "$rtmp" 2>/dev/null
         return 0
     }
