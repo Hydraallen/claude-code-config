@@ -2,6 +2,25 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [3.0.2] - 2026-08-15
+
+### 修复
+- **修复：image-gen 引导块压不住它所追加的上游 SKILL.md 正文。** 引导块被追加在一份自己正在教 `OPENAI_API_KEY`、`.env` 文件、`OPENAI_BASE_URL`、`--api-key` / `--base-url`、`--mask` 局部重绘、裸 `gpt-image-*` 模型 id，以及每个示例都写着 `python scripts/image_gen.py` 的文件末尾。同一个文件里并存着两套各自自洽、彼此矛盾的说明，而引导块只说了"请用我们这套"，从来没说上游那套已经作废。模型完全可能挑上游那条路 —— 而且真的挑了：它直接调用 `~/.claude/skills/image-gen/scripts/image_gen.py`，撞上缺失的 `OPENAI_API_KEY`，然后建议用户 `export OPENAI_API_KEY=sk-...` 或在 skill 目录里建 `.env` —— 这些跟本 wrapper 毫无关系。现在引导块被重写成一份显式覆盖声明：开篇即宣告它优先于上文的一切，指明 `python3 ~/.claude/scripts/image-gen-openrouter.py` 是唯一入口，随后**逐条点名**上游那些已失效的指令并标注其现状。它同时说明了 wrapper 真正接受的参数（包括上游从未提及的 `--aspect-ratio`、`--resolution`、`--seed` 与 `512`/`1K`/`2K`/`4K` 尺寸档）、真实的默认模型 `openai/gpt-image-2`，以及退出码 `2` / `3` / `4` 的含义与各自正确的应对 —— 每一条应对都不会绕回 `image_gen.py` 或某个 OpenAI 变量。`install.ps1` 的 `Get-ImageGenIntegrationBlock` 同步为逐字节相同的新文本。
+- **修复：安装结束时的启动器表格会列出用户根本没装的命令。** `cl_commands_hint` 无条件打印全部五行后端（`cl_claude` / `cl_glm` / `cl_or` / `cl_gpt` / `cl_ccr`），所以默认安装（只装 `claude`、`glm`、`or`）依然会告诉用户有 `cl_gpt` 和 `cl_ccr`。这些启动器是 `claude.zsh` 按已安装 profile 的 glob 动态生成的，在这台机器上压根不存在，照着敲只会得到 `command not found`。现在后端行按 `$CLAUDE_DIR/profiles/*.json` 逐行过滤；通用行（`cl` / `cl_auto`、`cl_switch`、`cl_profiles`、`cl_stop`）仍然始终显示。
+
+### 设计考量
+- **要的是显式否定，而不是更用力的推荐。** 只告诉模型"用 wrapper"，等于把上游那套留在原地当作一个仍然成立的备选 —— 这次故障正是这么发生的：文件里没有任何一句话说 `OPENAI_API_KEY` 是错的，只说了还存在另一条路。现在引导块把 `python scripts/image_gen.py`、`OPENAI_API_KEY`、`.env`、`OPENAI_BASE_URL`、`OPENAI_IMAGE_MODEL`、`--api-key`、`--base-url`、`--mask`、`--moderation` 以及 `gpt-image-*` 模型表逐条列出，并说明每一条现在是什么状态。覆盖范围是**有界**而非全盘的 —— 提示词撰写指引与 `references/sample-prompts.md` 的配方步骤被明确保留为仍然有效，这样引导块就不会被读成"忽略整个文件"。
+- **引导块仍然追加在 `SKILL.md` 末尾，没有改插到 frontmatter 之后。** 前移只能换来一点推测性的"靠前更被采信"收益，代价却有三项实打实的。存量安装本来也享受不到：replace 路径是**原地**改写这段块，所以除非再加一条 strip-and-reinsert 迁移，已装机器的块仍留在末尾 —— 而加了迁移，全新安装与升级安装的版式又会不一致。插入还需要解析 frontmatter（判第 1 行是否 `---`、找闭合的 `---`、处理两者都没有的文件），并在两个安装器里各写一遍；而编写本次改动的机器上没有 PowerShell 运行时，等于 Bash 侧被测试、PowerShell 侧只能盲移植一段**结构性逻辑**（而非仅仅一个字符串）。相比之下，引导块的逐字节一致性可以机械校验。既然缺陷出在引导块的内容而不是位置，就只修内容、不动写入路径：`image_gen_augment_skill`、严格 marker 校验器、legacy 迁移与幂等性全部未改。
+- **过滤依据是磁盘上的 profile，而不是 `SELECTED_PROFILES`。** `SELECTED_PROFILES` 记录的是**本次运行**选了什么，这和"用户现在能跑什么"并不是一回事：重装时取消勾选某个后端，之前装好的 profile 仍然留在原地（`install_profiles` 只增不删），而启动器认的是 profile 文件、不是本次运行。profiles 目录也正是前面几十行的 `backend_setup_hints` 已经在读的同一个来源，两块提示因此天然一致。`--dry-run` 下什么都还没落盘，所以全部显示。
+- **只做行级过滤，型号描述保持字面量。** 若要从各 profile 的 `ANTHROPIC_DEFAULT_*_MODEL_NAME` 派生 `/model` 那一列，就得为一张手工对齐的中英混排表格计算显示宽度 —— 而中文单元格的列宽并不等于其字符数。现在每一行仍是原来那串预先补好空格的字面量，只决定打不打印，因此对齐不可能被改坏。表格本来也已经把权威型号列表指向 `docs/BACKENDS.md`。
+
+### 注意事项
+- **引导块救不了一份压根没有引导块的 `SKILL.md`。** 产出这份报告的那台机器上是一份纯上游 `SKILL.md` —— 没有任何 marker，也没有归属清单 —— 因为更早的一次事故把托管块整个覆盖掉了。那种状态下改写引导块毫无用处，只能靠重跑安装器修复（3.0.1 的 adoption 路径现在会自愈）。本次改动解决的是：引导块**在场**时，别再被上游正文说服过去。
+- **frontmatter 的 `description:` 仍然写着 "OpenAI image generation API" 和 `gpt-image-*` 的模型 id**，因为那是上游文本，而 augmentation 刻意保留 marker 以外的每一个字节。它是 Claude Code 用来路由到该 skill 的匹配依据，并不决定 skill 跑起来之后怎么调用，而且引导块已显式纠正模型 id。改写 frontmatter 等于让安装器开始编辑上游元数据，每次上游发版都多一类解析失败的风险。
+- 重写后已重新校验两个安装器的引导块逐字节一致（各 79 行，`cmp` 无差异），55 条断言的 fixture 套件在 bash 5.3 与系统 bash 3.2 下均全数通过、无需改动：写入路径没有移动，因此没有测试需要更新。
+- `cl_stop [--all]` 仍然无条件显示，尽管只有带 `service` 的 profile（`ccr`、`gpt`）才可能拉起东西。要条件化就得用 `jq` 读 `.service`，而 `cl_commands_hint` 目前不依赖 `jq`；何况没有 service 在跑时执行 `cl_stop` 本身无害。
+- `install.ps1` 没有对应表格，也不安装 profile：Windows 尚无 `cl_*` 运行时，其 "Next steps" 里已有明确说明。无需同步。
+
 ## [3.0.1] - 2026-08-15
 
 ### 修复

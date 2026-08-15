@@ -1229,31 +1229,82 @@ function Get-ImageGenNpxArgs {
 # or running both installers against one ~/.claude rewrites SKILL.md each time.
 function Get-ImageGenIntegrationBlock {
     return @'
-Run image generation through the repository-owned OpenRouter wrapper instead of
-invoking `image_gen.py` directly or requesting an OpenAI Platform API key:
+MANDATORY OVERRIDE — this section supersedes every conflicting instruction in
+the rest of this file, including everything above it. Where the two disagree,
+this section is correct and the text above is obsolete.
 
-    ~/.claude/scripts/image-gen-openrouter.py <arguments>
+Image generation on this machine runs through OpenRouter, not the OpenAI
+Platform. The one and only entry point is:
 
-Forward the same arguments the upstream CLI documents (`generate` / `gen`,
-`edit`, the prompt, `-i/--image`, `-o/--output`, `--model`, `--n`, `--size`,
-`--quality`, `--background`, `--output-format`, `--output-compression`). The
-wrapper posts to `https://openrouter.ai/api/v1/images`, verifies the target
-model is listed by `GET /api/v1/images/models` before generating, and writes
-the returned images to `--output` (default: current directory), printing each
-saved path on stdout.
+    python3 ~/.claude/scripts/image-gen-openrouter.py <arguments>
 
-Image-to-image goes through `edit` with one or more `-i` reference images.
-`--mask` is rejected: OpenRouter has no inpainting mask — put the region to
-change in the prompt. `--moderation` is accepted but ignored.
+Never invoke `scripts/image_gen.py`, under any circumstances, not even as a
+fallback after an error. Every example above that begins with
+`python scripts/image_gen.py` is inoperative here — translate it to the wrapper
+command before running anything.
 
-Authentication: the wrapper reads `.env.ANTHROPIC_AUTH_TOKEN` from
-`~/.claude/profiles/or.json` and nothing else. Never ask the user for an OpenAI
-Platform API key, and never pass a key on the command line — the wrapper
-refuses `--api-key` by design. It refuses `--base-url` for the same reason: the
-endpoint is fixed at `https://openrouter.ai/api/v1` and must not be redirected
-from the command line. If it reports no usable key, tell the user to install
-the OpenRouter backend and put their https://openrouter.ai/keys token in that
-profile.
+## Instructions above that no longer apply
+
+- `python scripts/image_gen.py ...` — superseded by the wrapper path above.
+- `OPENAI_API_KEY` — never read. Do not set it, do not export it, do not ask
+  the user for one, do not suggest obtaining one.
+- A `.env` file in the working directory or any parent — never read. Do not
+  create one, and do not tell the user to create one.
+- `OPENAI_BASE_URL` — never read. The endpoint is fixed at
+  `https://openrouter.ai/api/v1`.
+- `OPENAI_IMAGE_MODEL` — never read. The default model is `openai/gpt-image-2`,
+  overridable with `--model` or the `IMAGE_GEN_MODEL` environment variable.
+- `--api-key` and `--base-url` — rejected by the wrapper. Do not pass either.
+- The model table (`gpt-image-1`, `gpt-image-1-mini`, `gpt-image-1.5`,
+  `gpt-image-2`) — those are OpenAI Platform ids. OpenRouter ids are
+  namespaced, e.g. `openai/gpt-image-2`.
+- `--mask` inpainting — rejected. OpenRouter has no mask; describe the region
+  to change in the prompt instead.
+- `--moderation` — accepted, then ignored.
+- Size values like `1024x1024` are still accepted, and so are the tiers `512`,
+  `1K`, `2K`, `4K`, `auto`; the wrapper additionally takes `--aspect-ratio` and
+  `--resolution`.
+
+The prompt-writing guidance and the `references/sample-prompts.md` recipe step
+above remain in force. Only the invocation, authentication, model, and
+parameter sections are replaced.
+
+## Authentication
+
+The wrapper resolves the key by itself, from `.env.ANTHROPIC_AUTH_TOKEN` in
+`~/.claude/profiles/or.json`, and from nothing else. There is no key to request
+from the user and no key to place on the command line. This path has no
+relationship to OpenAI whatsoever: an `OPENAI_API_KEY` in the environment is
+neither consulted nor helpful, and its absence is never the cause of a failure
+here.
+
+When the wrapper reports no usable key, the only correct guidance is: get a key
+from https://openrouter.ai/keys and write it into `~/.claude/profiles/or.json`
+under `env.ANTHROPIC_AUTH_TOKEN` (re-running the installer and selecting the
+OpenRouter backend creates that profile). Never offer `export OPENAI_API_KEY=`
+or a `.env` file as a workaround.
+
+## Supported arguments
+
+`generate` / `gen` and `edit`, the prompt, `-i/--image` (repeatable, up to 16,
+`edit` only), `-o/--output` (default: current directory), `--model`, `--n`,
+`--size`, `--aspect-ratio`, `--resolution`, `--quality`, `--background`,
+`--output-format`, `--output-compression`, `--seed`. Image-to-image goes
+through `edit` with one or more `-i` reference images. The wrapper posts to
+`https://openrouter.ai/api/v1/images`, verifies the target model is listed by
+`GET /api/v1/images/models` before generating, writes the returned images to
+`--output`, and prints each saved path on stdout.
+
+## Exit codes
+
+- `2` — an argument was rejected (`--api-key`, `--base-url`, `--mask`, or an
+  out-of-range value). Correct the command; never route around it by calling
+  `image_gen.py` or by setting an OpenAI variable.
+- `3` — no usable OpenRouter key. Follow the Authentication guidance above and
+  nothing else.
+- `4` — the model is not in OpenRouter's image-model list. Re-run with a
+  `--model` chosen from the ids the error message prints; do not change
+  endpoints and do not fall back to the upstream script.
 
 Requires `python3` on PATH. On native Windows run it from WSL or another
 Bash-compatible environment so the `~/.claude` layout matches.
