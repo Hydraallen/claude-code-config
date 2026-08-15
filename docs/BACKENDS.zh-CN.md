@@ -19,7 +19,7 @@ Claude Code 只会说 Anthropic 协议。因此每一个非 Claude 模型都必�
 |---|---|
 | `cl` | 用 `default-profile` 启动 |
 | `cl_auto` | 同上，附带 `--dangerously-skip-permissions` |
-| `cl_claude`、`cl_glm`、`cl_gpt`、`cl_ccr` | 强制指定某个后端 |
+| `cl_claude`、`cl_glm`、`cl_or`、`cl_gpt`、`cl_ccr` | 强制指定某个后端 |
 | `cl_<name>_auto` | 同上，跳过权限确认 |
 | `cl_switch <name>` | 修改默认后端 |
 | `cl_stop [<name>\|--all]` | 停止启动器拉起的代理服务 |
@@ -48,6 +48,12 @@ CL_MODEL=sonnet cl_glm          # change the default alias for one launch
 `settings.json` 写入任何内容。
 
 ## 各后端的配置
+
+> **`gpt` 与 `ccr` 默认不再勾选。** 从 2.22.0 起，安装器 "Model Backends" 分组里
+> 这两项默认是未选中状态 —— 它们都依赖安装器无法代劳的东西（`gpt` 需要一个 `brew`
+> 二进制加一次逆向出来的 OAuth 授权，`ccr` 需要手工在 web UI 里配置）。功能一行没删：
+> 勾上即可安装，`--all` 仍然包含它们，已经装过的 `gpt.json` / `ccr.json` 也不会被任何
+> 一次升级删除。
 
 ### `claude` —— 官方订阅
 
@@ -97,6 +103,88 @@ Coding Plan 只覆盖 **`glm-5.3`（1M 输入 / 128K 输出）、`glm-5-turbo`�
 文档：<https://docs.bigmodel.cn/cn/coding-plan/tool/claude>
 
 状态栏也会读这个后端的 5h 额度，见下方[状态栏里的额度](#状态栏里的额度)。
+
+### `or` —— OpenRouter（直连）
+
+把你的 OpenRouter key（`sk-or-v1-…`）粘贴到 `~/.claude/profiles/or.json` 的
+`.env.ANTHROPIC_AUTH_TOKEN`，然后：
+
+```bash
+cl_or
+```
+
+和 `glm` 一样是直连：`service` 为 `null`，不拉起任何本地代理，也不安装任何东西。
+
+#### 先退出 Anthropic 登录
+
+缓存的 Anthropic OAuth 会话**优先级高于** profile 注入的环境变量。首次 `cl_or` 之前，
+要在 Claude Code 里执行一次 `/logout`，否则请求仍然会打到 Anthropic，OpenRouter 的
+key 根本用不上。这是每台机器一次性的动作，不是每次启动都要做。
+
+#### 为什么 base URL 结尾没有 `/v1`
+
+`ANTHROPIC_BASE_URL` 是 `https://openrouter.ai/api`，刻意不带结尾的 `/v1`。Claude Code
+会自己拼上 `/v1/messages`；这里再写 `/v1` 就会变成 `/v1/v1/messages`，直接 404。
+
+#### 为什么 `ANTHROPIC_API_KEY` 是空字符串
+
+OpenRouter 用 `Authorization: Bearer` 鉴权，而 Claude Code 只在 `ANTHROPIC_API_KEY`
+为假值时才发这个头。只要它有**任何**值，客户端就会改用 `x-api-key` 头，并把这次调用
+当成直连 Anthropic —— OpenRouter 的 token 一次都不会发出去。所以 profile 把它钉死成
+`""`。由此引出三点：
+
+- **写在 `env` 里，不写进 `unset[]`。** 启动器的 `unset[]` 执行的是真正的 `unset`，
+  这和"值为空"不是一回事；这里真正需要的语义就是空串。两种写法在退出时的恢复都正确：
+  `_cl_save_var` 会把"原本未设置"和"原本设为 X"分开记录，退出时把 shell 还原成原样。
+- **空值确实会被注入。** `_cl_profile_env_pairs` 只拒绝 `array` 和 `object` 类型的值，
+  因此 `""` 会输出 `ANTHROPIC_API_KEY=` 这一行；注入循环只跳过空的**键**，不跳过空的值。
+- **不放进 `credentialKeys`。** 重装时只有列在其中的键会被保留，所以把它排除在外意味着
+  每次升级都从模板重新写回空串。这同时也让它不会被"仍是占位符"的扫描扫到 —— 这是对的，
+  空串本来就不是让你去填的东西。
+
+#### 模型槽位
+
+| 槽位 | 模型 | 上下文 / 输出 |
+|---|---|---|
+| `opus`、`sonnet` | `deepseek/deepseek-v4-pro` | 1,048,576 / 393,216 |
+| `haiku`、`fable` | `deepseek/deepseek-v4-flash` | 1,048,576 / 384,000 |
+
+`fable` 是 Claude Code 的后台槽位（compact、会话标题、额度探测），所以指向更便宜的那个。
+
+> **注意 —— 一个上下文上限，管所有槽位。** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 是客户端
+> 全局的单一值。这里设为 `1000000`，是因为两个 DeepSeek V4 模型都接受约 1M。如果你把
+> 任何一个槽位改到 163K 上下文的模型（`deepseek/deepseek-v3.2`、`deepseek/deepseek-chat`），
+> 就**必须**手工把这个值调低 —— 否则客户端会让上下文长到服务端根本不接受的程度，
+> 自动 compact 也救不了你。
+
+> **`deepseek/deepseek-reasoner` 在 OpenRouter 上不存在。** 那个 id 属于 DeepSeek 官方
+> API。在这里用它会 404。
+
+#### 刻意没有 `_SUPPORTED_CAPABILITIES`
+
+`glm.json` 和 `gpt.json` 里那串
+`effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking`
+在这里是刻意缺席的。它们会让 Claude Code 发出 Anthropic 的 thinking/effort 参数，
+而 OpenRouter 必须把这些翻译成 DeepSeek 的 `reasoning` 字段；其中 `adaptive_thinking` /
+`interleaved_thinking` 在 DeepSeek 侧根本没有对应物 —— 这是零星 400 的合理来源。
+如果你想要 reasoning 控制，请一次加回一个键，每加一个测一次。
+
+#### Best-effort，且未经实测
+
+OpenRouter 官方文档写的是：其原生 Anthropic 端点
+
+> "is built for Anthropic models and is only guaranteed to work with the
+> Anthropic first-party provider"，
+
+以及 "Claude Code expects Anthropic request semantics, so non-Anthropic models
+aren't supported through the native endpoint"。这是**不保证**，不是 API 层的硬拒绝；
+而且目前也不存在任何"DeepSeek 走该端点成功或失败"的公开报告。**本 profile 从未用真实的
+OpenRouter key 跑过** —— 尤其是 DeepSeek 的 `tool_use` 往返完全未经验证。如果它表现异常，
+先查工具调用。
+
+这个后端没有 5h 额度条，见下方[状态栏里的额度](#状态栏里的额度)。
+
+文档：<https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration>
 
 ### `gpt` —— ChatGPT Plus/Pro 订阅
 
@@ -269,39 +357,53 @@ export ANTHROPIC_DEFAULT_OPUS_MODEL='gpt-5.5(high)'
 npx -y skills@latest add sinedied/agent-skills --global --agent claude-code --copy --yes --skill image-gen
 ```
 
-`DO_NOT_TRACK=1` 关闭 `skills` CLI 的匿名遥测；`--copy` 写真实文件（非 symlink）以便 `--uninstall` 能删除。缺少 `npx` 或网络失败是非致命的：记一条警告后继续，版本戳和其余安装照常完成。Skill 落在 `~/.claude/skills/image-gen/`（全局 `$HOME` 路径）；本仓库**不**追踪上游的 `image_gen.py`、提示词、示例或 license。仓库自有的包装器安装到 `~/.claude/scripts/image-gen-cliproxyapi.sh`，下载下来的 `SKILL.md` 会被幂等地注入一段受管指令块。
+`DO_NOT_TRACK=1` 关闭 `skills` CLI 的匿名遥测；`--copy` 写真实文件（非 symlink）以便 `--uninstall` 能删除。缺少 `npx` 或网络失败是非致命的：记一条警告后继续，版本戳和其余安装照常完成。Skill 落在 `~/.claude/skills/image-gen/`（全局 `$HOME` 路径）；本仓库**不**追踪上游的 `image_gen.py`、提示词、示例或 license。仓库自有的包装器安装到 `~/.claude/scripts/image-gen-openrouter.py`，下载下来的 `SKILL.md` 会被幂等地注入一段受管指令块。
 
-#### 模型、版本、端点
+上游的 `image_gen.py` **不会被执行**：它的 `/v1/images/generations` 和 `/v1/images/edits` 路由在 OpenRouter 上并不存在，而 OpenRouter 的图生图是在同一个生成端点上用参考图表达的。安装器仍然检查 `scripts/image_gen.py` 是否存在，但那纯粹是"`npx` 下载下来的目录结构确实是我们预期的那个 image-gen"的下载完整性证明，不是运行时依赖。
+
+#### 模型、端点、参数
 
 | | |
 |---|---|
-| 图像模型 | `gpt-image-2`（确切名称，绝不写成 `image2`） |
-| 最低 CLIProxyAPI | `v7.2.17`（仅稳定版；**所有**预发布后缀 `-rc`/`-beta`/`-alpha`/`-pre`/`-dev`/… 都被拒绝） |
-| Base URL | `http://127.0.0.1:8317/v1`（确切常量；绝不从 health URL 推导） |
-| 存活探针 | `GET /healthz` —— 200 只代表监听端口起来了，**与鉴权无关** |
-| 能力就绪 | 鉴权过的 `GET /v1/models`，要求精确匹配 `data[].id == "gpt-image-2"`（仅子串匹配不算）；超时内（默认 25 秒，可覆盖）无法证明则 fail-closed |
-| 图像路由 | `/v1/images/generations` 与 `/v1/images/edits`（由上游 `image_gen.py` 向环回 base URL 发起） |
+| 默认图像模型 | `openai/gpt-image-2`（可用 `--model` 或 `IMAGE_GEN_MODEL` 覆盖） |
+| Base URL | `https://openrouter.ai/api/v1`（可用 `--base-url` 或 `IMAGE_GEN_BASE_URL` 覆盖） |
+| 生成路由 | `POST /api/v1/images` —— `generate` 与 `edit` 共用 |
+| 可用性预检 | `GET /api/v1/images/models`，要求目标模型在 `data[].id` 中精确命中 |
+| 超时 | 每请求 300 秒（`IMAGE_GEN_TIMEOUT`） |
+| 运行时 | `python3`，纯标准库 —— 无第三方依赖，无本地服务 |
 
-包装器先用 `/healthz` 决定启动还是复用，再执行鉴权过的 `/v1/models` 能力检查，通过后才委派。若无法证明能力，它会打印一条净化过的诊断（`OAuth/login may be inactive - run \`cliproxyapi --codex-login\` and retry`）并退出、**不**委派，避免配置错误的代理伪装成就绪。
+包装器是**严格 fail-closed** 的：每次出图前都会调 `GET /api/v1/images/models`，目标模型不在列表里、或列表无法解析，一律退出 `4`，并打印前几个真实可用的模型 id。**没有任何 skip/bypass 开关** —— 未经证实的端点永远收不到生成请求。
 
-#### 本地代理 key 与 OAuth —— 无需 OpenAI Platform key
+参数面（上游 CLI 的超集，既有引导话术继续成立）：
 
-包装器**绝不**索要 OpenAI Platform API key。鉴权有两层，都已在上面 `gpt` 后端配好：
+| 参数 | 行为 |
+|---|---|
+| `generate` / `gen`、`edit` | 保留，含 `gen` 别名 |
+| `-o/--output` | 与上游完全一致：file/dir 模式判定、`--n > 1` 时的 `_N` 后缀、**绝不**覆盖已有文件 |
+| `-m/--model`、`--n`、`-q/--quality`、`--background`、`-f/--output-format`、`--output-compression` | 保留；`--n` 按 OpenRouter 的 1–10 上限做本地校验 |
+| `-s/--size` | 放宽：新增 `512`/`1K`/`2K`/`4K` 档位与任意 `WxH`，旧的取值仍合法 |
+| `-i/--image`（edit） | 放宽：本地路径编码为 base64 data URL，http(s) URL 直接透传；最多 16 张参考图 |
+| `--aspect-ratio`、`--resolution`、`--seed` | 新增 —— OpenRouter 原生参数 |
+| `--api-key` | **接受但拒绝**。key 绝不能出现在 argv；包装器会说明该放到哪里 |
+| `--mask`（edit） | **接受但拒绝**。OpenRouter 没有 inpainting mask，请把要改的区域写进 prompt |
+| `--moderation`（generate） | 接受、警告并忽略 —— 请求体里没有这个字段 |
+| `.env` 自动加载 | **移除**。上游会从 CWD 一路向上找 `.env` 并注入环境；在任意用户仓库里出图不该读到该仓库的密钥 |
 
-1. **本地 client key** —— `~/.cli-proxy-api/config.yaml` 里 `api-keys:` 的第一个条目，安全读取，**绝不**打印、日志或放进 argv（仅 `export` 进委派子进程的环境；读取前后会禁用 xtrace，Authorization 头通过 curl `--config -` stdin 传入）。
-2. **ChatGPT/Codex OAuth** —— 上面 `gpt` 一节描述的一次性 `cliproxyapi --codex-login`。若登录已失效，能力探针会 fail-closed 并给出上面的诊断。
+退出码做了分级，不再一律 `1`：`0` 成功、`1` API/IO 失败、`2` 参数用法错误、`3` 没有可用的 key、`4` 模型预检失败。
 
-升级已有的 CLIProxyAPI：
+#### key 从哪来 —— 无需 OpenAI Platform key
 
-```bash
-brew upgrade cliproxyapi        # 之后用 cl_gpt 重启，以便拾取新二进制
-```
+包装器只读**一个**来源：`~/.claude/profiles/or.json` 里的 `.env.ANTHROPIC_AUTH_TOKEN` —— 与 `or` 后端用的是同一个 token。**没有环境变量兜底**，所以要填只有一处、要轮换也只有一处。
 
-包装器与启动器 profile 维护的是**各自独立**的候选列表，不要用一个去推断另一个。包装器自己的 `IMAGE_GEN_BIN_NAMES` 依次尝试 `cliproxyapi`、`cli-proxy-api`、`cliproxy-api`；启动器的 `profiles/gpt.json` 里 `service.bins` 依次尝试 `cli-proxy-api`、`cliproxyapi`、`CLIProxyAPI`（两个列表及顺序都不同）。二进制缺失或低于 `v7.2.17` 时，包装器会同时给出 `brew install cliproxyapi` 与 `brew upgrade cliproxyapi` 作为修复指引。
+- key **仅**作为 `Authorization: Bearer` 请求头使用。它绝不进入 argv、子进程环境、stdout、stderr 或任何错误信息；HTTP 失败只回显 URL 和截断后的响应体。
+- key 必须匹配 `[A-Za-z0-9._~-]+`，这是 header-safe 的字符集，杜绝用换行伪造请求头。OpenRouter 的 key（`sk-or-v1-…`）落在集合内。
+- 模板里未填写的占位符被当作**"没有 key"**而非 key，所以你会看到"请填写 key"，而不是拿占位符去打 API 收一个 401。
+
+**这意味着出图要求 OpenRouter 后端已安装且 key 已填**，无论你聊天是否用 `cl_or`。请在安装器里勾选 "OpenRouter"，然后把 <https://openrouter.ai/keys> 的 key 填进 `~/.claude/profiles/or.json`。
 
 #### 所有启动器共享同一组路径
 
-`claude.zsh` 经过 grep 审计，**不含**任何 image-gen / `OPENAI_*` 耦合。每个 `cl`、`cl_claude`、`cl_glm`、`cl_gpt`、`cl_ccr` 以及生成的 `cl_<name>_auto` 都流经 `_cl_profile_run` → `_cl_run` → `claude`，后者只管理 `ANTHROPIC_*` 环境与 `claude` 二进制。Skill 与包装器位于全局 `$HOME` 路径，启动器从不触碰，因此图像生成可在任意后端下工作。恶意或不兼容的 `ANTHROPIC_BASE_URL` 永远不会改变子进程的 `OPENAI_BASE_URL`（始终是上面的环回常量）—— 图像流量直接走 `:8317`，绕过当前启动器拉起的那个代理（包括 `cl_gpt` 本身，这没问题：CLIProxyAPI 在自己的端口上接受请求）。
+`claude.zsh` 不含任何 image-gen 耦合。每个 `cl`、`cl_claude`、`cl_glm`、`cl_or`、`cl_gpt`、`cl_ccr` 以及生成的 `cl_<name>_auto` 都流经 `_cl_profile_run` → `_cl_run` → `claude`，后者只管理 `ANTHROPIC_*` 环境与 `claude` 二进制。Skill 与包装器位于全局 `$HOME` 路径，启动器从不触碰，因此图像生成可在任意后端下工作 —— 而且不再依赖任何本地代理处于运行状态，请求直接走 HTTPS 打到 OpenRouter。
 
 #### 所有权安全的卸载
 
@@ -310,14 +412,24 @@ brew upgrade cliproxyapi        # 之后用 cl_gpt 重启，以便拾取新二�
 ```text
 skill=image-gen
 source=sinedied/agent-skills
-wrapper=image-gen-cliproxyapi.sh
+wrapper=image-gen-openrouter.py
 ```
 
 `--uninstall` 仅在**三者同时满足**时才删除 `~/.claude/skills/image-gen`：逐字节匹配的标准清单、目录布局、**以及** `SKILL.md` 中格式正确的注入标记。同名但用户自建的目录、有清单但无标记的植入/残留、以及清单有效但目录缺失的情况，都会被保留（仅清理过期清单）。包装器本身通过管理 `cleanup-claude-data.sh` 的同一个 `USER_SCRIPTS` 循环移除。已拥有的旧版本在 `npx` 运行前会被备份，任何后续失败都按字节恢复；恢复失败时备份会保留并打印其路径。
 
-#### 不支持原生 Windows
+#### 从 CLIProxyAPI 时代的安装升级
 
-包装器是 Bash 脚本，CLIProxyAPI 服务生命周期仅支持 Bash/Zsh。`install.ps1` 在 Windows 上会安装网络 Skill 和包装器资产，但 `cl_*` / CLIProxyAPI 的图像生成路径在原生 Windows 上**不**受支持。请在 **WSL 内**运行 Bash 安装器，使其落到 WSL 的 `~/.claude` —— WSL 不会把 `%USERPROFILE%\.claude` 当作 `~/.claude`，而 Git Bash 的 `~/.claude` → `%USERPROFILE%\.claude` 映射取决于具体安装。本次会话**未**验证真实的 PowerShell 运行时行为（`pwsh` 不存在时行为测试套件会干净地 SKIP）；pwsh-equipped 的 Windows 机器需自行确认解析器、`cmd.exe /d /s /c` 调用 `npx.cmd`、字节级 `SKILL.md` 注入、以及清单原子性。
+受管标记和清单里的 `wrapper=` 行都随着迁移到 OpenRouter 而改名了。因此所有权校验会**同时接受**当前值与迁移前的旧值；不这么做的话，所有存量安装都会过不了所有权证明、被判成"不是 installer 安装的"，然后每次重装都只打一条 warn 并永久跳过。**写入**的永远只有当前值，所以迁移只发生一次，在下一次成功安装时：
+
+1. 旧清单与旧标记仍能证明所有权，于是走正常升级流程，而不是被跳过。
+2. 注入前会先剥离旧的受管块，再插入当前块，文件最终只有一对标记，不会累积两块。
+3. 写入标准清单，此后每次运行都走纯当前格式的幂等路径。
+
+`~/.claude/scripts/image-gen-cliproxyapi.sh` 会在下一次安装时**自动删除** —— 它已不在 `USER_SCRIPTS` 里，否则卸载时会把它当孤儿文件留下。
+
+#### 原生 Windows
+
+包装器现在是零依赖的 Python 脚本，不含任何本地服务，因此只要 `python3` 在 PATH 上就能跑。本次发布顺带修掉了 `install.ps1` 里一个长期存在的路径 bug（它找的是 `image-gen\image_gen.py` 而非 `image-gen\scripts\image_gen.py`，导致注入失败、进而整个 image-gen 安装在 Windows 上每次都失败）。仍然建议在 **WSL 内**运行 Bash 安装器，让布局落到 WSL 的 `~/.claude` —— WSL 不会把 `%USERPROFILE%\.claude` 当作 `~/.claude`，而 Git Bash 的映射取决于具体安装。本次**未**验证真实的 PowerShell 运行时行为；pwsh-equipped 的 Windows 机器需自行确认解析器、`cmd.exe /d /s /c` 调用 `npx.cmd`、字节级 `SKILL.md` 注入（含新增的旧块剥离）、以及清单原子性。
 
 ### `ccr` —— 跨多个供应商的统一 `/model` 列表
 
@@ -483,13 +595,18 @@ v3 的路由**不再是**老 v1 那套 `default` / `background` / `think` / `lon
 | ------------------------------- | -------- | -------------------------------------------------------------- | ------- |
 | 未设置（`claude` profile）       | `5h`     | `api.anthropic.com/api/oauth/usage`，OAuth token                | 60 秒   |
 | `*bigmodel.cn*` / `*z.ai*`      | `glm 5h` | `{host}/api/monitor/usage/quota/limit`，`$ANTHROPIC_AUTH_TOKEN` | 600 秒  |
-| 其他（`gpt`、`ccr` 等）          | —        | 没有可用的额度端点，整段不渲染                                    | —       |
+| 其他（`or`、`gpt`、`ccr` 等）    | —        | 没有可用的额度端点，整段不渲染                                    | —       |
 
 进度条显示的是**已用**百分比，后面的时间是窗口重置时刻。GLM 的窗口是滚动的 —— 从开启
 窗口的那次请求起五小时后重置，而不是按整点 —— 所以重置时间取自接口返回值，不在本地推算。
 
 说明：
 
+- **OpenRouter（`or`）没有额度条，而且也没法有。** 两个独立的原因：一是
+  `hooks/statusline.sh` 里那个按 `$ANTHROPIC_BASE_URL` 选数据源的 `case` 只认识
+  `bigmodel.cn` 和 `z.ai`；二是更根本的 —— OpenRouter 压根不存在 5 小时滚动窗口，
+  它只在 `/api/v1/credits` 暴露一个余额，那是钱，不是"某个带重置时间的窗口已用掉多少
+  百分比"。硬塞进这个进度条只会得到一个语义上错误的 bar，所以这一段直接不渲染。
 - **GLM 的轮询频率是原生 API 的十分之一。** 状态栏每次渲染都会触发，而智谱有未公开的
   限流与风控规则，600 秒的 TTL 能让活跃会话离阈值足够远。代价是新开终端的第一次渲染
   通常没有额度段，下一次才有。
@@ -532,6 +649,11 @@ v3 的路由**不再是**老 v1 那套 `default` / `background` / `think` / `lon
   }
 }
 ```
+
+如果你要指向的网关用的是 `Authorization: Bearer` 而不是 `x-api-key`，请在 `env` 里加上
+`"ANTHROPIC_API_KEY": ""` —— Claude Code 只在这个变量为假值时才发 bearer 头，只要它有
+任何值就会切到 `x-api-key`。要写在 `env` 里并给空串，而不是放进 `unset[]`，同时不要放进
+`credentialKeys`，这样每次重装都会把空串写回来。现成的范例是 `profiles/or.json`。
 
 开一个新 shell，`cl_<name>` 就存在了。`credentialKeys` 里点名的键会在重新安装时保留 ——
 其余内容都从仓库模板刷新，这样模型默认值能跟上上游，同时永远不会覆盖掉你的 key。

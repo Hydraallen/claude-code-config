@@ -1,0 +1,28 @@
+{
+  "label": "OpenRouter (direct, Anthropic-compatible)",
+  "note": "OpenRouter's Anthropic-compatible endpoint. Set ANTHROPIC_AUTH_TOKEN to your OpenRouter key (sk-or-v1-...); the base URL has NO /v1 suffix because Claude Code appends /v1/messages itself. ANTHROPIC_API_KEY IS DELIBERATELY THE EMPTY STRING, NOT ABSENT: as long as it holds any value Claude Code switches to the x-api-key header and treats the request as a direct Anthropic call, so the OpenRouter bearer token is never sent. It is set in env rather than listed in unset[] because unset[] performs a real unset, which is not the same thing; it is also kept out of credentialKeys so every re-install restores the empty string. LOGIN: a cached Anthropic OAuth session beats these environment variables — run /logout inside Claude Code once before the first cl_or launch, otherwise requests keep going to Anthropic. CONTEXT: CLAUDE_CODE_MAX_CONTEXT_TOKENS is one client-wide value, not per-slot. It is set to 1000000 to match deepseek-v4-pro and deepseek-v4-flash (both 1,048,576 context). If you repoint any slot at a 163K-context model (deepseek/deepseek-v3.2, deepseek/deepseek-chat) you MUST lower this by hand — the client will otherwise grow the context past what the server accepts and auto-compact will not rescue you. Note deepseek/deepseek-reasoner does not exist on OpenRouter; that id belongs to DeepSeek's own API. STATUSLINE: there is no 5h quota bar on this backend. hooks/statusline.sh picks its quota source from ANTHROPIC_BASE_URL and only knows bigmodel.cn / z.ai, and OpenRouter has no 5h rolling window at all — only a credit balance at /api/v1/credits, which is a different unit and not comparable to a percentage-used bar. CAPABILITIES: the ..._SUPPORTED_CAPABILITIES keys the glm and gpt profiles carry (effort, xhigh_effort, max_effort, thinking, adaptive_thinking, interleaved_thinking) are intentionally omitted here. They make Claude Code emit Anthropic thinking/effort parameters that OpenRouter must translate into DeepSeek's reasoning field, and adaptive_thinking / interleaved_thinking have no DeepSeek counterpart — a plausible source of sporadic 400s. Add them back one at a time and test if you want reasoning controls. GATEWAY DISCOVERY: CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY is deliberately NOT set. All four slots are filled, so the suppression branch in claude.zsh never fires and the launcher would still inject --model opus, leaving the /model picker pre-locked; enabling it would only add a startup model-list round trip for no behaviour change. Set it yourself if you want to browse OpenRouter's catalogue from /model. OpenRouter states the native Anthropic endpoint is only guaranteed for Anthropic first-party models, so non-Anthropic routing here is best-effort and untested against a live key. Docs: https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration",
+  "credentialKeys": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"],
+  "service": null,
+  "unset": [],
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_OPENROUTER_API_KEY",
+    "ANTHROPIC_API_KEY": "",
+    "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek/deepseek-v4-flash",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": "DeepSeek V4 Flash",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION": "DeepSeek V4 Flash 轻量快速模型 (1M 上下文 / 384K 输出)",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek/deepseek-v4-pro",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "DeepSeek V4 Pro",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION": "DeepSeek V4 Pro 旗舰推理模型 (1M 上下文 / 393K 输出)",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek/deepseek-v4-pro",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "DeepSeek V4 Pro",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION": "DeepSeek V4 Pro 旗舰推理模型 (1M 上下文 / 393K 输出)",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "deepseek/deepseek-v4-flash",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME": "DeepSeek V4 Flash",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION": "DeepSeek V4 Flash 轻量快速模型 (1M 上下文 / 384K 输出)",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1000000",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "128000",
+    "API_TIMEOUT_MS": "3000000"
+  }
+}

@@ -22,7 +22,7 @@ there as a **profile**: one JSON file in `~/.claude/profiles/`, loaded by
 |---|---|
 | `cl` | Launch using `default-profile` |
 | `cl_auto` | Same, with `--dangerously-skip-permissions` |
-| `cl_claude`, `cl_glm`, `cl_gpt`, `cl_ccr` | Force a specific backend |
+| `cl_claude`, `cl_glm`, `cl_or`, `cl_gpt`, `cl_ccr` | Force a specific backend |
 | `cl_<name>_auto` | Same, skipping permission prompts |
 | `cl_switch <name>` | Change the default |
 | `cl_stop [<name>\|--all]` | Stop proxy services the launcher started |
@@ -52,6 +52,13 @@ afterwards, including vars that were previously unset. Nothing is written to
 `settings.json`.
 
 ## Setup per backend
+
+> **`gpt` and `ccr` are not selected by default.** Since 2.22.0 the installer
+> ships them unticked in the "Model Backends" group — both need something the
+> installer cannot do for you (a `brew` binary plus a reverse-engineered OAuth
+> for `gpt`, a manual web-UI configuration for `ccr`). Nothing was removed: tick
+> them to install, `--all` still includes them, and an already-installed
+> `gpt.json` / `ccr.json` survives every upgrade untouched.
 
 ### `claude` — official subscription
 
@@ -108,6 +115,103 @@ Docs: <https://docs.bigmodel.cn/cn/coding-plan/tool/claude>
 
 The statusline reads this backend's 5h quota too — see
 [Quota in the statusline](#quota-in-the-statusline) below.
+
+### `or` — OpenRouter (direct)
+
+Paste your OpenRouter key (`sk-or-v1-…`) into `.env.ANTHROPIC_AUTH_TOKEN` of
+`~/.claude/profiles/or.json`, then:
+
+```bash
+cl_or
+```
+
+Like `glm`, this is a direct connection: `service` is `null`, no local proxy is
+started, and nothing is installed.
+
+#### Log out of Anthropic first
+
+A cached Anthropic OAuth session **outranks** the environment variables the
+profile injects. Run `/logout` inside Claude Code once before the first `cl_or`
+launch, otherwise your requests keep going to Anthropic and the OpenRouter key
+is never used. This is a one-time step per machine, not per launch.
+
+#### Why the base URL has no `/v1`
+
+`ANTHROPIC_BASE_URL` is `https://openrouter.ai/api`, deliberately without a
+trailing `/v1`. Claude Code appends `/v1/messages` itself; adding `/v1` here
+produces `/v1/v1/messages` and a 404.
+
+#### Why `ANTHROPIC_API_KEY` is the empty string
+
+OpenRouter authenticates with `Authorization: Bearer`, which Claude Code sends
+only when `ANTHROPIC_API_KEY` is falsy. As soon as that variable holds *any*
+value the client switches to the `x-api-key` header and treats the call as a
+direct Anthropic request — the OpenRouter token never leaves the machine. So
+the profile pins it to `""`. Three details follow from that:
+
+- **`env`, not `unset[]`.** The launcher's `unset[]` performs a real `unset`,
+  which is not the same as an empty value; an inherited-then-unset variable and
+  an explicitly-empty one behave identically here only by accident, and the
+  empty string is what is actually specified. Restoration on exit is correct
+  either way: `_cl_save_var` records "was not set" separately from "was set to
+  X" and puts the shell back exactly as it found it.
+- **The empty value really is injected.** `_cl_profile_env_pairs` rejects only
+  `array` and `object` values, so `""` emits the line `ANTHROPIC_API_KEY=`, and
+  the injection loop skips empty *keys*, not empty values.
+- **Not in `credentialKeys`.** Re-installs preserve only the keys listed there,
+  so leaving it out means every upgrade rewrites the empty string from the
+  template. It also keeps it out of the "still a placeholder" scan, which is
+  correct — an empty string is not something you are supposed to fill in.
+
+#### Model slots
+
+| Slot | Model | Context / output |
+|---|---|---|
+| `opus`, `sonnet` | `deepseek/deepseek-v4-pro` | 1,048,576 / 393,216 |
+| `haiku`, `fable` | `deepseek/deepseek-v4-flash` | 1,048,576 / 384,000 |
+
+`fable` is Claude Code's background slot (compact, session titles, quota
+probes), so it is pointed at the cheaper model.
+
+> **Caveat — one context limit, all slots.** `CLAUDE_CODE_MAX_CONTEXT_TOKENS`
+> is a single client-wide value. It is set to `1000000` because both DeepSeek V4
+> models accept ~1M. If you repoint any slot at a 163K-context model
+> (`deepseek/deepseek-v3.2`, `deepseek/deepseek-chat`) you **must** lower it by
+> hand — otherwise the client grows the context past what the server accepts and
+> auto-compact will not rescue you.
+
+> **`deepseek/deepseek-reasoner` does not exist on OpenRouter.** That id belongs
+> to DeepSeek's own API. Using it here 404s.
+
+#### No `_SUPPORTED_CAPABILITIES` keys
+
+The `effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking`
+strings that `glm.json` and `gpt.json` carry are intentionally absent. They make
+Claude Code emit Anthropic thinking/effort parameters that OpenRouter has to
+translate into DeepSeek's `reasoning` field, and `adaptive_thinking` /
+`interleaved_thinking` have no DeepSeek counterpart at all — a plausible source
+of sporadic 400s. If you want reasoning controls, add them back one key at a
+time and test after each.
+
+#### Best-effort, and untested
+
+OpenRouter's own documentation says the native Anthropic endpoint
+
+> "is built for Anthropic models and is only guaranteed to work with the
+> Anthropic first-party provider",
+
+and that "Claude Code expects Anthropic request semantics, so non-Anthropic
+models aren't supported through the native endpoint". That is a
+*no-guarantee*, not a hard API-level rejection, and no public report of DeepSeek
+succeeding or failing through this endpoint exists either way. **This profile
+has never been exercised against a live OpenRouter key** — in particular
+`tool_use` round-trips through DeepSeek are unverified. If it misbehaves, check
+tool calls first.
+
+There is no 5h quota bar for this backend — see
+[Quota in the statusline](#quota-in-the-statusline) below.
+
+Docs: <https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration>
 
 ### `gpt` — ChatGPT Plus/Pro subscription
 
@@ -322,67 +426,80 @@ continues, so the version stamp and the rest of the install still complete.
 The Skill lands at `~/.claude/skills/image-gen/` (a global `$HOME` path); no
 upstream `image_gen.py`, prompts, samples, or license is tracked in this repo.
 A repository-owned wrapper is installed at
-`~/.claude/scripts/image-gen-cliproxyapi.sh` and the downloaded `SKILL.md` is
+`~/.claude/scripts/image-gen-openrouter.py` and the downloaded `SKILL.md` is
 augmented idempotently with a managed instructions block.
 
-#### Model, version, endpoints
+The upstream `image_gen.py` is **not executed**. Its `/v1/images/generations`
+and `/v1/images/edits` routes do not exist on OpenRouter, and image editing
+there is expressed as reference images on the same generation endpoint. The
+installer still checks that `scripts/image_gen.py` is present, purely as proof
+that `npx` downloaded the layout we expect and not something else under the
+same name.
+
+#### Model, endpoints, arguments
 
 | | |
 |---|---|
-| Image model | `gpt-image-2` (exact — never `image2`) |
-| Minimum CLIProxyAPI | `v7.2.17` (stable only; **all** pre-release suffixes `-rc`/`-beta`/`-alpha`/`-pre`/`-dev`/… are rejected) |
-| Base URL | `http://127.0.0.1:8317/v1` (exact constant; never derived from the health URL) |
-| Liveness | `GET /healthz` — 200 means the listener is up, **nothing about auth** |
-| Capability readiness | authenticated `GET /v1/models`, requires an exact `data[].id == "gpt-image-2"` (substring is not enough); fail-closed within the timeout (default 25 s, overridable) |
-| Image routes | `/v1/images/generations` and `/v1/images/edits` (called by upstream `image_gen.py` against the loopback base URL) |
+| Default image model | `openai/gpt-image-2` (override with `--model` or `IMAGE_GEN_MODEL`) |
+| Base URL | `https://openrouter.ai/api/v1` (override with `--base-url` or `IMAGE_GEN_BASE_URL`) |
+| Generation route | `POST /api/v1/images` — used for both `generate` and `edit` |
+| Availability precheck | `GET /api/v1/images/models`, requires an exact `data[].id` match on the target model |
+| Timeout | 300 s per request (`IMAGE_GEN_TIMEOUT`) |
+| Runtime | `python3`, standard library only — no third-party packages, no local service |
 
-The wrapper probes `/healthz` to decide start-vs-reuse, then runs the
-authenticated `/v1/models` capability check before delegating. If capability
-cannot be proven it prints a sanitized diagnostic
-(`OAuth/login may be inactive - run \`cliproxyapi --codex-login\` and retry`)
-and exits **without** delegating, so a misconfigured proxy cannot masquerade
-as ready.
+The wrapper is **fail-closed**: it calls `GET /api/v1/images/models` before
+every generation and exits `4` if the target model is absent or the list cannot
+be parsed, printing the first few model ids that *are* available. There is no
+bypass switch — an unverified endpoint never receives a generation request.
 
-#### Local proxy key vs OAuth — no OpenAI Platform key
+Argument surface (a superset of the upstream CLI, so existing guidance keeps
+working):
 
-The wrapper **never** asks for an OpenAI Platform API key. Authentication has
-two layers, both already set up by the `gpt` backend above:
+| Argument | Behaviour |
+|---|---|
+| `generate` / `gen`, `edit` | Preserved, including the `gen` alias |
+| `-o/--output` | Identical to upstream: file-vs-directory mode, `_N` suffix for `--n > 1`, existing files are **never** overwritten |
+| `-m/--model`, `--n`, `-q/--quality`, `--background`, `-f/--output-format`, `--output-compression` | Preserved; `--n` is validated locally against OpenRouter's 1–10 limit |
+| `-s/--size` | Widened: the `512`/`1K`/`2K`/`4K` tiers and arbitrary `WxH` are accepted alongside the old values |
+| `-i/--image` (edit) | Widened: local paths are base64 data-URL encoded, and http(s) URLs pass through directly; up to 16 references |
+| `--aspect-ratio`, `--resolution`, `--seed` | New — OpenRouter-native |
+| `--api-key` | **Accepted but refused.** A key must never appear in argv; the wrapper explains where to put it instead |
+| `--mask` (edit) | **Accepted but refused.** OpenRouter has no inpainting mask; describe the region in the prompt |
+| `--moderation` (generate) | Accepted, warned about, and ignored — the request body has no such field |
+| `.env` auto-loading | **Removed.** Upstream walked up from the CWD looking for a `.env` to inject; generating an image inside an arbitrary repo should not read that repo's secrets |
 
-1. **Local client key** — the first `api-keys:` entry of
-   `~/.cli-proxy-api/config.yaml`, read securely and **never** printed,
-   logged, or placed in argv (it is `export`ed into the delegated child's
-   environment only; xtrace is disabled around the read and the Authorization
-   header is fed to curl via `--config -` stdin).
-2. **ChatGPT/Codex OAuth** — the one-time `cliproxyapi --codex-login`
-   described in the `gpt` section. If login has lapsed, the capability probe
-   fails closed with the diagnostic above.
+Exit codes are graded rather than always `1`: `0` success, `1` API/IO failure,
+`2` argument usage error, `3` no usable API key, `4` model precheck failed.
 
-To upgrade an existing CLIProxyAPI:
+#### Where the key comes from — no OpenAI Platform key
 
-```bash
-brew upgrade cliproxyapi        # then restart with cl_gpt so the new binary is picked up
-```
+The wrapper reads **one** source: `.env.ANTHROPIC_AUTH_TOKEN` in
+`~/.claude/profiles/or.json` — the same token the `or` backend uses. There is
+no environment-variable fallback, so there is exactly one place to fill in and
+exactly one place to rotate.
 
-The wrapper and the launcher profile keep **separate** candidate lists, so do
-not assume one from the other. The wrapper's own `IMAGE_GEN_BIN_NAMES` tries
-`cliproxyapi`, then `cli-proxy-api`, then `cliproxy-api`; the launcher's
-`profiles/gpt.json` `service.bins` tries `cli-proxy-api`, then `cliproxyapi`,
-then `CLIProxyAPI` (the lists and the order differ). When the binary is
-missing or below `v7.2.17` the wrapper prints both `brew install cliproxyapi`
-and `brew upgrade cliproxyapi` as the remediation.
+- The key is used **only** as an `Authorization: Bearer` request header. It
+  never enters argv, a subprocess environment, stdout, stderr, or any error
+  message; HTTP failures echo the URL and a truncated response body only.
+- It must match `[A-Za-z0-9._~-]+`, which is header-safe and rules out newline
+  injection into the request headers. OpenRouter keys (`sk-or-v1-…`) qualify.
+- The unfilled template placeholder is treated as *absent*, not as a key, so
+  you get "fill in your key" rather than a 401 from the API.
+
+**This means image generation requires the OpenRouter backend to be installed
+and its key filled in**, whether or not you use `cl_or` for chat. Tick
+"OpenRouter" in the installer, then put a key from
+<https://openrouter.ai/keys> into `~/.claude/profiles/or.json`.
 
 #### All launchers share the same paths
 
-`claude.zsh` was grep-audited and contains **no** image-gen / `OPENAI_*`
-coupling. Every `cl`, `cl_claude`, `cl_glm`, `cl_gpt`, `cl_ccr`, and generated
-`cl_<name>_auto` flows through `_cl_profile_run` → `_cl_run` → `claude`, which
-only manages `ANTHROPIC_*` env and the `claude` binary. The Skill and wrapper
-live at global `$HOME` paths the launcher never touches, so image generation
-works from any backend. A hostile or incompatible `ANTHROPIC_BASE_URL` never
-changes the child `OPENAI_BASE_URL`, which is always the loopback constant
-above — image traffic goes directly to `:8317`, bypassing whichever proxy the
-active launcher started (including `cl_gpt` itself, which is fine:
-CLIProxyAPI accepts the request on its own port).
+`claude.zsh` contains no image-gen coupling. Every `cl`, `cl_claude`, `cl_glm`,
+`cl_or`, `cl_gpt`, `cl_ccr`, and generated `cl_<name>_auto` flows through
+`_cl_profile_run` → `_cl_run` → `claude`, which only manages `ANTHROPIC_*` env
+and the `claude` binary. The Skill and wrapper live at global `$HOME` paths the
+launcher never touches, so image generation works from any backend — and it no
+longer depends on any local proxy being up, because the request goes straight
+to OpenRouter over HTTPS.
 
 #### Ownership-safe uninstall
 
@@ -393,7 +510,7 @@ only after the wrapper exists, the upstream layout (`SKILL.md` +
 ```text
 skill=image-gen
 source=sinedied/agent-skills
-wrapper=image-gen-cliproxyapi.sh
+wrapper=image-gen-openrouter.py
 ```
 
 `--uninstall` deletes `~/.claude/skills/image-gen` only when **all three**
@@ -406,18 +523,39 @@ manifest is pruned). The wrapper itself is removed through the same
 upgrade is backed up before `npx` runs and restored byte-for-byte on any later
 failure; on restore failure the backup is retained and its path emitted.
 
-#### Native Windows unsupported
+#### Upgrading from the CLIProxyAPI-era install
 
-The wrapper is a Bash script and CLIProxyAPI service lifecycle is Bash/Zsh-only.
-`install.ps1` installs the network Skill and the wrapper asset on Windows, but
-the `cl_*` / CLIProxyAPI image-generation path is **not** supported natively.
-Run the Bash installer **inside WSL** so it lands in the WSL `~/.claude` — WSL
-does not see `%USERPROFILE%\.claude` as `~/.claude`, and Git Bash's
-`~/.claude` → `%USERPROFILE%\.claude` mapping depends on the install. Real
-PowerShell runtime behaviour was **not** verified here (the behavioural test
-suite SKIPs cleanly when `pwsh` is absent); a pwsh-equipped Windows machine
-must confirm the parser, the `cmd.exe /d /s /c` `npx.cmd` invocation, the
-byte-level `SKILL.md` augmentation, and the manifest atomicity.
+Both the managed markers and the manifest's `wrapper=` line changed with the
+move to OpenRouter. Ownership checks therefore accept **either** the current
+values or the pre-OpenRouter ones; without that, every existing install would
+fail the ownership proof, be classified as "not installer-owned", and be
+skipped forever with a warning. Only the current values are ever *written*, so
+the migration happens exactly once, on the next successful install:
+
+1. The legacy manifest and markers still prove ownership, so the upgrade
+   proceeds normally instead of being skipped.
+2. Augmentation strips the legacy block before inserting the current one, so
+   the file ends up with exactly one managed block rather than two.
+3. A canonical manifest is written, and every later run takes the pure
+   current-format idempotent path.
+
+`~/.claude/scripts/image-gen-cliproxyapi.sh` is deleted automatically on the
+next install — it is no longer in `USER_SCRIPTS`, so uninstall would otherwise
+leave it behind as an orphan.
+
+#### Native Windows
+
+The wrapper is now a dependency-free Python script with no local service, so it
+runs anywhere `python3` is on PATH. `install.ps1` fixes a long-standing path bug
+in this release (it looked for `image-gen\image_gen.py` instead of
+`image-gen\scripts\image_gen.py`, which made augmentation — and therefore the
+whole image-gen install — fail on every Windows run). Running the Bash installer
+**inside WSL** is still recommended so the layout lands in the WSL `~/.claude`;
+WSL does not see `%USERPROFILE%\.claude` as `~/.claude`, and Git Bash's mapping
+depends on the install. Real PowerShell runtime behaviour was **not** verified
+here; a pwsh-equipped Windows machine must confirm the parser, the
+`cmd.exe /d /s /c` `npx.cmd` invocation, the byte-level `SKILL.md` augmentation
+(including the new legacy-block strip), and the manifest atomicity.
 
 ### `ccr` — one `/model` list across providers
 
@@ -604,7 +742,7 @@ the same time without interfering:
 | -------------------------------- | -------- | --------------------------------------------------- | ------- |
 | unset (the `claude` profile)     | `5h`     | `api.anthropic.com/api/oauth/usage`, OAuth token     | 60s     |
 | `*bigmodel.cn*` / `*z.ai*`       | `glm 5h` | `{host}/api/monitor/usage/quota/limit`, `$ANTHROPIC_AUTH_TOKEN` | 600s |
-| anything else (`gpt`, `ccr`, …)  | —        | no quota endpoint; the segment is not rendered       | —       |
+| anything else (`or`, `gpt`, `ccr`, …) | —   | no quota endpoint; the segment is not rendered       | —       |
 
 The bar shows the **used** percentage, and the trailing time is when the window
 resets. GLM's window is rolling — it resets five hours after the request that
@@ -613,6 +751,13 @@ than being computed locally.
 
 Notes:
 
+- **OpenRouter (`or`) has no quota bar, and cannot meaningfully have one.** Two
+  independent reasons: the `case` in `hooks/statusline.sh` that picks a quota
+  source from `$ANTHROPIC_BASE_URL` only knows `bigmodel.cn` and `z.ai`, and —
+  more fundamentally — OpenRouter has no 5h rolling window at all. What it
+  exposes is a credit balance at `/api/v1/credits`, which is money, not a
+  percentage of a window with a reset time. Rendering it in this bar would
+  produce a semantically wrong progress bar, so the segment stays absent.
 - **GLM is polled at 1/10th the rate of the native API.** The statusline fires on
   every render, and Zhipu applies undisclosed rate-limit and risk-control rules,
   so a 600s TTL keeps an active session well clear of them. The cost is that the
@@ -663,6 +808,13 @@ Write `~/.claude/profiles/<name>.json`. Two constraints on `<name>`:
   }
 }
 ```
+
+If the gateway you are pointing at authenticates with `Authorization: Bearer`
+rather than `x-api-key`, add `"ANTHROPIC_API_KEY": ""` to `env` — Claude Code
+sends the bearer header only while that variable is falsy, and any value at all
+flips it to `x-api-key`. Put it in `env` with an empty value rather than in
+`unset[]`, and keep it out of `credentialKeys` so re-installs restore it.
+`profiles/or.json` is a working example.
 
 Open a new shell and `cl_<name>` exists. Keys named in `credentialKeys` are
 carried across re-installs — everything else is refreshed from the repo

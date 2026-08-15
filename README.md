@@ -151,17 +151,23 @@ The installer writes `~/.claude/profiles/*.json`, but every backend except `clau
 |---------|---------|-------|---------------------------|
 | `claude` | — | native OAuth | Nothing to configure |
 | `glm` | — (vendor-hosted endpoint) | — | Your BigModel API key → `.env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/profiles/glm.json` |
+| `or` | — (vendor-hosted endpoint) | — | Your OpenRouter key (`sk-or-v1-…`) → `.env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/profiles/or.json` |
 | `gpt` | `brew install cliproxyapi` | `cli-proxy-api --codex-login` (one-time browser authorization) | An `api-keys` entry from `~/.cli-proxy-api/config.yaml` → `.env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/profiles/gpt.json` |
 | `ccr` | `npm install -g @musistudio/claude-code-router` (needs Node.js >= 22) | `ccr ui` — admin UI on `http://127.0.0.1:3458` | The CCR client key minted in the UI → `.env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/profiles/ccr.json` |
 
 - **`gpt` carries a real account-ban risk.** It reuses a consumer ChatGPT subscription through a reverse-engineered OAuth flow; read the full warning in [docs/BACKENDS.md](docs/BACKENDS.md#gpt--chatgpt-pluspro-subscription) before using it.
 - **`ccr` cannot be automated.** CCR v3 keeps its configuration in SQLite, so the providers, the client key, and the agent profile have to be created by hand in the web UI — once.
+- **`or` needs a `/logout` first.** A cached Anthropic OAuth session outranks the environment variables the profile injects, so run `/logout` inside Claude Code once before the first `cl_or` launch — otherwise the requests keep going to Anthropic.
+- **`or` has no 5h quota bar** in the statusline, and OpenRouter has no 5h rolling window to show one for; the reason is spelled out in [docs/BACKENDS.md](docs/BACKENDS.md#quota-in-the-statusline). OpenRouter also only *guarantees* its native Anthropic endpoint for Anthropic first-party models, so the DeepSeek slots this profile ships are best-effort and have not been tested against a live key.
+- **`gpt` and `ccr` are no longer selected by default** in the installer. They are still shipped in full: tick them in the "Model Backends" group to install them, `--all` still includes them, and an existing `~/.claude/profiles/gpt.json` / `ccr.json` is never removed by an upgrade.
 
-Then `cl_glm` / `cl_gpt` / `cl_ccr` launches that backend, and `cl_switch <name>` makes it the default for a bare `cl`. Every launch prints the backend and the model it resolved to. To pick a model without editing JSON, pass claude's own flag — `cl_glm --model glm-5v-turbo` — or set `CL_MODEL=sonnet` for one launch.
+Then `cl_glm` / `cl_or` / `cl_gpt` / `cl_ccr` launches that backend, and `cl_switch <name>` makes it the default for a bare `cl`. Every launch prints the backend and the model it resolved to. To pick a model without editing JSON, pass claude's own flag — `cl_glm --model glm-5v-turbo` — or set `CL_MODEL=sonnet` for one launch.
 
 ## Image Generation
 
-The [`sinedied/agent-skills`:`image-gen`](https://github.com/sinedied/agent-skills) Skill is **always installed** over the network (never vendored), alongside a repository-owned wrapper at `~/.claude/scripts/image-gen-cliproxyapi.sh`. Every `cl*` / `cl_*_auto` launcher shares the same global `~/.claude/skills/` and `~/.claude/scripts/` paths, so image generation works from any backend: requests always hit the loopback endpoint `http://127.0.0.1:8317/v1` directly, bypassing whichever proxy the active launcher started. The wrapper requires CLIProxyAPI >= `v7.2.17`, uses the `gpt-image-2` model, treats `/healthz` as liveness only and additionally runs an authenticated `/v1/models` capability probe before delegating to the Skill's `image_gen.py` (which calls `/v1/images/generations` and `/v1/images/edits`). Authentication is the local CLIProxyAPI client key plus the one-time ChatGPT/Codex OAuth (`cliproxyapi --codex-login`) — **no OpenAI Platform API key is needed or requested**. `--uninstall` removes the Skill only when an ownership manifest, layout, and augmentation markers all agree. Native Windows runtime is unsupported (run the Bash installer inside WSL); real PowerShell runtime behaviour was not verified here. Full contract: [docs/BACKENDS.md](docs/BACKENDS.md).
+The [`sinedied/agent-skills`:`image-gen`](https://github.com/sinedied/agent-skills) Skill is **always installed** over the network (never vendored), alongside a repository-owned wrapper at `~/.claude/scripts/image-gen-openrouter.py`. Every `cl*` / `cl_*_auto` launcher shares the same global `~/.claude/skills/` and `~/.claude/scripts/` paths, so image generation works from any backend — and needs no local proxy at all: the wrapper posts straight to `https://openrouter.ai/api/v1/images` with `openai/gpt-image-2`, verifying the model is listed by `GET /api/v1/images/models` before it generates and failing closed if it is not. The upstream `image_gen.py` is not executed (its OpenAI routes do not exist on OpenRouter); `edit` sends reference images on the same endpoint instead. It needs `python3` and nothing else. **Authentication is the OpenRouter key in `~/.claude/profiles/or.json` (`.env.ANTHROPIC_AUTH_TOKEN`) and nothing else** — no environment-variable fallback, never on the command line, and **no OpenAI Platform API key is needed or requested**. `--uninstall` removes the Skill only when an ownership manifest, layout, and augmentation markers all agree. Real PowerShell runtime behaviour was not verified here. Full contract: [docs/BACKENDS.md](docs/BACKENDS.md).
+
+> **Upgrading from 2.x:** image generation now requires the OpenRouter backend. Tick "OpenRouter" during install and put a key from <https://openrouter.ai/keys> into `~/.claude/profiles/or.json`, or image generation will stop working. The old `image-gen-cliproxyapi.sh` wrapper is deleted automatically.
 
 ## Directory Structure
 
@@ -175,7 +181,7 @@ The [`sinedied/agent-skills`:`image-gen`](https://github.com/sinedied/agent-skil
 ├── mcp/                   # MCP server config (Playwright; Lark-MCP opt-in)
 ├── plugins/               # Plugin catalogue & install guide
 ├── skills/                # Bundled custom skills (vendored)
-├── scripts/               # User scripts (image-gen-cliproxyapi.sh wrapper + helpers)
+├── scripts/               # User scripts (image-gen-openrouter.py wrapper + helpers)
 ├── docs/                  # Paper summaries, showcases
 └── install.sh / install.ps1
 ```

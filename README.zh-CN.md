@@ -151,17 +151,23 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 |------|------|------|--------------|
 | `claude` | — | 原生 OAuth | 无需配置 |
 | `glm` | —（厂商托管的 endpoint） | — | 你的 BigModel API key → `~/.claude/profiles/glm.json` 的 `.env.ANTHROPIC_AUTH_TOKEN` |
+| `or` | —（厂商托管的 endpoint） | — | 你的 OpenRouter key（`sk-or-v1-…`）→ `~/.claude/profiles/or.json` 的 `.env.ANTHROPIC_AUTH_TOKEN` |
 | `gpt` | `brew install cliproxyapi` | `cli-proxy-api --codex-login`（一次性浏览器授权） | `~/.cli-proxy-api/config.yaml` 中的一条 `api-keys` → `~/.claude/profiles/gpt.json` 的 `.env.ANTHROPIC_AUTH_TOKEN` |
 | `ccr` | `npm install -g @musistudio/claude-code-router`（需要 Node.js >= 22） | `ccr ui` —— 管理界面在 `http://127.0.0.1:3458` | 在 UI 中生成的 CCR client key → `~/.claude/profiles/ccr.json` 的 `.env.ANTHROPIC_AUTH_TOKEN` |
 
 - **`gpt` 有真实的封号风险。** 它通过逆向出来的 OAuth 流程复用消费级 ChatGPT 订阅；使用前请先读 [docs/BACKENDS.md](docs/BACKENDS.md#gpt--chatgpt-pluspro-subscription) 里的完整警告。
 - **`ccr` 无法自动化。** CCR v3 把配置存在 SQLite 里，因此 providers、client key、agent profile 都必须在 web UI 里手工创建一次。
+- **`or` 必须先 `/logout`。** 缓存的 Anthropic OAuth 会话优先级高于 profile 注入的环境变量，因此首次 `cl_or` 之前要在 Claude Code 里执行一次 `/logout`，否则请求仍然会打到 Anthropic。
+- **`or` 没有 5h 配额条**，OpenRouter 本身也不存在 5h 滚动窗口可供展示；原因见 [docs/BACKENDS.zh-CN.md](docs/BACKENDS.zh-CN.md)。另外 OpenRouter 官方只*保证* Anthropic 自家模型能走它的原生 Anthropic 端点，因此本 profile 里的 DeepSeek 槽位属于 best-effort，且尚未用真实 key 实测过。
+- **`gpt` / `ccr` 在安装器中已改为默认不勾选。** 功能完整保留：在 "Model Backends" 分组里勾上即可安装，`--all` 仍然包含它们，已存在的 `~/.claude/profiles/gpt.json` / `ccr.json` 也不会被升级删除。
 
-配好之后，`cl_glm` / `cl_gpt` / `cl_ccr` 直接以对应后端启动，`cl_switch <name>` 则把它设为裸 `cl` 的默认后端。每次启动都会打印实际使用的后端与模型。想换模型不必改 JSON —— 直接传 claude 自己的参数（`cl_glm --model glm-5v-turbo`），或用 `CL_MODEL=sonnet` 改这一次的默认。
+配好之后，`cl_glm` / `cl_or` / `cl_gpt` / `cl_ccr` 直接以对应后端启动，`cl_switch <name>` 则把它设为裸 `cl` 的默认后端。每次启动都会打印实际使用的后端与模型。想换模型不必改 JSON —— 直接传 claude 自己的参数（`cl_glm --model glm-5v-turbo`），或用 `CL_MODEL=sonnet` 改这一次的默认。
 
 ## 图像生成
 
-[`sinedied/agent-skills`:`image-gen`](https://github.com/sinedied/agent-skills) Skill **始终**通过网络安装（**绝不** vendored），同时安装一个仓库自有的包装器到 `~/.claude/scripts/image-gen-cliproxyapi.sh`。所有 `cl*` / `cl_*_auto` 启动器共享同一组全局 `~/.claude/skills/` 和 `~/.claude/scripts/` 路径，因此图像生成可在任意后端下工作：请求始终直接打到环回地址 `http://127.0.0.1:8317/v1`，绕过当前启动器拉起的那个代理。包装器要求 CLIProxyAPI >= `v7.2.17`，使用 `gpt-image-2` 模型，把 `/healthz` 仅当作存活探针，并在委派给 Skill 的 `image_gen.py`（调用 `/v1/images/generations` 与 `/v1/images/edits`）之前，额外执行一次鉴权过的 `/v1/models` 能力探针。鉴权使用本地 CLIProxyAPI client key，加上一次性的 ChatGPT/Codex OAuth（`cliproxyapi --codex-login`）—— **不需要、也不会请求 OpenAI Platform API key**。`--uninstall` 仅在所有权清单、目录布局与注入标记三者一致时才删除该 Skill。不支持原生 Windows 运行时（请在 WSL 内运行 Bash 安装器）；本次会话未验证真实的 PowerShell 运行时行为。完整契约见 [docs/BACKENDS.md](docs/BACKENDS.md)。
+[`sinedied/agent-skills`:`image-gen`](https://github.com/sinedied/agent-skills) Skill **始终**通过网络安装（**绝不** vendored），同时安装一个仓库自有的包装器到 `~/.claude/scripts/image-gen-openrouter.py`。所有 `cl*` / `cl_*_auto` 启动器共享同一组全局 `~/.claude/skills/` 和 `~/.claude/scripts/` 路径，因此图像生成可在任意后端下工作 —— 而且完全不需要本地代理：包装器用 `openai/gpt-image-2` 直接 POST 到 `https://openrouter.ai/api/v1/images`，出图前先用 `GET /api/v1/images/models` 确认模型可用，确认不了就 fail-closed。上游的 `image_gen.py` 不会被执行（它那套 OpenAI 路由在 OpenRouter 上不存在）；`edit` 改为在同一端点上发送参考图。只需要 `python3`，无其他依赖。**鉴权只读 `~/.claude/profiles/or.json` 里的 OpenRouter key（`.env.ANTHROPIC_AUTH_TOKEN`），没有别的来源** —— 无环境变量兜底、绝不出现在命令行，且**不需要、也不会请求 OpenAI Platform API key**。`--uninstall` 仅在所有权清单、目录布局与注入标记三者一致时才删除该 Skill。本次未验证真实的 PowerShell 运行时行为。完整契约见 [docs/BACKENDS.md](docs/BACKENDS.md)。
+
+> **从 2.x 升级：** 出图现在依赖 OpenRouter 后端。请在安装时勾选 "OpenRouter"，并把 <https://openrouter.ai/keys> 的 key 填进 `~/.claude/profiles/or.json`，否则图像生成将无法使用。旧的 `image-gen-cliproxyapi.sh` 包装器会被自动删除。
 
 ## 目录结构
 
@@ -175,7 +181,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 ├── mcp/                   # MCP 服务器配置（Playwright；Lark-MCP 可选）
 ├── plugins/               # 插件目录与安装指南
 ├── skills/                # 内置自定义 skill（vendored）
-├── scripts/               # 用户脚本（image-gen-cliproxyapi.sh 包装器 + 辅助脚本）
+├── scripts/               # 用户脚本（image-gen-openrouter.py 包装器 + 辅助脚本）
 ├── docs/                  # 论文摘要、实战示例
 └── install.sh / install.ps1
 ```

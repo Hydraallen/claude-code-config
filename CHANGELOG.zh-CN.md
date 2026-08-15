@@ -2,6 +2,52 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [3.0.0] - 2026-08-15
+
+### 新功能
+- **新增 `or` 后端 —— OpenRouter 的 Anthropic 兼容端点，直连。** `profiles/or.json` 完全照 `glm.json` 的形状：`service` 为 `null`，不拉起任何代理，也不安装任何东西。`ANTHROPIC_BASE_URL` 是 `https://openrouter.ai/api`（结尾没有 `/v1` —— Claude Code 会自己拼 `/v1/messages`），四个模型槽位映射到 `deepseek/deepseek-v4-pro`（opus、sonnet）与 `deepseek/deepseek-v4-flash`（haiku、fable）。`cl_or` / `cl_or_auto` 由 `claude.zsh` 从 profiles 的 glob 结果自动生成，因此启动器一行都不用改。
+- **`gpt` 与 `ccr` 在安装器 "Model Backends" 分组里不再默认勾选**，`or` 默认勾选。只改了这两项 `GROUP_ITEMS` 条目的 `default_on` 那一列 —— 没有删除任何代码、模板或 `configure_*` 函数。两者的描述文案也补上了依赖（"needs cliproxyapi"、"manual web-UI setup"），让依赖在做选择的当下就可见。
+- **`--all` 安装全部后端，现在包含 `or`**：`SELECTED_PROFILES=("glm" "or" "gpt" "ccr")`。
+- **`cl_commands_hint()` 的启动器表格加入 `cl_or`**。
+
+- **BREAKING：出图链路从 CLIProxyAPI 换成 OpenRouter。** 始终安装的 `sinedied/agent-skills:image-gen` Skill 现在由 `scripts/image-gen-openrouter.py` 驱动 —— 一个零依赖的 Python 包装器，用 `openai/gpt-image-2` 直接 POST 到 `https://openrouter.ai/api/v1/images`。538 行的 `scripts/image-gen-cliproxyapi.sh` 被删除，随之消失的还有 CLIProxyAPI 二进制依赖、`v7.2.17` 最低版本要求、环回 `:8317` 端点、`/healthz` 存活探针、本地 client key 读取，以及 ChatGPT/Codex OAuth 依赖。出图不再需要任何本地服务处于运行状态。
+- **上游的 `image_gen.py` 不再被执行。** 它的 `/v1/images/generations` 与 `/v1/images/edits` 路由在 OpenRouter 上不存在；`edit` 改为在同一生成端点上用 `input_references` 表达。安装器仍然校验 `scripts/image_gen.py` 存在，但这已纯粹是对 npx 下载产物的完整性检查。
+- **严格 fail-closed 的模型预检，不留逃生舱。** 每次调用都先打 `GET /api/v1/images/models`，目标模型不在列表里、或列表无法解析，一律退出 `4`，并打印前几个真实可用的 id。刻意**不**提供任何 `SKIP_MODEL_CHECK` 之类的 bypass 开关。
+- **参数面更宽，`--output` 语义不变。** `-o/--output` 与上游逐条一致（file/dir 模式判定、`_N` 后缀、绝不覆盖）。`--size` 新增 `512`/`1K`/`2K`/`4K` 档位与任意 `WxH`；`-i/--image` 在本地路径之外新增 http(s) URL 支持；新增 `--aspect-ratio`、`--resolution`、`--seed`。`--api-key`、`--base-url` 与 `--mask` 接受但拒绝并解释原因，`--moderation` 接受但忽略。退出码从一律 `1` 改为 `0`/`1`/`2`/`3`/`4` 分级。
+- **`~/.claude` 下残留的 `scripts/image-gen-cliproxyapi.sh` 会在下次安装时自动删除**，两个安装器都新增了 `SUPERSEDED_USER_SCRIPTS` 清理环节。不这么做的话该文件会变成孤儿 —— 卸载循环只认当前的 `USER_SCRIPTS`。
+- **修复：`install.ps1` 找的是 `image-gen\image_gen.py` 而非 `image-gen\scripts\image_gen.py`**，`Update-ImageGenSkillInstructions` 和还原路径校验两处都有。因此注入在每一次 Windows 运行上都失败，并连带把整个 image-gen 安装拖垮（表现为 warn，不是致命错）。修复前 Windows 上的 image-gen 安装是 100% 失败的。
+- **修复：两个安装器注入的 SKILL.md 引导块内容不一致**（PowerShell 版多了 5 行 WSL 说明），导致在同一 `~/.claude` 上交替运行两个安装器会每次都重写 SKILL.md。现已逐字节相同，且两边都加了注释说明必须保持一致。
+- **删除死目录 `skills/generate-image/`** —— 4 个孤立的 `.pyc`，无源码、全仓零引用。
+
+### 设计理由
+- **`ANTHROPIC_API_KEY` 取空串、写在 `env` 里，并刻意不进 `credentialKeys`。** OpenRouter 用 `Authorization: Bearer` 鉴权，而 Claude Code 只在 `ANTHROPIC_API_KEY` 为假值时才发这个头 —— 只要它有任何值就会切到 `x-api-key`，把请求当成直连 Anthropic，OpenRouter 的 token 便一次都发不出去。写在 `env` 而不是 `unset[]`，是因为 `unset[]` 执行的是真正的 `unset`，与"值为空"不是一回事，而这里需要的语义就是空串。这条机制是实测过的、不是推断：`_cl_profile_env_pairs`（`claude.zsh:484-498`）只拒绝 `array`/`object` 类型的值，把它的 jq filter 原样跑一遍 `profiles/or.json`，确实输出了 `ANTHROPIC_API_KEY=` 这一行；注入循环（`claude.zsh:736-741`）判空的是**键**不是值，因此 export 成立。不进 `credentialKeys` 意味着重装合并（`install.sh:2192-2199`）每次都从模板把空串写回来，同时也让它不会被占位符扫描扫到 —— 空串本来就不是让用户去填的东西。
+- **刻意不加 `_SUPPORTED_CAPABILITIES`。** `glm.json` / `gpt.json` 里那串 `effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking` 会让 Claude Code 发出 Anthropic 的 thinking/effort 参数，需要 OpenRouter 翻译成 DeepSeek 的 `reasoning` 字段，而 `adaptive_thinking` / `interleaved_thinking` 在 DeepSeek 侧根本没有对应物 —— 在一条没人测过的链路上，这是零星 400 的合理来源。因此留空，并在 `note` 里写明如何逐个加回并测试。
+- **不设 `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`。** `claude.zsh:555` 的抑制分支只在解析出的槽位变量为**空**时才触发；这里四个槽位全都有值，所以无论设不设，启动器照旧注入 `--model opus`，`/model` 选择器都是预锁定态。设了没有任何行为收益，只多一次每次启动的模型列表往返。本 profile 所照抄的直连范本 `glm.json` 同样没设。
+- **`gpt` / `ccr` 降级，是因为两者装完都不能直接用。** `gpt` 需要一个外部 `brew` 二进制，外加一次有真实封号风险的逆向 OAuth 流程；`ccr` 把配置存在 SQLite 里，必须手工在 web UI 中配一遍。两者都属于"能装上、装上也不能用"的后端 —— 正是 2.21.0 把 `adversarial-review` 移出默认路径时所针对的那种依赖形态，这里适用同一套理由。
+
+- **key 只从 `profiles/or.json` 读，不做 `OPENROUTER_API_KEY` 兜底。** 同一个 token 开两个凭据面，必然漂移；而且仓库既有的心智模型就是"凭据集中在 `~/.claude/profiles/*.json`，重装时靠 `credentialKeys` 保留"。代价是明确的：出图现在要求 OpenRouter 后端已安装并填好 key，即便你从不用 `cl_or` 聊天。key 仅作为 `Authorization` 请求头使用 —— 绝不进 argv、子进程环境、stdout、stderr 或任何错误信息 —— 并限制字符集为 `[A-Za-z0-9._~-]+`，杜绝用换行注入伪造请求头。未填写的 `YOUR_*` 占位符被当作"没有 key"，而不是拿去打 API 收一个 401。
+- **目标 host 与 key 本身受同等强度的保护。** 只拒绝 `--api-key` 是没有意义的，只要**端点**还能随意指定 —— `Authorization: Bearer <真实 key>` 会跟着 base URL 指向的任何 host 发出去，于是被 prompt injection 塞进参数表的 `--base-url https://evil.example/api/v1` 可以在完全遵守 `--api-key` 禁令的前提下把 token 送走。因此 `--base-url` 与 `--api-key` 同等处理：直接拒绝（退出 `2`，且从 `--help` 隐藏）—— argv 才是 prompt injection 能控制的面，而正常使用根本不需要它。`IMAGE_GEN_BASE_URL` 保留，因为环境变量不具备同样的可达性，但现在限定为 `openrouter.ai` 及其子域走 https，外加 `127.0.0.1` / `[::1]` / `localhost` 走 http(s) 以保住 stub server 测试路径。匹配基于解析出的 hostname 精确比较，绝不用子串判断 —— `https://openrouter.ai.evil.com` 与 `https://evil.com/?x=openrouter.ai` 均被拒。该校验在读取 key 之前执行，所以非法 host 会以自己的错误信息失败，而不是被"缺少凭据"的报错掩盖。
+- **包装器用 Python 而非 Bash。** 要做的是 base64 编解码、JSON 构造、data URL 拼装；纯 Bash 意味着内嵌三四段 `python3 -c` heredoc（旧包装器已经这么干了两处）。`python3` 本来就是硬依赖，而 `argparse` 保证 flag 语义与上游对齐的可靠性远高于手写 getopt。代价：这是仓库第一个 `.py` 文件，`bash -n` 覆盖不到它，验证清单里因此补上了 `python3 -m py_compile`。
+- **刻意去掉了上游的 `.env` 自动加载。** `image_gen.py` 会从 CWD 一路向上找 `.env` 并注入环境。在任意用户仓库里出图，不该读到该仓库的密钥。
+- **所有权校验接受旧的 marker 与 manifest，但只写入新的。** 这是整个改动里最重要的一条。SKILL.md 的标记和 manifest 的 `wrapper=` 行都变了。不做兼容的话，所有存量安装都会过不了 `_image_gen_manifest_valid`、过不了 `_image_gen_dir_owned`，落到"目录存在但不是 installer 安装的"分支，然后被**永久跳过** —— 每次升级只打一条 warn，出图能力冻结在已被删除的 CLIProxyAPI 包装器上。新增的 `_image_gen_manifest_valid_any` / `_image_gen_markers_strict_any` 只用在三个所有权判定点；写入路径与写后自检仍是严格版，所以迁移只发生一次，第二次运行就是纯新格式的幂等路径。注入前会先剥离旧块再插入新块，迁移后的 SKILL.md 只有一对标记而不是两对。
+
+### 注意事项
+- **`or` 后端从未对真实的 OpenRouter key 跑过。** 任务书里那一步阻断性的 curl 实测按用户决定跳过（当前没有 key），因此 DeepSeek 经 OpenRouter 的 Anthropic skin 走 `tool_use` 往返是否真的可用，**尚未验证**。OpenRouter 官方的措辞是该原生端点"只保证与 Anthropic 第一方 provider 配合工作" —— 这是不保证，不是硬拒绝，而且正反两方向都不存在公开实测报告。已验证的是凭证守卫的**失败**路径（未填 key 时 `cl_or` 报占位符错误并中止，不会发出任何网络请求）；happy path 未验证。
+- **默认值变更对存量用户无影响。** `install_profiles()` 只遍历选中集合、不做反向清理，因此已经装好的 `~/.claude/profiles/gpt.json` / `ccr.json` 不会被任何一次升级删除，`configure_ccr_profile` 也仍按该文件是否存在触发。
+- **`--all` 同时也是非 TTY 下 `curl | bash` 的回退路径**，那条路径仍然会安装 `gpt` 与 `ccr`。新的默认值只对交互式选择器生效。
+- **`or` 没有 5h 额度条。** `hooks/statusline.sh:85-90` 按 `$ANTHROPIC_BASE_URL` 选数据源，只认识 `bigmodel.cn` / `z.ai`；更根本的是 OpenRouter 压根没有 5 小时滚动窗口 —— 它只有 `/api/v1/credits` 的余额，那是钱而不是"窗口已用百分比"，硬塞进去只会渲染出一个语义错误的进度条。
+- **一个上下文上限管所有槽位。** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 是客户端全局值，设为 `1000000` 以匹配两个 DeepSeek V4 模型。把任何槽位改到 163K 上下文的模型（`deepseek/deepseek-v3.2`、`deepseek/deepseek-chat`）都必须手工调低它。`deepseek/deepseek-reasoner` 在 OpenRouter 上不存在 —— 那个 id 属于 DeepSeek 官方 API。
+- **`install.ps1` 未做任何改动。** 它完全没有 profile / launcher 支持（`grep -c profile install.ps1` 为 0）；Windows 侧只有状态栏。
+- **已验证**：`bash -n install.sh` 在 bash 5.3 与系统 bash 3.2.57 下、以及 `zsh -n claude.zsh`，退出码均为 0；`jq empty profiles/*.json` 无输出；把 `_cl_profile_env_pairs` 的 filter 原样跑 `profiles/or.json`，恰好输出一行 `ANTHROPIC_API_KEY=`；占位符扫描只返回 `ANTHROPIC_AUTH_TOKEN`；十二个 `ANTHROPIC_DEFAULT_*` 槽位键齐全，`_SUPPORTED_CAPABILITIES` 为 0 个。在一次性的临时 `HOME` 下：交互式默认选择只装出 `claude.json`、`glm.json`、`or.json`，没有 `gpt.json` / `ccr.json`；`--all` 五个全装；source 安装好的 `claude.zsh` 之后 `cl_or` 与 `cl_or_auto` 均已定义；未填 key 时 `cl_or` 以退出码 1 报占位符错误；安装尾部的待配置清单中 `[or]` 只有 `key` + `guide` 两步（因 `service` 为 `null`，没有 install / login 子步骤）；对手工改过的 profile 重装一次，`ANTHROPIC_AUTH_TOKEN` 被保留，而 `ANTHROPIC_API_KEY` 被重置回 `""`、非凭证键被重置回模板值。
+
+- **对存量用户是 BREAKING：不配 OpenRouter 就出不了图。** 迁移步骤：重跑安装器 → 在 "Model Backends" 分组勾选 **OpenRouter** → 把 <https://openrouter.ai/keys> 的 key 填进 `~/.claude/profiles/or.json` 的 `.env.ANTHROPIC_AUTH_TOKEN`。在填好之前，包装器会退出 `3` 并给出明确说明。旧的 `~/.claude/scripts/image-gen-cliproxyapi.sh` 由同一次安装自动删除，无需手工清理。已有的 `~/.claude/skills/image-gen/` 安装会被就地迁移而不是跳过（见上面的所有权说明）。
+- **OpenRouter 出图链路从未用真实 key 跑通过。** 没有端到端出图、没有图生图往返验证，请求/响应形状也未与真实 API 核对过。`input_references` 的对象形状来自 OpenRouter 公开文档，不是实际观测到的请求。
+- **最大的单点未验证风险：`openai/gpt-image-2` 是否真的出现在 `GET /api/v1/images/models` 里。** 该端点需要鉴权，无法查询。此前证实的是该 id 出现在 `GET /api/v1/models?output_modalities=image` —— 那是**另一个**端点，两个列表未必完全一致。若两者不一致，fail-closed 预检会拦下所有请求。这个失败是响亮且可自救的（错误信息会列出前几个真实可用的 id，`--model` 可覆盖），而不是静默的，但拿到 key 后第一件事就该验它。
+- **`size` / `quality` / `background` / `output_compression` 在 `openai/gpt-image-2` 上是否被支持，未经验证。** `GET /api/v1/images/models/{id}/endpoints` 能给出按模型的 `supported_parameters`，但需鉴权。不支持的参数预期由 API 返回 4xx，包装器会原样透传。
+- **`install.ps1` 改了但没跑过。** 本环境没有 `pwsh`，连语法检查都跳过了 —— PowerShell 侧的改动（旧块字节级剥离、`*Any` 校验器、两处路径修复、超期脚本清理）全部只靠与 Bash 实现的对照审查支撑。其中 `Update-ImageGenSkillInstructions` 里的字节级旧块剥离风险最高，需要真实 Windows 环境验证。
+- **两侧旧块剥离现在在畸形输入上行为一致。** 双方都只在"恰好一个旧 BEGIN + 恰好一个旧 END + BEGIN 在 END 之前"时才删除该区间；其余任何形态（没有、成对重复、只有一侧、END 先于 BEGIN）一律恒等变换，把文本留给当前标记的校验去判定。Bash 侧此前用的是无状态 `awk` skip 开关，意味着只要出现一个没有配对的旧 BEGIN —— 手工编辑过的 SKILL.md、上次安装中途失败、或者文件里恰好有一行等于旧 marker 文本 —— `skip` 就会永久锁死，**丢弃该行之后的全部内容**，包括其下方完好的当前标记块。被截断的文件随后过不了严格校验，静默退化成 append 模式，再以零退出码、无任何 warn 的方式覆盖回 SKILL.md。修复前已复现（8 行样本被吃到只剩 1 行），修复后七种形态逐一确认正常。
+- **本次已验证**：`bash -n install.sh` 在 bash 5.3 与系统 bash 3.2.57 下均退出 0；新包装器的 `python3 -m py_compile` 与三种 `--help` 均正常；`jq empty profiles/*.json` 干净；`scripts/check-readme-sync.sh` 通过；两个安装器的 SKILL.md 引导块经 `cmp` 确认逐字节相同。对本地 stub HTTP server：真 PNG 被解码落盘、路径打到 stdout、`revised_prompt` 打到 stderr、key 只出现在 `Authorization` 头、嵌套输出目录会被创建、已存在的目标绝不覆盖（`pic.png` → `pic_2.png`）、`edit` 发出的 `input_references` 是形状正确的 base64 data URL 条目。把 stub 的模型列表改成不含目标模型后，运行退出 `4` 且**零** POST 请求，fail-closed 得到确认。一个 25 条断言的 harness 直接跑真实 `install.sh` 函数，覆盖幂等性（两次注入逐字节相同、恰好一对标记）与完整的旧版升级路径：CLIProxyAPI 时代的 manifest 与标记块被认成 owned、旧块被剥离、恰好一个新块取而代之且前后散文保留、manifest 被改写为标准格式、之后再跑一次逐字节相同。在临时 `CLAUDE_DIR` 下，`install_scripts` 安装了可执行的新包装器并删除了超期的旧包装器，而 `--dry-run` 只报告这两个动作、不落盘。旧块剥离针对七种标记形态重跑（8 行未闭合 BEGIN 复现用例、0 对、恰好一对合法、两对、只有 BEGIN、只有 END、顺序颠倒），只有单一合法对被删除，其余输入逐字节原样透传。`--base-url` 退出 `2` 且不回显 key，也不出现在 `--help` 中；`IMAGE_GEN_BASE_URL` 对 `evil.example`、`openrouter.ai.evil.com`、`evil.com/?x=openrouter.ai`、`notopenrouter.ai`、`file://` URL 以及明文 http 的 `openrouter.ai` 均退出 `2`，而 `openrouter.ai`、`api.openrouter.ai` 与三种 loopback 写法均放行进入 key 查找。两个 stub 场景在新校验下行为不变：loopback base URL 正常出图并写出 `image_1.png`、key 只出现在 `Authorization` 头，未列出的模型退出 `4` 且 `posts: 0`。
+
 ## [2.21.0] - 2026-08-15
 
 ### 新功能

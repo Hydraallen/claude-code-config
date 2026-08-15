@@ -1102,11 +1102,16 @@ function Install-Agents {
     }
 }
 
-# image-gen-cliproxyapi.sh is the always-installed CLIProxyAPI delegation wrapper
+# image-gen-openrouter.py is the always-installed OpenRouter image wrapper
 # consumed by the network-installed sinedied/agent-skills:image-gen Skill (see
 # Install-ImageGen). Installed as a user script so uninstall removes it. It is a
-# Bash script; native Windows cl_*/CLIProxyAPI service lifecycle is unsupported.
-$USER_SCRIPTS = @("cleanup-claude-data.sh", "image-gen-cliproxyapi.sh")
+# Python script and needs python3 on PATH to run.
+$USER_SCRIPTS = @("cleanup-claude-data.sh", "image-gen-openrouter.py")
+
+# Wrapper superseded by image-gen-openrouter.py, removed from ~/.claude on the
+# next install so it does not linger past the uninstall loop that no longer
+# knows about it.
+$SUPERSEDED_USER_SCRIPTS = @("image-gen-cliproxyapi.sh")
 
 function Install-Scripts {
     Write-Info "Installing maintenance scripts..."
@@ -1123,6 +1128,16 @@ function Install-Scripts {
         } else {
             Copy-Item $src (Join-Path $destDir $script) -Force
             Write-Ok "Script installed: $script (run manually; not auto-executed)"
+        }
+    }
+    foreach ($script in $SUPERSEDED_USER_SCRIPTS) {
+        $stale = Join-Path $destDir $script
+        if (-not (Test-Path -LiteralPath $stale)) { continue }
+        if ($DryRun) {
+            Write-Info "Would remove superseded script: $stale"
+        } else {
+            Remove-Item -LiteralPath $stale -Force
+            Write-Ok "Removed superseded script: $script"
         }
     }
 }
@@ -1171,19 +1186,28 @@ function Invoke-Cleanup {
 # failed download is non-fatal — it increments $script:InstallWarnings so
 # the summary surfaces it while letting the rest of the install finish.
 #
-# IMPORTANT: the wrapper asset (image-gen-cliproxyapi.sh) is a Bash script.
-# Native Windows cl_*/CLIProxyAPI service lifecycle is NOT supported; the
-# wrapper is installed for WSL / Git-Bash / Bash-compatible environments.
+# The wrapper asset (image-gen-openrouter.py) is a Python script with no local
+# service dependency, so it can run natively wherever python3 is on PATH. The
+# ~/.claude layout still differs between Windows and WSL; see the integration
+# block for the recommended path.
 # ============================================================
 
 # Managed markers wrapping the integration block in the installed SKILL.md.
-$IMAGE_GEN_BEGIN_MARKER = "<!-- BEGIN claude-code-config CLIProxyAPI image-gen integration -->"
-$IMAGE_GEN_END_MARKER = "<!-- END claude-code-config CLIProxyAPI image-gen integration -->"
+$IMAGE_GEN_BEGIN_MARKER = "<!-- BEGIN claude-code-config OpenRouter image-gen integration -->"
+$IMAGE_GEN_END_MARKER = "<!-- END claude-code-config OpenRouter image-gen integration -->"
+
+# Pre-OpenRouter markers. Recognized for ownership only; never written.
+$IMAGE_GEN_LEGACY_BEGIN_MARKER = "<!-- BEGIN claude-code-config CLIProxyAPI image-gen integration -->"
+$IMAGE_GEN_LEGACY_END_MARKER = "<!-- END claude-code-config CLIProxyAPI image-gen integration -->"
 
 # Exact canonical ownership manifest content. Validation compares
 # byte-for-byte (order, one trailing newline, no extras/CRLF). Kept as a
 # single literal so it is the only source of truth.
-$IMAGE_GEN_MANIFEST_CANONICAL = "skill=image-gen`nsource=sinedied/agent-skills`nwrapper=image-gen-cliproxyapi.sh"
+$IMAGE_GEN_MANIFEST_CANONICAL = "skill=image-gen`nsource=sinedied/agent-skills`nwrapper=image-gen-openrouter.py"
+
+# Pre-OpenRouter manifest. Recognized for ownership so an existing install
+# upgrades in place instead of being treated as user-authored; never written.
+$IMAGE_GEN_MANIFEST_LEGACY = "skill=image-gen`nsource=sinedied/agent-skills`nwrapper=image-gen-cliproxyapi.sh"
 
 # Returns the exact `skills add` argument array. Installs globally to
 # ~/.claude/skills/ as real copies for Claude Code, scoped to the single
@@ -1198,29 +1222,41 @@ function Get-ImageGenNpxArgs {
 
 # Returns the canonical managed instructions block (the bytes between the
 # markers). Pure: no side effects. Tells Claude Code to invoke the wrapper,
-# forward upstream arguments, avoid requesting an OpenAI Platform API key,
-# and notes the loopback endpoint, model, and the native-Windows limitation.
+# which arguments carry over, where the key comes from, and that a key must
+# never be requested from the user or passed on the command line.
 # Single-quoted here-string: literal (no `$ expansion, no backtick escapes).
+# MUST stay byte-identical to install.sh's image_gen_render_integration_block,
+# or running both installers against one ~/.claude rewrites SKILL.md each time.
 function Get-ImageGenIntegrationBlock {
     return @'
-Run image generation through the local CLIProxyAPI wrapper instead of invoking
-`image_gen.py` directly or requesting an OpenAI Platform API key:
+Run image generation through the repository-owned OpenRouter wrapper instead of
+invoking `image_gen.py` directly or requesting an OpenAI Platform API key:
 
-    ~/.claude/scripts/image-gen-cliproxyapi.sh <upstream arguments>
+    ~/.claude/scripts/image-gen-openrouter.py <arguments>
 
-Forward all upstream arguments (`generate`, `edit`, prompts, file paths, and
-image options) unchanged. The wrapper starts or reuses CLIProxyAPI on the
-loopback endpoint `http://127.0.0.1:8317/v1`, reads the local client key
-without exposing it, and requests the `gpt-image-2` model. Do not ask the user
-for an OpenAI Platform API key — image generation is covered by the local
-CLIProxyAPI using ChatGPT/Codex OAuth.
+Forward the same arguments the upstream CLI documents (`generate` / `gen`,
+`edit`, the prompt, `-i/--image`, `-o/--output`, `--model`, `--n`, `--size`,
+`--quality`, `--background`, `--output-format`, `--output-compression`). The
+wrapper posts to `https://openrouter.ai/api/v1/images`, verifies the target
+model is listed by `GET /api/v1/images/models` before generating, and writes
+the returned images to `--output` (default: current directory), printing each
+saved path on stdout.
 
-Note: native Windows `cl_*`/CLIProxyAPI service lifecycle is not supported.
-The wrapper is a Bash script — run it inside WSL (run the Bash installer inside
-WSL so it lands in the WSL `~/.claude`, NOT the Windows `%USERPROFILE%\.claude`,
-which WSL does not see as `~/.claude`). Git Bash may also work but its
-`~/.claude` -> `%USERPROFILE%\.claude` mapping depends on the install, so WSL
-is the recommended path for a faithful `~/.claude` layout.
+Image-to-image goes through `edit` with one or more `-i` reference images.
+`--mask` is rejected: OpenRouter has no inpainting mask — put the region to
+change in the prompt. `--moderation` is accepted but ignored.
+
+Authentication: the wrapper reads `.env.ANTHROPIC_AUTH_TOKEN` from
+`~/.claude/profiles/or.json` and nothing else. Never ask the user for an OpenAI
+Platform API key, and never pass a key on the command line — the wrapper
+refuses `--api-key` by design. It refuses `--base-url` for the same reason: the
+endpoint is fixed at `https://openrouter.ai/api/v1` and must not be redirected
+from the command line. If it reports no usable key, tell the user to install
+the OpenRouter backend and put their https://openrouter.ai/keys token in that
+profile.
+
+Requires `python3` on PATH. On native Windows run it from WSL or another
+Bash-compatible environment so the `~/.claude` layout matches.
 '@
 }
 
@@ -1232,23 +1268,27 @@ is the recommended path for a faithful `~/.claude` layout.
 # Ownership and augmentation both consult this so a hand-edited or hostile
 # SKILL.md can never authorize deletion or overwrite.
 function Test-ImageGenMarkersStrict {
-    param([Parameter(Mandatory=$true)][string]$SkillMd)
+    param(
+        [Parameter(Mandatory=$true)][string]$SkillMd,
+        [string]$Begin = $IMAGE_GEN_BEGIN_MARKER,
+        [string]$End = $IMAGE_GEN_END_MARKER
+    )
     if (-not (Test-Path -LiteralPath $SkillMd)) { return $false }
     $lines = @(Get-Content -LiteralPath $SkillMd -ErrorAction SilentlyContinue)
     $begin = 0; $end = 0; $inBlock = $false; $bad = $false; $embedded = $false
     foreach ($line in $lines) {
-        if ($line -ceq $IMAGE_GEN_BEGIN_MARKER) {
+        if ($line -ceq $Begin) {
             if ($inBlock) { $bad = $true }
             if ($end -gt 0) { $bad = $true }
             $begin++
             if ($begin -gt 1) { $bad = $true }
             $inBlock = $true
-        } elseif ($line -ceq $IMAGE_GEN_END_MARKER) {
+        } elseif ($line -ceq $End) {
             if (-not $inBlock) { $bad = $true }
             $end++
             if ($end -gt 1) { $bad = $true }
             $inBlock = $false
-        } elseif ($line.Contains($IMAGE_GEN_BEGIN_MARKER) -or $line.Contains($IMAGE_GEN_END_MARKER)) {
+        } elseif ($line.Contains($Begin) -or $line.Contains($End)) {
             $embedded = $true
         }
     }
@@ -1256,22 +1296,46 @@ function Test-ImageGenMarkersStrict {
     return ($begin -eq 1 -and $end -eq 1)
 }
 
+# Ownership-only: a strictly well-formed CURRENT block, or a strictly
+# well-formed pre-OpenRouter one. Write paths keep using the strict validator
+# above so nothing but the current format is ever emitted.
+function Test-ImageGenMarkersStrictAny {
+    param([Parameter(Mandatory=$true)][string]$SkillMd)
+    if (Test-ImageGenMarkersStrict -SkillMd $SkillMd) { return $true }
+    return (Test-ImageGenMarkersStrict -SkillMd $SkillMd `
+        -Begin $IMAGE_GEN_LEGACY_BEGIN_MARKER -End $IMAGE_GEN_LEGACY_END_MARKER)
+}
+
 # Validate that an image-gen ownership manifest is byte-for-byte identical to
 # the canonical content this installer writes: exactly three lines in order,
 # one trailing newline, no duplicates/extras, no CRLF. Byte comparison so a
 # field-by-field parser cannot accept reordering/duplication. Pure.
 function Test-ImageGenManifestValid {
-    param([Parameter(Mandatory=$true)][string]$Manifest)
+    param(
+        [Parameter(Mandatory=$true)][string]$Manifest,
+        [string]$Expected = $IMAGE_GEN_MANIFEST_CANONICAL
+    )
     if (-not (Test-Path -LiteralPath $Manifest)) { return $false }
     try {
         $actual = [System.IO.File]::ReadAllBytes($Manifest)
     } catch { return $false }
-    $expected = [System.Text.Encoding]::UTF8.GetBytes($IMAGE_GEN_MANIFEST_CANONICAL + "`n")
-    if ($actual.Length -ne $expected.Length) { return $false }
+    $expectedBytes = [System.Text.Encoding]::UTF8.GetBytes($Expected + "`n")
+    if ($actual.Length -ne $expectedBytes.Length) { return $false }
     for ($i = 0; $i -lt $actual.Length; $i++) {
-        if ($actual[$i] -ne $expected[$i]) { return $false }
+        if ($actual[$i] -ne $expectedBytes[$i]) { return $false }
     }
     return $true
+}
+
+# Ownership-only validator: the canonical manifest OR the pre-OpenRouter one.
+# Write-ImageGenManifest stays canonical-only, so a legacy manifest is upgraded
+# exactly once, on the next successful install. Without this, every existing
+# install would fail the ownership proof after the wrapper rename and be
+# skipped forever as "not installer-owned".
+function Test-ImageGenManifestValidAny {
+    param([Parameter(Mandatory=$true)][string]$Manifest)
+    if (Test-ImageGenManifestValid -Manifest $Manifest) { return $true }
+    return (Test-ImageGenManifestValid -Manifest $Manifest -Expected $IMAGE_GEN_MANIFEST_LEGACY)
 }
 
 # Full ownership proof: a directory is installer-owned ONLY when a valid
@@ -1285,8 +1349,8 @@ function Test-ImageGenDirOwned {
         [Parameter(Mandatory=$true)][string]$Manifest
     )
     if (-not (Test-Path -LiteralPath $SkillDir)) { return $false }
-    if (-not (Test-ImageGenManifestValid -Manifest $Manifest)) { return $false }
-    return (Test-ImageGenMarkersStrict -SkillMd (Join-Path $SkillDir "SKILL.md"))
+    if (-not (Test-ImageGenManifestValidAny -Manifest $Manifest)) { return $false }
+    return (Test-ImageGenMarkersStrictAny -SkillMd (Join-Path $SkillDir "SKILL.md"))
 }
 
 # Write the ownership manifest atomically. The manifest is the sole authority
@@ -1352,7 +1416,10 @@ function Write-ImageGenManifest {
 function Update-ImageGenSkillInstructions {
     param([string]$SkillsDir = (Join-Path $CLAUDE_DIR "skills"))
     $skillMd = Join-Path $SkillsDir "image-gen\SKILL.md"
-    $upstream = Join-Path $SkillsDir "image-gen\image_gen.py"
+    # Download-integrity sanity check, not a runtime dependency: the wrapper no
+    # longer invokes image_gen.py, but its presence still proves npx fetched the
+    # image-gen layout we expect rather than something else under that name.
+    $upstream = Join-Path $SkillsDir "image-gen\scripts\image_gen.py"
     if (-not (Test-Path -LiteralPath $skillMd)) {
         Write-Warn "image-gen: SKILL.md not found at $skillMd - augmentation skipped"
         return $false
@@ -1389,6 +1456,38 @@ function Update-ImageGenSkillInstructions {
             break
         }
         if ($all[$i] -eq 0x0A) { $nlBytes = [byte[]](0x0A); break }
+    }
+
+    # Strip any pre-OpenRouter managed block first, so a CLIProxyAPI-era
+    # SKILL.md upgrades to exactly one current block instead of accumulating a
+    # second one beside the stale text. Operates on the same Latin1 view (char
+    # index == byte offset), so bytes outside the removed interval are untouched
+    # and the BOM/newline handling below is unaffected. Only a single, ordered,
+    # well-formed legacy pair is removed; anything else is left as prose for the
+    # current-marker validation below to judge. Identity transform when absent,
+    # which is what keeps a second run byte-identical to the first.
+    $lSegs = [regex]::Split($body, '(\r\n|\r|\n)')
+    $lBeginIdx = -1; $lEndIdx = -1; $lBad = $false
+    for ($i = 0; $i -lt $lSegs.Length; $i += 2) {
+        if ($lSegs[$i] -ceq $IMAGE_GEN_LEGACY_BEGIN_MARKER) {
+            if ($lBeginIdx -ge 0) { $lBad = $true }
+            $lBeginIdx = $i
+        } elseif ($lSegs[$i] -ceq $IMAGE_GEN_LEGACY_END_MARKER) {
+            if ($lEndIdx -ge 0) { $lBad = $true }
+            $lEndIdx = $i
+        }
+    }
+    if (-not $lBad -and $lBeginIdx -ge 0 -and $lEndIdx -gt $lBeginIdx) {
+        $lHeadEnd = 0
+        for ($i = 0; $i -lt $lBeginIdx; $i++) { $lHeadEnd += $lSegs[$i].Length }
+        # Consume the END marker line AND the separator that follows it, so the
+        # removal is whole-line and leaves no blank line behind.
+        $lTailStart = 0
+        $lLast = [Math]::Min($lEndIdx + 1, $lSegs.Length - 1)
+        for ($i = 0; $i -le $lLast; $i++) { $lTailStart += $lSegs[$i].Length }
+        $lTail = ""
+        if ($lTailStart -lt $body.Length) { $lTail = $body.Substring($lTailStart) }
+        $body = $body.Substring(0, $lHeadEnd) + $lTail
     }
 
     # Split into alternating (line-content, separator) segments so we can compute
@@ -1576,7 +1675,7 @@ function Install-ImageGen {
     # Reconcile stale ownership BEFORE every other early return: a valid
     # manifest with no skill directory is stale ownership of nothing; remove
     # it so it can never later authorize deletion of a user-created directory.
-    if (-not $priorOwned -and (Test-Path -LiteralPath $manifest) -and (Test-ImageGenManifestValid -Manifest $manifest)) {
+    if (-not $priorOwned -and (Test-Path -LiteralPath $manifest) -and (Test-ImageGenManifestValidAny -Manifest $manifest)) {
         Remove-Item -LiteralPath $manifest -Force -ErrorAction SilentlyContinue
         Write-Warn "image-gen: removed stale ownership manifest (no image-gen directory present)"
     }
@@ -1646,9 +1745,9 @@ function Install-ImageGen {
             Copy-Item -LiteralPath (Join-Path $backupDir "image-gen") -Destination (Join-Path $rtmp "image-gen") -Recurse -Force
             Copy-Item -LiteralPath (Join-Path $backupDir "manifest") -Destination (Join-Path $rtmp "manifest") -Force
             if (-not (Test-Path (Join-Path $rtmp "image-gen")) `
-                -or -not (Test-Path (Join-Path $rtmp "image-gen\image_gen.py")) `
-                -or -not (Test-ImageGenMarkersStrict -SkillMd (Join-Path $rtmp "image-gen\SKILL.md")) `
-                -or -not (Test-ImageGenManifestValid -Manifest (Join-Path $rtmp "manifest"))) {
+                -or -not (Test-Path (Join-Path $rtmp "image-gen\scripts\image_gen.py")) `
+                -or -not (Test-ImageGenMarkersStrictAny -SkillMd (Join-Path $rtmp "image-gen\SKILL.md")) `
+                -or -not (Test-ImageGenManifestValidAny -Manifest (Join-Path $rtmp "manifest"))) {
                 Remove-Item $rtmp -Recurse -Force -ErrorAction SilentlyContinue
                 return 1
             }
@@ -1689,7 +1788,7 @@ function Install-ImageGen {
     }
     Write-Ok "image-gen Skill installed (~/.claude/skills/image-gen/)"
 
-    $wrapper = Join-Path $CLAUDE_DIR "scripts\image-gen-cliproxyapi.sh"
+    $wrapper = Join-Path $CLAUDE_DIR "scripts\image-gen-openrouter.py"
     if (-not (Test-Path -LiteralPath $wrapper)) {
         Write-Warn "image-gen wrapper not installed at $wrapper - augmentation/manifest skipped"
         $rc = Restore-ImageGenPrev
@@ -2241,7 +2340,7 @@ function Invoke-Uninstall {
     Write-Host "  - $CLAUDE_DIR\agents\ (installer-managed only)"
     Write-Host "  - $CLAUDE_DIR\skills\deepxiv-* (DeepXiv skills)"
     Write-Host "  - $CLAUDE_DIR\skills\image-gen\ (when installer-owned, via .image-gen-sinedied)"
-    Write-Host "  - $CLAUDE_DIR\scripts\image-gen-cliproxyapi.sh (image-gen wrapper)"
+    Write-Host "  - $CLAUDE_DIR\scripts\image-gen-openrouter.py (image-gen wrapper)"
     Write-Host "  - $CLAUDE_DIR\.image-gen-sinedied (image-gen ownership manifest)"
     Write-Host "  - $CLAUDE_DIR\lessons.md"
     Write-Host "  - $CLAUDE_DIR\hooks\ (installer-managed only)"

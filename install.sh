@@ -911,8 +911,9 @@ Co-authored-by|Add Claude as co-author in commits|0|co-author")
     GROUP_LABELS+=("Model Backends")
     GROUP_HINTS+=("cl_<name> per backend; credentials are never overwritten on upgrade")
     GROUP_ITEMS+=("GLM Coding Plan|Zhipu BigModel, Anthropic-compatible endpoint|1|backend-glm
-ChatGPT via CLIProxyAPI|Reuse a ChatGPT Plus/Pro subscription (Codex OAuth)|1|backend-gpt
-CCR gateway|claude-code-router: GLM + GPT merged into one /model list|1|backend-ccr")
+OpenRouter|Direct Anthropic-compatible endpoint; DeepSeek V4 slots|1|backend-or
+ChatGPT via CLIProxyAPI|Reuse a ChatGPT Plus/Pro subscription (Codex OAuth); needs cliproxyapi|0|backend-gpt
+CCR gateway|claude-code-router: GLM + GPT merged into one /model list; manual web-UI setup|0|backend-ccr")
 
     # Group 2: Language Rules
     GROUP_LABELS+=("Language Rules")
@@ -1382,6 +1383,7 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
             co-author)              CO_AUTHOR=true ;;
             # Model backends (profile JSON consumed by claude.zsh)
             backend-glm)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("glm") ;;
+            backend-or)             INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("or") ;;
             backend-gpt)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("gpt") ;;
             backend-ccr)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("ccr") ;;
             # Language rules
@@ -1980,11 +1982,16 @@ install_agents() {
 
 # User-facing maintenance scripts to install into ~/.claude/scripts.
 # Repo-dev-only scripts (e.g. check-readme-sync.sh) are deliberately excluded.
-# image-gen-cliproxyapi.sh is the always-installed CLIProxyAPI delegation
-# wrapper consumed by the network-installed sinedied/agent-skills:image-gen
-# Skill (see install_image_gen). It is installed as a user script so uninstall
-# removes it through the same USER_SCRIPTS loop.
-USER_SCRIPTS=("cleanup-claude-data.sh" "image-gen-cliproxyapi.sh")
+# image-gen-openrouter.py is the always-installed OpenRouter image wrapper
+# consumed by the network-installed sinedied/agent-skills:image-gen Skill (see
+# install_image_gen). It is installed as a user script so uninstall removes it
+# through the same USER_SCRIPTS loop.
+USER_SCRIPTS=("cleanup-claude-data.sh" "image-gen-openrouter.py")
+
+# Wrapper superseded by image-gen-openrouter.py, removed from ~/.claude on the
+# next install so it does not linger past the uninstall loop that no longer
+# knows about it.
+SUPERSEDED_USER_SCRIPTS=("image-gen-cliproxyapi.sh")
 
 install_scripts() {
     info "Installing maintenance scripts..."
@@ -1999,6 +2006,15 @@ install_scripts() {
             cp "$src" "$CLAUDE_DIR/scripts/$script"
             chmod +x "$CLAUDE_DIR/scripts/$script"
             ok "Script installed: $script (run manually; not auto-executed)"
+        fi
+    done
+    for script in "${SUPERSEDED_USER_SCRIPTS[@]}"; do
+        local stale="$CLAUDE_DIR/scripts/$script"
+        [[ -f "$stale" ]] || continue
+        if $DRY_RUN; then
+            info "Would remove superseded script: $stale"
+        else
+            rm -f "$stale" && ok "Removed superseded script: $script"
         fi
     done
 }
@@ -2711,7 +2727,7 @@ backend_setup_hints() {
 
 # Lists every cl_* launcher the config exposes, so users know what they can run
 # right after install. Static by design — command names track the fixed profile
-# set (ccr/glm/gpt/claude); models reflect what each backend injects today.
+# set (ccr/glm/or/gpt/claude); models reflect what each backend injects today.
 # Readers are pointed at docs/BACKENDS.md for the authoritative model list.
 cl_commands_hint() {
     local step="$1"
@@ -2721,6 +2737,7 @@ cl_commands_hint() {
     echo "      |------------------|----------------------------|------------------------------|"
     echo "      | cl_claude /_auto | 官方 Claude 订阅            | Opus / Sonnet / Haiku        |"
     echo "      | cl_glm    /_auto | 智谱 GLM (BigModel)        | glm-5.3 / glm-5-turbo / 4.7  |"
+    echo "      | cl_or     /_auto | OpenRouter (直连)          | DeepSeek V4 Pro / V4 Flash   |"
     echo "      | cl_gpt    /_auto | ChatGPT 订阅 (CLIProxyAPI) | GPT / Codex (代理暴露的模型) |"
     echo "      | cl_ccr    /_auto | CCR gateway                | GLM + GPT 合并成一个列表     |"
     echo "      | cl / cl_auto     | 默认 profile (cl_switch 设) | 同上                         |"
@@ -2811,8 +2828,14 @@ install_mattpocock_skills() {
 # ============================================================
 
 # Managed markers wrapping the integration block in the installed SKILL.md.
-IMAGE_GEN_BEGIN_MARKER="<!-- BEGIN claude-code-config CLIProxyAPI image-gen integration -->"
-IMAGE_GEN_END_MARKER="<!-- END claude-code-config CLIProxyAPI image-gen integration -->"
+IMAGE_GEN_BEGIN_MARKER="<!-- BEGIN claude-code-config OpenRouter image-gen integration -->"
+IMAGE_GEN_END_MARKER="<!-- END claude-code-config OpenRouter image-gen integration -->"
+
+# Pre-OpenRouter markers. Recognized so an existing CLIProxyAPI-era install is
+# still provably installer-owned (and therefore upgradable in place); never
+# written. The legacy block is stripped during augmentation.
+IMAGE_GEN_LEGACY_BEGIN_MARKER="<!-- BEGIN claude-code-config CLIProxyAPI image-gen integration -->"
+IMAGE_GEN_LEGACY_END_MARKER="<!-- END claude-code-config CLIProxyAPI image-gen integration -->"
 
 # The exact `skills add` invocation. Installs globally to ~/.claude/skills/ as
 # real copies (not symlinks) for Claude Code, scoped to the single image-gen
@@ -2831,24 +2854,40 @@ _image_gen_npx() {
 
 # Render the canonical managed instructions block (the bytes between the
 # markers). Pure: no side effects, unit-testable. Tells Claude Code to invoke
-# the wrapper, forward upstream arguments, avoid requesting an OpenAI Platform
-# key, and notes the loopback endpoint, model, and Windows limitation.
+# the wrapper, which arguments carry over, where the key comes from, and that a
+# key must never be requested from the user or passed on the command line.
+# install.ps1's Get-ImageGenIntegrationBlock must emit these bytes verbatim, or
+# running both installers against one ~/.claude rewrites SKILL.md each time.
 image_gen_render_integration_block() {
     cat <<'EOF'
-Run image generation through the local CLIProxyAPI wrapper instead of invoking
-`image_gen.py` directly or requesting an OpenAI Platform API key:
+Run image generation through the repository-owned OpenRouter wrapper instead of
+invoking `image_gen.py` directly or requesting an OpenAI Platform API key:
 
-    ~/.claude/scripts/image-gen-cliproxyapi.sh <upstream arguments>
+    ~/.claude/scripts/image-gen-openrouter.py <arguments>
 
-Forward all upstream arguments (`generate`, `edit`, prompts, file paths, and
-image options) unchanged. The wrapper starts or reuses CLIProxyAPI on the
-loopback endpoint `http://127.0.0.1:8317/v1`, reads the local client key
-without exposing it, and requests the `gpt-image-2` model. Do not ask the user
-for an OpenAI Platform API key — image generation is covered by the local
-CLIProxyAPI using ChatGPT/Codex OAuth.
+Forward the same arguments the upstream CLI documents (`generate` / `gen`,
+`edit`, the prompt, `-i/--image`, `-o/--output`, `--model`, `--n`, `--size`,
+`--quality`, `--background`, `--output-format`, `--output-compression`). The
+wrapper posts to `https://openrouter.ai/api/v1/images`, verifies the target
+model is listed by `GET /api/v1/images/models` before generating, and writes
+the returned images to `--output` (default: current directory), printing each
+saved path on stdout.
 
-Note: native Windows `cl_*`/CLIProxyAPI service lifecycle is not supported;
-use WSL or a Bash-compatible environment for the wrapper.
+Image-to-image goes through `edit` with one or more `-i` reference images.
+`--mask` is rejected: OpenRouter has no inpainting mask — put the region to
+change in the prompt. `--moderation` is accepted but ignored.
+
+Authentication: the wrapper reads `.env.ANTHROPIC_AUTH_TOKEN` from
+`~/.claude/profiles/or.json` and nothing else. Never ask the user for an OpenAI
+Platform API key, and never pass a key on the command line — the wrapper
+refuses `--api-key` by design. It refuses `--base-url` for the same reason: the
+endpoint is fixed at `https://openrouter.ai/api/v1` and must not be redirected
+from the command line. If it reports no usable key, tell the user to install
+the OpenRouter backend and put their https://openrouter.ai/keys token in that
+profile.
+
+Requires `python3` on PATH. On native Windows run it from WSL or another
+Bash-compatible environment so the `~/.claude` layout matches.
 EOF
 }
 
@@ -2866,6 +2905,9 @@ EOF
 image_gen_augment_skill() {
     local skills_dir="${1:-$CLAUDE_DIR/skills}"
     local skill_md="$skills_dir/image-gen/SKILL.md"
+    # Download-integrity sanity check, not a runtime dependency: the wrapper no
+    # longer invokes image_gen.py, but its presence still proves npx fetched the
+    # image-gen layout we expect rather than something else under that name.
     local upstream="$skills_dir/image-gen/scripts/image_gen.py"
 
     if [[ ! -f "$skill_md" ]]; then
@@ -2890,18 +2932,45 @@ image_gen_augment_skill() {
     # Same-directory temp so the final rename is guaranteed atomic on one fs.
     tmp=$(mktemp "${dir}/${base}.augment.XXXXXX" 2>/dev/null) || { warn "image-gen: mktemp failed"; return 1; }
 
+    # Strip any pre-OpenRouter managed block first, so a CLIProxyAPI-era
+    # SKILL.md upgrades to exactly one current block instead of accumulating a
+    # second one beside the stale text. Two passes over the same file: the first
+    # counts and locates the legacy markers, the second removes the interval
+    # only when it is a single ordered well-formed pair. Anything else (none,
+    # duplicated, one-sided, or end-before-begin) is an identity transform,
+    # leaving the text for the current-marker validation below to judge instead
+    # of silently truncating the file. Matches install.ps1's legacy strip.
+    local work
+    work=$(mktemp "${dir}/${base}.legacy.XXXXXX" 2>/dev/null) || {
+        rm -f "$tmp"; warn "image-gen: mktemp failed"; return 1
+    }
+    if ! awk -v lb="$IMAGE_GEN_LEGACY_BEGIN_MARKER" -v le="$IMAGE_GEN_LEGACY_END_MARKER" '
+            NR == FNR {
+                if ($0 == lb) { nb++; if (nb == 1) bl = FNR }
+                else if ($0 == le) { ne++; if (ne == 1) el = FNR }
+                next
+            }
+            FNR == 1 { strip = (nb == 1 && ne == 1 && bl < el) }
+            strip && FNR >= bl && FNR <= el { next }
+            { print }
+        ' "$skill_md" "$skill_md" > "$work" 2>/dev/null; then
+        rm -f "$tmp" "$work"
+        warn "image-gen: legacy block strip failed"
+        return 1
+    fi
+
     # Decide mode via the SHARED strict validator (review round 3 #1): single
     # source of truth for marker-layout validity, identical to what ownership
     # checks use. No duplicated weak grep checks here.
     local mode="reject"
-    if _image_gen_markers_strict "$skill_md"; then
+    if _image_gen_markers_strict "$work"; then
         mode="replace"
-    elif ! grep -qF -- "$begin" "$skill_md" 2>/dev/null \
-         && ! grep -qF -- "$end" "$skill_md" 2>/dev/null; then
+    elif ! grep -qF -- "$begin" "$work" 2>/dev/null \
+         && ! grep -qF -- "$end" "$work" 2>/dev/null; then
         mode="append"
     fi
     if [[ "$mode" == "reject" ]]; then
-        rm -f "$tmp"
+        rm -f "$tmp" "$work"
         warn "image-gen: SKILL.md markers malformed (duplicate/embedded/mismatched) — augmentation skipped"
         return 1
     fi
@@ -2916,24 +2985,27 @@ image_gen_augment_skill() {
             $0 == begin { print; print block; in_block=1; next }
             $0 == end   { print; in_block=0; next }
             !in_block { print }
-        ' "$skill_md" > "$tmp" 2>/dev/null || emit_rc=$?
+        ' "$work" > "$tmp" 2>/dev/null || emit_rc=$?
     else
-        { cat "$skill_md"; printf '\n%s\n%s\n%s\n' "$begin" "$block" "$end"; } > "$tmp" 2>/dev/null || emit_rc=$?
+        { cat "$work"; printf '\n%s\n%s\n%s\n' "$begin" "$block" "$end"; } > "$tmp" 2>/dev/null || emit_rc=$?
     fi
     if [[ "$emit_rc" -ne 0 ]]; then
-        rm -f "$tmp"
+        rm -f "$tmp" "$work"
         warn "image-gen: augmentation emit failed"
         return 1
     fi
 
     # Post-write sanity: the result must itself be strictly valid (one exact
-    # begin, one exact end, correct order, no embedded text).
+    # begin, one exact end, correct order, no embedded text). Deliberately the
+    # CURRENT-marker validator, never the _any variant — what gets written is
+    # only ever allowed to be the new format.
     if ! _image_gen_markers_strict "$tmp"; then
-        rm -f "$tmp"
+        rm -f "$tmp" "$work"
         warn "image-gen: augmentation produced malformed markers — skipped"
         return 1
     fi
 
+    rm -f "$work"
     chmod "$mode_perm" "$tmp" 2>/dev/null || true
     if ! mv -f "$tmp" "$skill_md" 2>/dev/null; then
         rm -f "$tmp"
@@ -2946,6 +3018,12 @@ image_gen_augment_skill() {
 # Exact canonical manifest bytes. Kept as a single literal so validation can
 # compare byte-for-byte (order, one trailing newline, no extras/CRLF).
 _IMAGE_GEN_MANIFEST_CANONICAL="skill=image-gen
+source=sinedied/agent-skills
+wrapper=image-gen-openrouter.py"
+
+# Pre-OpenRouter manifest. Recognized for ownership so an existing install
+# upgrades in place instead of being treated as user-authored; never written.
+_IMAGE_GEN_MANIFEST_LEGACY="skill=image-gen
 source=sinedied/agent-skills
 wrapper=image-gen-cliproxyapi.sh"
 
@@ -2981,6 +3059,18 @@ _image_gen_manifest_valid() {
     printf '%s\n' "$_IMAGE_GEN_MANIFEST_CANONICAL" | cmp -s - "$manifest"
 }
 
+# Ownership-only validator: the canonical manifest OR the pre-OpenRouter one.
+# The write path (_image_gen_write_manifest) stays canonical-only, so a legacy
+# manifest is upgraded exactly once, on the next successful install. Without
+# this, every existing install would fail the ownership proof after the wrapper
+# rename and be skipped forever as "not installer-owned".
+_image_gen_manifest_valid_any() {
+    local manifest="$1"
+    _image_gen_manifest_valid "$manifest" && return 0
+    [[ -r "$manifest" ]] || return 1
+    printf '%s\n' "$_IMAGE_GEN_MANIFEST_LEGACY" | cmp -s - "$manifest"
+}
+
 # Strict marker-layout validator (review round 3 #1). Single source of truth
 # for "does this SKILL.md have a well-formed managed block?" Returns 0 iff the
 # file contains exactly one exact-line BEGIN marker, exactly one exact-line END
@@ -2992,7 +3082,7 @@ _image_gen_manifest_valid() {
 _image_gen_markers_strict() {
     local skill_md="$1"
     [[ -f "$skill_md" && -r "$skill_md" ]] || return 1
-    local begin="$IMAGE_GEN_BEGIN_MARKER" end="$IMAGE_GEN_END_MARKER"
+    local begin="${2:-$IMAGE_GEN_BEGIN_MARKER}" end="${3:-$IMAGE_GEN_END_MARKER}"
     awk -v begin="$begin" -v end="$end" '
         BEGIN { b=0; e=0; in_block=0; bad=0; emb=0 }
         $0 == begin { if (in_block) bad=1; if (e>0) bad=1; b++; if (b>1) bad=1; in_block=1; next }
@@ -3006,6 +3096,16 @@ _image_gen_markers_strict() {
     ' "$skill_md" 2>/dev/null
 }
 
+# Ownership-only: a strictly well-formed CURRENT block, or a strictly
+# well-formed pre-OpenRouter one. Write paths keep using the strict validator
+# above so nothing but the current format is ever emitted.
+_image_gen_markers_strict_any() {
+    local skill_md="$1"
+    _image_gen_markers_strict "$skill_md" && return 0
+    _image_gen_markers_strict "$skill_md" \
+        "$IMAGE_GEN_LEGACY_BEGIN_MARKER" "$IMAGE_GEN_LEGACY_END_MARKER"
+}
+
 # Full ownership proof (review #1): a directory is installer-owned ONLY when a
 # valid manifest exists AND the installed SKILL.md passes the STRICT marker
 # layout validator. A completed install always writes a strictly-valid marker
@@ -3015,8 +3115,8 @@ _image_gen_markers_strict() {
 _image_gen_dir_owned() {
     local skill_dir="$1" manifest="$2"
     [[ -d "$skill_dir" ]] || return 1
-    _image_gen_manifest_valid "$manifest" || return 1
-    _image_gen_markers_strict "$skill_dir/SKILL.md" || return 1
+    _image_gen_manifest_valid_any "$manifest" || return 1
+    _image_gen_markers_strict_any "$skill_dir/SKILL.md" || return 1
     return 0
 }
 
@@ -3055,7 +3155,7 @@ install_image_gen() {
     # A valid manifest with no skill directory is stale ownership of nothing;
     # remove it so it can never later authorize deletion of a directory the
     # user creates themselves. (Dry-run returned above, so this write is safe.)
-    if ! $prior_owned && [[ -f "$manifest" ]] && _image_gen_manifest_valid "$manifest"; then
+    if ! $prior_owned && [[ -f "$manifest" ]] && _image_gen_manifest_valid_any "$manifest"; then
         rm -f "$manifest"
         warn "image-gen: removed stale ownership manifest (no image-gen directory present)"
     fi
@@ -3148,8 +3248,8 @@ install_image_gen() {
         # strict marker block, and canonical manifest must all hold.
         if [[ ! -d "$rtmp/image-gen" ]] \
            || [[ ! -f "$rtmp/image-gen/scripts/image_gen.py" ]] \
-           || ! _image_gen_markers_strict "$rtmp/image-gen/SKILL.md" 2>/dev/null \
-           || ! _image_gen_manifest_valid "$rtmp/manifest" 2>/dev/null; then
+           || ! _image_gen_markers_strict_any "$rtmp/image-gen/SKILL.md" 2>/dev/null \
+           || ! _image_gen_manifest_valid_any "$rtmp/manifest" 2>/dev/null; then
             rm -rf "$rtmp" 2>/dev/null
             return 1
         fi
@@ -3190,7 +3290,7 @@ install_image_gen() {
     fi
     ok "image-gen Skill installed (~/.claude/skills/image-gen/)"
 
-    local wrapper="$CLAUDE_DIR/scripts/image-gen-cliproxyapi.sh"
+    local wrapper="$CLAUDE_DIR/scripts/image-gen-openrouter.py"
     if [[ ! -x "$wrapper" ]]; then
         warn "image-gen wrapper not installed at $wrapper — augmentation/manifest skipped"
         _image_gen_abort_after_mutation "wrapper missing"
@@ -3814,7 +3914,7 @@ uninstall() {
     echo "  - $CLAUDE_DIR/agents/ (installer-managed only)"
     echo "  - $CLAUDE_DIR/scripts/ (installer-managed only)"
     echo "  - $CLAUDE_DIR/skills/image-gen/ (when installer-owned, via .image-gen-sinedied)"
-    echo "  - $CLAUDE_DIR/scripts/image-gen-cliproxyapi.sh (image-gen wrapper)"
+    echo "  - $CLAUDE_DIR/scripts/image-gen-openrouter.py (image-gen wrapper)"
     echo "  - $CLAUDE_DIR/.image-gen-sinedied (image-gen ownership manifest)"
     echo "  - $CLAUDE_DIR/skills/deepxiv-* (DeepXiv skills)"
     echo "  - $CLAUDE_DIR/lessons.md"
@@ -4715,7 +4815,7 @@ main() {
         INSTALL_SHELL_WRAPPER=true
         INSTALL_PLUGINS=true
         # All backend profiles; each is just a template until credentials are added
-        SELECTED_PROFILES=("glm" "gpt" "ccr")
+        SELECTED_PROFILES=("glm" "or" "gpt" "ccr")
         # Review defaults for --all: both OFF, so CLAUDE.md points at the
         # code-reviewer agent. --all does not install the codex CLI, and the
         # adversarial-review skill hard-requires `codex exec`, so flipping this
