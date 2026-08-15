@@ -143,6 +143,8 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 | **Playwright MCP** | `mcp/` | 浏览器自动化（`@playwright/mcp`） | 开启 |
 | [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | 飞书 / Lark 集成 — 可选；需 Feishu App ID/Secret，每会话约占用 1 GB 内存。分步指引：[docs/LARK-MCP.zh-CN.md](docs/LARK-MCP.zh-CN.md) | **关闭** |
 
+**重跑安装器会对账插件。** 插件阶段会把机器上*所有*已安装插件对齐到本次勾选：没勾中的一律卸载 —— **包括你手工装的第三方插件** —— 以及不再被任何存活插件需要的 marketplace。加 `--keep-foreign-plugins`（PowerShell：`-KeepForeignPlugins`）可把对账范围收回本目录内。卸载不可逆，建议先用 `--dry-run` 预览。一个插件都没勾选时，对账不做任何动作。
+
 ## 模型后端 —— 首次使用前的配置
 
 安装器会写入 `~/.claude/profiles/*.json`，但除 `claude` 之外的每个后端都需要先登录、或粘贴一份凭证，`cl_<backend>` 才能用。完整说明见 [docs/BACKENDS.md](docs/BACKENDS.md)。
@@ -205,7 +207,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 | `tui` | `fullscreen` | 无闪烁全屏渲染 |
 | `env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` | `1` | 固定思考预算（Opus 4.7 不受影响） |
 
-重新安装时会智能合并 `env`、`permissions.allow`、`enabledPlugins`、`hooks.SessionStart`、`statusLine`，保留你的改动。你在 `enabledPlugins` 中手动添加的本目录之外的插件会原样保留。
+重新安装时会智能合并 `env`、`permissions.allow`、`enabledPlugins`、`hooks.SessionStart`、`statusLine`，保留你的改动。自 3.1.0 起，插件阶段还会清掉 `enabledPlugins` 里既未在本次勾选、也没有实际安装的键，因此本目录之外的第三方条目不再原样保留 —— 想保留请加 `--keep-foreign-plugins`。
 
 ## 自定义
 

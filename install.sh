@@ -455,8 +455,13 @@ Options:
     --all               Install everything (non-interactive)
     --uninstall         Remove all installed files
     --version           Show version info
-    --dry-run           Show what would be installed without doing it
+    --dry-run           Show what would be installed without doing it,
+                        including which plugins/marketplaces would be REMOVED
     --force             Skip confirmation prompts
+    --keep-foreign-plugins
+                        Only reconcile installer-managed plugins. Without it,
+                        every installed plugin that is not selected this run is
+                        uninstalled — hand-installed third-party ones included.
     -h, --help          Show this help
 
 Examples:
@@ -464,6 +469,7 @@ Examples:
     $(basename "$0") --all                           # Install everything
     $(basename "$0") --uninstall                     # Uninstall everything
     $(basename "$0") --dry-run --all                 # Preview full install
+    $(basename "$0") --dry-run                       # Preview plugin reconciliation
     bash <(curl -fsSL $REPO_URL/raw/$REPO_BRANCH/install.sh)        # Remote install (interactive)
     bash <(curl -fsSL $REPO_URL/raw/$REPO_BRANCH/install.sh) --all  # Remote install (everything)
 EOF
@@ -521,9 +527,20 @@ DEEPXIV_KNOWN_SKILLS=("deepxiv-cli" "deepxiv-trending-digest" "deepxiv-baseline-
 #   RESOLVED_PLUGINS   - deduped plugins selected for THIS run (set by install_plugins)
 #   CATALOGUE_PLUGINS  - union of all installer-managed plugin groups
 #   INSTALLED_PLUGINS  - keys currently present in installed_plugins.json
+#   PRUNED_PLUGINS     - keys prune_unlisted_plugins() decided to uninstall
+#   SURVIVING_PLUGINS  - keys still installed once pruning has settled
+#   LOCAL_MARKETPLACES - marketplace cache dirs present locally (valid catalogs)
+#   PLUGIN_PRUNE_SCOPE - "all" (default: uninstall anything not selected this
+#                        run, including hand-installed third-party plugins) or
+#                        "catalogue" (only reconcile installer-managed plugins;
+#                        set by --keep-foreign-plugins)
 RESOLVED_PLUGINS=()
 CATALOGUE_PLUGINS=()
 INSTALLED_PLUGINS=()
+PRUNED_PLUGINS=()
+SURVIVING_PLUGINS=()
+LOCAL_MARKETPLACES=()
+PLUGIN_PRUNE_SCOPE="all"
 
 # Retired Skill ownership tombstones.
 RETIRED_HARNESS_WORKFLOW_SHA256="d897cbfec20f87b553cbbe0f0541a1169f045492881b78b566149d15af1e68ba"
@@ -844,6 +861,10 @@ parse_args() {
                 ;;
             --force)
                 FORCE=true
+                shift
+                ;;
+            --keep-foreign-plugins)
+                PLUGIN_PRUNE_SCOPE="catalogue"
                 shift
                 ;;
             -h|--help)
@@ -3628,8 +3649,9 @@ install_mcp() {
 
 # build_plugin_catalogue: echo the union of every installer-managed plugin
 # group (newline-separated, deduplicated). This is the set the installer
-# "owns" — anything installed that is NOT in this set is a user's own
-# third-party plugin and must be preserved.
+# "owns". It only carries a preserve-it meaning under
+# PLUGIN_PRUNE_SCOPE=catalogue; under the default scope=all, plugins outside
+# the catalogue are reconciled just like the ones inside it.
 build_plugin_catalogue() {
     local all=(
         "${PLUGINS_ESSENTIAL[@]}"
@@ -3652,13 +3674,18 @@ build_plugin_catalogue() {
 #   CATALOGUE_PLUGINS  - the installer-managed plugin catalogue
 #   RESOLVED_PLUGINS   - plugins selected for THIS run
 #   INSTALLED_PLUGINS  - plugins currently installed (from installed_plugins.json)
-# Echoes (newline-separated) the installed keys that should be UNINSTALLED:
-# those that are in the catalogue AND not selected this run (rule 1). Installed
-# plugins NOT in the catalogue are user-owned third-party plugins and are
-# preserved (rule 4); selected plugins are reinstalled elsewhere, not pruned
-# (rule 2). bash 3.2 compatible: pipe-delimited "set" strings, no assoc arrays.
+# Also reads PLUGIN_PRUNE_SCOPE. Echoes (newline-separated) the installed keys
+# that should be UNINSTALLED: everything installed but not selected this run
+# (rule 1). Under scope=catalogue the old rule 4 applies and plugins outside the
+# catalogue are preserved; under the default scope=all there is no such
+# exemption. Selected plugins are reinstalled elsewhere, not pruned (rule 2).
+# bash 3.2 compatible: pipe-delimited "set" strings, no assoc arrays.
 compute_plugins_to_prune() {
     local catalogue_set="" selected_set="" entry
+    # Empty selection means "prune nothing", never "prune everything" — the same
+    # safety valve prune_unlisted_plugins() enforces, repeated here so the
+    # invariant survives any future caller that forgets to guard.
+    [[ ${#RESOLVED_PLUGINS[@]} -gt 0 ]] || return 0
     if [[ ${#CATALOGUE_PLUGINS[@]} -gt 0 ]]; then
         for entry in "${CATALOGUE_PLUGINS[@]}"; do
             catalogue_set="$catalogue_set|$entry|"
@@ -3672,11 +3699,20 @@ compute_plugins_to_prune() {
     [[ ${#INSTALLED_PLUGINS[@]} -gt 0 ]] || return 0
     for entry in "${INSTALLED_PLUGINS[@]}"; do
         [[ -n "$entry" ]] || continue
-        # Rule 4: preserve plugins that are not part of our catalogue.
-        [[ "$catalogue_set" == *"|$entry|"* ]] || continue
+        # Never touch local skills-dir pseudo-plugins. `claude plugin init`
+        # scaffolds them under ~/.claude/skills/<name>/ and they auto-load as
+        # <name>@skills-dir; they belong to no marketplace, so
+        # `claude plugin uninstall` has nothing to act on. Hard exemption under
+        # every scope.
+        [[ "$entry" == *"@skills-dir" ]] && continue
+        # Rule 4 (scope=catalogue only): preserve plugins outside our catalogue.
+        # Under scope=all there is no exemption — not selected means uninstall.
+        if [[ "$PLUGIN_PRUNE_SCOPE" != "all" ]]; then
+            [[ "$catalogue_set" == *"|$entry|"* ]] || continue
+        fi
         # Rule 2: selected this run -> reinstalled (update), not pruned.
         [[ "$selected_set" == *"|$entry|"* ]] && continue
-        # Rule 1: in catalogue, installed, not selected -> prune.
+        # Rule 1: installed, not selected -> prune.
         printf '%s\n' "$entry"
     done
 }
@@ -3691,6 +3727,17 @@ plugin_is_installed() {
     jq -e --arg k "$pkg" '.plugins | has($k)' "$list_json" >/dev/null 2>&1
 }
 
+# read_installed_plugin_keys: echo every installed plugin's name@marketplace,
+# one per line. Empty output is ambiguous — it means either "nothing installed"
+# or "jq/the state file is missing" — so callers that act destructively on the
+# result must guard those two cases themselves first (see prune_unlisted_plugins).
+read_installed_plugin_keys() {
+    local list_json="$HOME/.claude/plugins/installed_plugins.json"
+    [[ -f "$list_json" ]] || return 0
+    command -v jq &>/dev/null || return 0
+    jq -r '.plugins | keys[]' "$list_json" 2>/dev/null
+}
+
 # 0 if the marketplace cache dir holds a usable catalog. A bare `.git` is not
 # enough: `git clone` creates it within the first moments, so an interrupted
 # clone leaves one behind. The manifest only lands once the checkout completes.
@@ -3698,6 +3745,47 @@ marketplace_dir_is_valid() {
     local dir="$1"
     [[ -n "$dir" && -d "$dir" ]] || return 1
     [[ -f "$dir/.claude-plugin/marketplace.json" ]]
+}
+
+# read_local_marketplaces: echo the name of every locally configured
+# marketplace whose catalog is complete, one per line. temp_<epoch> dirs are the
+# CLI's in-flight scratch clones, not catalogs — same filter update_installed_plugins() uses.
+read_local_marketplaces() {
+    local root="$HOME/.claude/plugins/marketplaces" path name
+    [[ -d "$root" ]] || return 0
+    for path in "$root"/*; do
+        [[ -d "$path" ]] || continue
+        name="$(basename "$path")"
+        [[ "$name" == temp_* ]] && continue
+        marketplace_dir_is_valid "$path" || continue
+        printf '%s\n' "$name"
+    done
+}
+
+# compute_marketplaces_to_remove: pure decision logic. Reads two globals:
+#   LOCAL_MARKETPLACES - marketplace names present on disk
+#   SURVIVING_PLUGINS  - plugins still installed after pruning (name@marketplace)
+# Echoes the marketplaces that exist locally but that no surviving plugin needs.
+# The "needed" set must come from the survivors, NOT from this run's selection:
+# under --keep-foreign-plugins a hand-installed plugin is deliberately kept while
+# never appearing in RESOLVED_PLUGINS, and a `claude plugin uninstall` that fails
+# also leaves a plugin behind that the selection does not name. Judging by the
+# selection would delete those plugins' marketplaces out from under them.
+# bash 3.2 compatible: pipe-delimited "set" strings, no assoc arrays.
+compute_marketplaces_to_remove() {
+    local needed="" entry name
+    # Empty survivor set means "remove nothing", never "remove every
+    # marketplace". Same safety valve as compute_plugins_to_prune().
+    [[ ${#SURVIVING_PLUGINS[@]} -gt 0 ]] || return 0
+    for entry in "${SURVIVING_PLUGINS[@]}"; do
+        needed="$needed|${entry##*@}|"
+    done
+    [[ ${#LOCAL_MARKETPLACES[@]} -gt 0 ]] || return 0
+    for name in "${LOCAL_MARKETPLACES[@]}"; do
+        [[ -n "$name" ]] || continue
+        [[ "$needed" == *"|$name|"* ]] && continue
+        printf '%s\n' "$name"
+    done
 }
 
 install_plugins() {
@@ -3870,6 +3958,10 @@ install_plugins() {
 # selected, so a plain `./install.sh` re-run keeps plugins fresh.
 # (A Claude Code restart is required for updates to take effect.)
 # Uninstall plugins and remove marketplaces that were renamed/removed upstream.
+# This is the UNCONDITIONAL tombstone sweep: it runs on every invocation, even
+# when the plugin step is skipped entirely, so hardcoded known-dead entries
+# always get cleaned. The selection-driven reconciliation is a separate thing —
+# see prune_unlisted_plugins() — and only runs when plugins were selected.
 prune_retired_plugins() {
     command -v claude &>/dev/null || return
     local list_json="$HOME/.claude/plugins/installed_plugins.json"
@@ -3900,27 +3992,35 @@ prune_retired_plugins() {
     done
 }
 
-# Prune installer-managed plugins that are installed but were NOT selected this
-# run (rule 1). Reads the installed keys from installed_plugins.json, computes
-# the prune set via the pure compute_plugins_to_prune(), and uninstalls each.
-# User-owned third-party plugins (outside the catalogue) are preserved (rule 4).
-# Must run AFTER install_plugins() so RESOLVED_PLUGINS reflects this run's
-# selection. Respects DRY_RUN.
+# Reconcile installed plugins against this run's selection: uninstall every
+# installed plugin that was NOT selected (rule 1). Under the default
+# PLUGIN_PRUNE_SCOPE=all that includes plugins the user installed by hand;
+# --keep-foreign-plugins narrows it back to the installer's own catalogue.
+# Reads the installed keys from installed_plugins.json, computes the prune set
+# via the pure compute_plugins_to_prune(), and uninstalls each. Must run AFTER
+# install_plugins() so RESOLVED_PLUGINS reflects this run's selection.
+# Respects DRY_RUN.
 prune_unlisted_plugins() {
     command -v claude &>/dev/null || return
-    # An empty resolved set must NEVER imply "prune everything". This guards the
-    # case where the plugin step ran but the user deselected all plugins
-    # (RESOLVED_PLUGINS=()), which would otherwise mark every installed catalogue
-    # plugin for removal. The $INSTALL_PLUGINS gate in main() does not cover this.
+    # Reset on every entry: an early return below must not leave a stale prune
+    # list behind for prune_unlisted_marketplaces() to subtract.
+    PRUNED_PLUGINS=()
+    # Deliberate semantic boundary: an empty resolved set means "uninstall
+    # NOTHING", never "uninstall everything". If the plugin step ran but ended
+    # with zero selected plugins (user deselected them all), a full-scope
+    # reconcile would otherwise wipe every installed plugin on the machine off
+    # the back of an empty set. Losing the ability to deselect-all-to-remove-all
+    # is the cheaper failure; do not "fix" this by removing the guard. The
+    # $INSTALL_PLUGINS gate in main() does not cover this case.
     [[ ${#RESOLVED_PLUGINS[@]} -gt 0 ]] || return
     local list_json="$HOME/.claude/plugins/installed_plugins.json"
 
     if ! command -v jq &>/dev/null || [[ ! -f "$list_json" ]]; then
-        warn "jq or installed_plugins.json unavailable — skipping catalogue prune"
+        warn "jq or installed_plugins.json unavailable — skipping plugin reconciliation"
         return
     fi
     if ! jq empty "$list_json" 2>/dev/null; then
-        warn "installed_plugins.json is not valid JSON — skipping catalogue prune"
+        warn "installed_plugins.json is not valid JSON — skipping plugin reconciliation"
         return
     fi
 
@@ -3929,7 +4029,7 @@ prune_unlisted_plugins() {
     local key
     while IFS= read -r key; do
         [[ -n "$key" ]] && INSTALLED_PLUGINS+=("$key")
-    done < <(jq -r '.plugins | keys[]' "$list_json" 2>/dev/null)
+    done < <(read_installed_plugin_keys)
 
     CATALOGUE_PLUGINS=()
     while IFS= read -r key; do
@@ -3937,17 +4037,147 @@ prune_unlisted_plugins() {
     done < <(build_plugin_catalogue)
     # RESOLVED_PLUGINS is set by install_plugins() (selected this run).
 
-    local pkg
+    local pkg prune_list=() kept=0
     while IFS= read -r pkg; do
-        [[ -n "$pkg" ]] || continue
-        if $DRY_RUN; then
-            info "Would uninstall unlisted plugin: $pkg"
-        elif claude plugin uninstall "$pkg" 2>/dev/null; then
-            ok "Pruned plugin (no longer selected): $pkg"
-        else
-            warn "Could not uninstall plugin: $pkg (may already be gone)"
-        fi
+        [[ -n "$pkg" ]] && prune_list+=("$pkg")
     done < <(compute_plugins_to_prune)
+
+    kept=$(( ${#INSTALLED_PLUGINS[@]} - ${#prune_list[@]} ))
+    if [[ ${#prune_list[@]} -gt 0 ]]; then
+        PRUNED_PLUGINS=("${prune_list[@]}")
+    fi
+
+    if [[ ${#prune_list[@]} -eq 0 ]]; then
+        ok "Plugins already match your selection — nothing to uninstall ($kept kept)"
+        return
+    fi
+
+    warn "Reconciling plugins: ${#prune_list[@]} installed plugin(s) are not in this run's selection and will be UNINSTALLED"
+    for pkg in "${prune_list[@]}"; do
+        if $DRY_RUN; then
+            info "Would uninstall: $pkg"
+        elif claude plugin uninstall --scope user "$pkg" 2>/dev/null; then
+            ok "Uninstalled (not selected): $pkg"
+        else
+            warn "Could not uninstall: $pkg (may already be gone)"
+            (( INSTALL_WARNINGS++ )) || true
+        fi
+    done
+    info "Kept $kept selected plugin(s)"
+}
+
+# Remove marketplaces that no plugin selected this run needs any more. Must run
+# AFTER prune_unlisted_plugins(): only once the plugin set has settled does
+# "does anything still need this marketplace?" have a definite answer. Must run
+# BEFORE update_installed_plugins(), which would otherwise spend NET_TIMEOUT
+# refreshing a catalog that is about to be deleted. Respects DRY_RUN.
+prune_unlisted_marketplaces() {
+    command -v claude &>/dev/null || return
+    # Same empty-selection safety valve as prune_unlisted_plugins().
+    [[ ${#RESOLVED_PLUGINS[@]} -gt 0 ]] || return
+
+    local list_json="$HOME/.claude/plugins/installed_plugins.json"
+    if ! command -v jq &>/dev/null || [[ ! -f "$list_json" ]]; then
+        warn "jq or installed_plugins.json unavailable — skipping marketplace reconciliation"
+        return
+    fi
+    if ! jq empty "$list_json" 2>/dev/null; then
+        warn "installed_plugins.json is not valid JSON — skipping marketplace reconciliation"
+        return
+    fi
+
+    # Re-read the state file instead of reusing RESOLVED_PLUGINS: only the file
+    # knows which plugins actually survived pruning (kept foreign plugins, failed
+    # uninstalls), and those still need their marketplaces. See
+    # compute_marketplaces_to_remove().
+    SURVIVING_PLUGINS=()
+    local key
+    while IFS= read -r key; do
+        [[ -n "$key" ]] && SURVIVING_PLUGINS+=("$key")
+    done < <(read_installed_plugin_keys)
+
+    # A dry run uninstalled nothing, so the file still lists the plugins a real
+    # run would have removed. Subtract them so the preview matches what execution
+    # would actually do.
+    if $DRY_RUN && [[ ${#PRUNED_PLUGINS[@]} -gt 0 ]] && [[ ${#SURVIVING_PLUGINS[@]} -gt 0 ]]; then
+        local pruned_set="" survivors=()
+        for key in "${PRUNED_PLUGINS[@]}"; do
+            pruned_set="$pruned_set|$key|"
+        done
+        for key in "${SURVIVING_PLUGINS[@]}"; do
+            [[ "$pruned_set" == *"|$key|"* ]] && continue
+            survivors+=("$key")
+        done
+        SURVIVING_PLUGINS=()
+        if [[ ${#survivors[@]} -gt 0 ]]; then
+            SURVIVING_PLUGINS=("${survivors[@]}")
+        fi
+    fi
+
+    LOCAL_MARKETPLACES=()
+    local name
+    while IFS= read -r name; do
+        [[ -n "$name" ]] && LOCAL_MARKETPLACES+=("$name")
+    done < <(read_local_marketplaces)
+
+    while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        if $DRY_RUN; then
+            info "Would remove marketplace (no remaining plugin needs it): $name"
+        elif claude plugin marketplace remove "$name" 2>/dev/null; then
+            ok "Removed marketplace (no longer needed): $name"
+        else
+            warn "Could not remove marketplace: $name"
+            (( INSTALL_WARNINGS++ )) || true
+        fi
+    done < <(compute_marketplaces_to_remove)
+}
+
+# Converge settings.json's enabledPlugins onto this run's selection by dropping
+# keys that are neither selected nor installed. enabledPlugins is an
+# enable/disable preference, not an install ledger, so it drifts into dead
+# entries pointing at plugins that no longer exist once those are uninstalled.
+# install_settings() only ever adds/flips keys it knows about, so it cannot
+# clear these itself. Subtractive only: selected plugins are set true upstream.
+sync_enabled_plugins_settings() {
+    local settings="$CLAUDE_DIR/settings.json"
+    [[ -f "$settings" ]] || return
+    command -v jq &>/dev/null || return
+    # Same empty-selection safety valve as prune_unlisted_plugins().
+    [[ ${#RESOLVED_PLUGINS[@]} -gt 0 ]] || return
+
+    local sel_json; sel_json="$(_effective_selected_plugins_json)"
+    local stale_count
+    stale_count="$(jq --argjson selected "$sel_json" '
+        ($selected | reduce .[] as $p ({}; .[$p] = true)) as $sel |
+        [(.enabledPlugins // {}) | keys[] | select($sel[.] | not)] | length
+    ' "$settings" 2>/dev/null)" || return
+    [[ "${stale_count:-0}" -gt 0 ]] || return
+
+    if $DRY_RUN; then
+        info "Would drop $stale_count stale enabledPlugins entr(ies) from settings.json"
+        return
+    fi
+    local tmp
+    tmp="$(mktemp "${settings}.tmp.XXXXXX")" || {
+        warn "Could not create a temp file — left enabledPlugins unchanged"
+        (( INSTALL_WARNINGS++ )) || true
+        return
+    }
+    if jq --argjson selected "$sel_json" '
+        ($selected | reduce .[] as $p ({}; .[$p] = true)) as $sel |
+        .enabledPlugins = ((.enabledPlugins // {}) | with_entries(select($sel[.key])))
+    ' "$settings" > "$tmp" && jq empty "$tmp" 2>/dev/null; then
+        # mktemp makes the temp file 0600; mv replaces the inode, so carry the
+        # original mode over rather than silently tightening settings.json.
+        chmod --reference="$settings" "$tmp" 2>/dev/null || chmod 600 "$tmp" 2>/dev/null || true
+        mv -f "$tmp" "$settings"
+        ok "Cleaned $stale_count stale enabledPlugins entr(ies)"
+    else
+        rm -f "$tmp"
+        warn "Could not clean enabledPlugins — left unchanged"
+        (( INSTALL_WARNINGS++ )) || true
+    fi
 }
 
 update_installed_plugins() {
@@ -3962,7 +4192,9 @@ update_installed_plugins() {
     # selected ones were just reinstalled fresh by install_plugins(), and the
     # unselected ones were already removed by prune_unlisted_plugins(). We only
     # `claude plugin update` the PRESERVED user-owned third-party plugins, and
-    # we never resurrect a pruned plugin.
+    # we never resurrect a pruned plugin. Under PLUGIN_PRUNE_SCOPE=all nothing
+    # survives outside the catalogue, so this loop simply idles; it still earns
+    # its keep under --keep-foreign-plugins.
     local catalogue_set="" centry
     while IFS= read -r centry; do
         [[ -n "$centry" ]] && catalogue_set="$catalogue_set|$centry|"
@@ -5027,12 +5259,20 @@ main() {
     $INSTALL_STATUSLINE && install_statusline
     { $INSTALL_MCP || $INSTALL_LARK; } && install_mcp
     prune_retired_plugins
+    if $INSTALL_PLUGINS && [[ "$PLUGIN_PRUNE_SCOPE" == "all" ]] && ! $DRY_RUN; then
+        info "This run aligns your installed plugins to this run's selection — anything not selected is uninstalled. Preview it any time with: $(basename "$0") --dry-run"
+    fi
     $INSTALL_PLUGINS && install_plugins
-    # Reconcile installed catalogue plugins against this run's selection: prune
-    # installer-managed plugins that were NOT selected. Gated on $INSTALL_PLUGINS
-    # so a run that skips the plugin step never prunes (RESOLVED_PLUGINS would be
-    # empty and wrongly mark every installed catalogue plugin for removal).
+    # Reconcile what is installed against what was selected this run: uninstall
+    # unselected plugins, then drop the marketplaces and enabledPlugins entries
+    # they leave behind. All three are gated on $INSTALL_PLUGINS so a run that
+    # skips the plugin step never reconciles. Order matters: plugins first (a
+    # marketplace is only orphaned once its plugins are gone), and all of it
+    # before update_installed_plugins() so we never spend NET_TIMEOUT refreshing
+    # a catalog we are about to delete.
     $INSTALL_PLUGINS && prune_unlisted_plugins
+    $INSTALL_PLUGINS && prune_unlisted_marketplaces
+    $INSTALL_PLUGINS && sync_enabled_plugins_settings
     # Always refresh marketplaces and update installed plugins, even when no
     # plugins were selected this run — keeps third-party plugins current.
     update_installed_plugins
@@ -5088,7 +5328,9 @@ main() {
 }
 
 # Source guard: only run main when executed directly, not when sourced (e.g. by
-# the test harness in tests/, which exercises the pure resolution functions).
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+# a test harness exercising the pure resolution functions). ACCC_LIB_ONLY is the
+# same escape hatch for harnesses that must `bash install.sh` rather than source
+# it, and costs nothing at runtime.
+if [[ "${BASH_SOURCE[0]}" == "${0}" && -z "${ACCC_LIB_ONLY:-}" ]]; then
     main "$@"
 fi

@@ -1,5 +1,28 @@
 # Changelog
 
+## [3.1.0] - 2026-08-15
+
+### Features
+- **Full plugin reconciliation.** The installer's plugin stage now aligns *every* plugin present on the machine with the selection made this run, not just the ones it put there. Anything installed but not selected is `claude plugin uninstall`-ed — **including third-party plugins the user installed by hand**. The authority for "what is installed" is `~/.claude/plugins/installed_plugins.json`, not `settings.json`'s `enabledPlugins`; the latter is an enable/disable preference and has never been an install ledger.
+- **Marketplace cleanup follows the pruning.** After the plugin set has settled, any marketplace directory that no surviving plugin still needs is removed via `claude plugin marketplace remove`. This runs before the catalog-update pass, so no time is spent refreshing a marketplace that is about to be deleted.
+- **`enabledPlugins` dead-entry cleanup.** Keys in `settings.json` that are neither selected this run nor actually installed are dropped. Subtractive only — selected plugins are still set to `true` upstream by the normal settings merge.
+- **New flag `--keep-foreign-plugins` (PowerShell: `-KeepForeignPlugins`)** restores the pre-3.1.0 behaviour: reconciliation is narrowed to the installer's own catalogue, and hand-installed third-party plugins — together with the marketplaces only they need — are preserved.
+- **`*@skills-dir` pseudo-plugins are hard-exempt** and are never uninstalled, under any scope.
+- **`--dry-run` previews the whole thing**: every plugin that would be uninstalled, every marketplace that would be removed, and the count of `enabledPlugins` entries that would be dropped — with zero filesystem writes and zero `claude` CLI invocations. The dry-run marketplace preview subtracts the plugins a real run would have removed, so the preview matches what execution would actually do.
+
+### Design Rationale
+- **The marketplace "still needed by" set is recomputed from the state file after pruning, not reused from this run's selection.** Two classes of plugin exist on disk that are not in the selection and must still keep their marketplaces alive: plugins deliberately preserved by `--keep-foreign-plugins`, and plugins whose uninstall failed and are therefore still installed. Computing "needed" from the selection would declare both sets' marketplaces orphaned and delete catalogs that live plugins still depend on. Re-reading `installed_plugins.json` after the prune yields the actual surviving set, which is the only correct input to that question.
+- **An empty selection reconciles nothing, rather than uninstalling everything.** Read literally, "align the machine to the selection" with an empty selection means removing every plugin on the system. That is almost never what a user who unticked everything means, and it is the exact shape a bug in selection resolution would take — a resolver returning an empty array would silently escalate into a full wipe. All three new functions therefore return early when the selection is empty. It is a deliberate safety valve, not an oversight.
+- **Unreadable state is treated as "unknown", not as "empty".** A missing `jq`, a missing `installed_plugins.json`, or a file that fails `jq empty` produces a warning and zero actions. The alternative — treating an unreadable file as an empty installed set — would compute "everything selected is missing, nothing installed is needed" and delete marketplaces on the basis of information the installer does not have.
+- **Uninstall failures warn and continue instead of aborting.** `claude plugin uninstall` returns exit code 1 both for "the target does not exist" and for a genuine failure, with no way to tell the two apart from the outside. Aborting the install on an ambiguous signal would turn a harmless no-op into a hard stop, so every failure increments the warning counter and the run proceeds.
+
+### Notes & Caveats
+- **This is not reversible.** Run `--dry-run` first. On a `curl | bash` install with no TTY, the implicit `--all` path was measured on the development machine to uninstall three plugins: `claude-mem@thedotmack`, `codex@openai-codex`, and `code-review@claude-plugins-official`. The last of those is only selected on the **explicit** `--all` branch — the implicit no-TTY path's essential group does not include it.
+- **`install.ps1` was never executed and never validated by a PowerShell parser.** No `pwsh` or `powershell` is available on this machine. Verification was static only: line-by-line comparison against the sh-side changes, two-way grep of the key strings, and a hand-written tokenizer checking brace and here-string balance against the HEAD baseline. Runtime behaviour is entirely unverified. Re-run `Parser::ParseFile` on a machine that has `pwsh`.
+- **No real CLI interaction was tested.** All end-to-end coverage runs against a stub `claude`; actual `claude plugin uninstall` and `claude plugin marketplace remove` calls were never made.
+- **The regression suite is not in the repository.** 14 unit cases and 55 sandboxed end-to-end cases were written and pass under both bash 5.3.15 and macOS's stock bash 3.2.57, but they live only in a temporary directory.
+- `install.ps1` writes `settings.json` through `ConvertTo-Json -Depth 10`, which reflows the file's formatting and does not byte-match what the sh side's `jq` produces. This is pre-existing `install.ps1` behaviour, not something introduced here.
+
 ## [3.0.2] - 2026-08-15
 
 ### Fixes

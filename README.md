@@ -143,6 +143,8 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | **Playwright MCP** | `mcp/` | Browser automation via `@playwright/mcp` | on |
 | [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | Feishu / Lark integration — opt-in; needs Feishu App ID/Secret and uses ~1 GB RAM/session. Walkthrough: [docs/LARK-MCP.md](docs/LARK-MCP.md) | **off** |
 
+**Re-running the installer reconciles your plugins.** The plugin stage aligns *every* plugin installed on the machine with the selection you make this run: anything not selected is uninstalled — including third-party plugins you installed by hand — along with any marketplace no remaining plugin needs. Pass `--keep-foreign-plugins` (PowerShell: `-KeepForeignPlugins`) to limit reconciliation to this catalogue. Uninstalls are not reversible, so preview with `--dry-run` first. Selecting no plugins at all reconciles nothing.
+
 ## Model Backends — First-Run Setup
 
 The installer writes `~/.claude/profiles/*.json`, but every backend except `claude` needs a login and/or a pasted credential before `cl_<backend>` will work. Full detail: [docs/BACKENDS.md](docs/BACKENDS.md).
@@ -205,7 +207,7 @@ The [`sinedied/agent-skills`:`image-gen`](https://github.com/sinedied/agent-skil
 | `tui` | `fullscreen` | Flicker-free alt-screen rendering |
 | `env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` | `1` | Fixed thinking budget (no effect on Opus 4.7) |
 
-Smart merge on re-install preserves your overrides for `env`, `permissions.allow`, `enabledPlugins`, `hooks.SessionStart`, and `statusLine`. Third-party plugins in your `enabledPlugins` that are outside this catalogue are left untouched.
+Smart merge on re-install preserves your overrides for `env`, `permissions.allow`, `enabledPlugins`, `hooks.SessionStart`, and `statusLine`. As of 3.1.0 the plugin stage additionally drops `enabledPlugins` keys that are neither selected this run nor installed, so third-party entries outside this catalogue are no longer left untouched — `--keep-foreign-plugins` keeps them.
 
 ## Customization
 

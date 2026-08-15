@@ -79,4 +79,6 @@ When making version-level changes to a project (new features, major refactors, a
 
 ## Code Review
 
-Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — always invoke the `adversarial-review` skill to perform it. If the adversarial-review skill is unavailable (e.g., `codex` CLI not installed), fall back to using the `code-reviewer` agent for the review. Never substitute the actual review call with a text-only description.
+Whenever a code review is needed — whether explicitly requested by the user or triggered by a skill (e.g., `code-reviewer`, `simplify`) — actually invoke a reviewer, and never substitute the review call with a text-only description. Prefer the `adversarial-review` skill when it is installed and the `codex` CLI it depends on is on `PATH`; otherwise — the default case, since neither `adversarial-review` nor the Codex plugin is installed out of the box — fall back to the `code-reviewer` agent.
+
+To enable cross-model review, re-run the installer and tick either **adversarial-review** or **Codex CLI** in the Review group (the two are mutually exclusive). `adversarial-review` additionally needs the `codex` CLI installed separately.

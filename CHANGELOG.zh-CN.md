@@ -2,6 +2,29 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [3.1.0] - 2026-08-15
+
+### 新功能
+- **插件全量对账。** 安装器的插件阶段现在会把机器上*所有*已安装插件对齐到本次的选择，而不只是它自己装过的那些。凡是已安装但本次没选中的，一律执行 `claude plugin uninstall` —— **包括用户手工安装的第三方插件**。判断"装了什么"的权威来源是 `~/.claude/plugins/installed_plugins.json`，不是 `settings.json` 的 `enabledPlugins`：后者是启用/禁用偏好，从来就不是安装账本。
+- **marketplace 随之清理。** 插件集合稳定之后，凡是没有任何存活插件还需要的 marketplace 目录，都会通过 `claude plugin marketplace remove` 删掉。这一步跑在 catalog 更新之前，因此不会把时间花在刷新一个马上要被删掉的 marketplace 上。
+- **清理 `enabledPlugins` 死条目。** `settings.json` 里既没在本次选中、实际也没装的键会被移除。只做减法 —— 选中的插件仍由常规的 settings 合并逻辑置为 `true`。
+- **新旗标 `--keep-foreign-plugins`（PowerShell：`-KeepForeignPlugins`）** 恢复 3.1.0 之前的行为：对账范围收窄到安装器自己的目录，手工安装的第三方插件、以及只有它们需要的 marketplace 都会被保留。
+- **`*@skills-dir` 伪插件硬豁免**，在任何 scope 下都不会被卸载。
+- **`--dry-run` 完整预览全过程**：将被卸载的每个插件、将被删除的每个 marketplace、以及将被清掉的 `enabledPlugins` 条目数 —— 且零文件系统写入、零 `claude` CLI 调用。dry-run 的 marketplace 预览会先减去真实运行本该卸载的那些插件，因此预览与真正执行的结果一致。
+
+### 设计取舍
+- **marketplace 的"还有谁需要"集合是在剪枝之后重读状态文件算出来的，不是复用本次选中集。** 磁盘上有两类插件不在选中集里、却仍然必须让自己的 marketplace 活着：被 `--keep-foreign-plugins` 刻意保留的插件，以及卸载失败因而仍然装着的插件。若用选中集去算"还需要谁"，这两类的 marketplace 都会被判为孤儿而删除，而活着的插件仍依赖那些 catalog。剪枝后重读 `installed_plugins.json` 得到的才是真实存活集，也是回答这个问题唯一正确的输入。
+- **空选择等于什么都不删，而不是全删。** 按字面理解，"把机器对齐到选择"在选择为空时意味着卸载系统上的每一个插件。一个把所有勾都取消的用户几乎不可能是这个意思；而这恰好也是选择解析出 bug 时会呈现的形状 —— 解析器返回空数组，就会静悄悄升级成一次全盘清空。因此三个新函数在选择为空时全部提前返回、零动作。这是刻意留的安全阀，不是漏写。
+- **读不到状态就当"未知"，不当"空集"。** 缺 `jq`、缺 `installed_plugins.json`、或文件过不了 `jq empty`，一律 warn + 零动作。另一条路 —— 把读不到的文件当成"已安装集为空" —— 会推导出"选中的都没装、装着的都不需要"，然后基于安装器根本不掌握的信息去删 marketplace。
+- **卸载失败只 warn 不中止。** `claude plugin uninstall` 对"目标本来就不存在"和"真的失败"都返回退出码 1，从外部无法区分。因为一个语义含混的信号就中断整个安装，会把一次无害的空操作升级成硬停止，所以每次失败只累加警告计数，安装继续往下走。
+
+### 注意事项
+- **该操作不可逆。** 请先跑 `--dry-run`。在无 TTY 的 `curl | bash` 安装场景下，隐式 `--all` 路径在开发机上实测会卸载三个插件：`claude-mem@thedotmack`、`codex@openai-codex`、`code-review@claude-plugins-official`。其中最后一个只有在**显式** `--all` 分支才会被选中 —— 隐式无 TTY 路径的 essential 组并不包含它。
+- **`install.ps1` 完全没有执行过，也没有经过 PowerShell 语法解析器验证。** 本机没有 `pwsh` / `powershell`。只做了静态核对：逐行对照 sh 侧改动、关键字符串双向 grep 比对、以及自写 tokenizer 检查括号与 here-string 配平（结果与 HEAD 基线一致）。运行时行为零验证。建议在有 `pwsh` 的机器上补跑 `Parser::ParseFile`。
+- **真实 CLI 交互未测。** 所有端到端覆盖都跑在 stub `claude` 上，真正的 `claude plugin uninstall` / `claude plugin marketplace remove` 一次都没调用过。
+- **回归测试没有进仓库。** 14 个单元用例与 55 个沙箱端到端用例已写好，在 bash 5.3.15 与 macOS 自带的 bash 3.2.57 下均通过，但它们只存在于临时目录里。
+- `install.ps1` 通过 `ConvertTo-Json -Depth 10` 写 `settings.json`，会重排文件格式，与 sh 侧 `jq` 的落盘结果并不逐字节一致。这是 `install.ps1` 既有行为，不是本次引入的。
+
 ## [3.0.2] - 2026-08-15
 
 ### 修复
