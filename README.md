@@ -34,7 +34,7 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 ```
   > [5/5] Core                   Global instructions, settings, rules...
     [0/3] Language Rules          Python / TypeScript / Go
-    [2/3] Review                  code-review + adversarial-review
+    [1/3] Review                  code-review (adversarial-review opt-in)
     [8/8] Workflow                karpathy, superpowers, update-config...
     [3/3] Integrations            context7, github, playwright
     [3/4] Design & Content        document-skills, example-skills, humanizer...
@@ -72,7 +72,7 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 | Item | Source | What It Does | Default |
 |------|--------|--------------|---------|
 | **code-review** | claude-plugins-official (plugin) | Confidence-based PR code review | on |
-| [**adversarial-review**](https://github.com/poteto/noodle/blob/main/.agents/skills/adversarial-review/SKILL.md) | bundled skill | Cross-model review (Skeptic / Architect / Minimalist lenses) | on |
+| [**adversarial-review**](https://github.com/poteto/noodle/blob/main/.agents/skills/adversarial-review/SKILL.md) | bundled skill | Cross-model review (Skeptic / Architect / Minimalist lenses); requires the `codex` CLI | off |
 | [**codex**](https://github.com/openai/codex-plugin-cc) | openai-codex (plugin) | Codex CLI-backed adversarial review | off |
 
 **Workflow (8)** — planning, iteration, code quality, meta-config.

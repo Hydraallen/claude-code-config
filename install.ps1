@@ -354,7 +354,7 @@ function Show-InteractiveMenu {
         )}
         @{ Label = "Review"; Hint = "adversarial-review and Codex are mutually exclusive"; Items = @(
             @{ Label = "code-review plugin"; Desc = "PR code review (claude-plugins-official)"; Default = $true; Id = "review-code-review" }
-            @{ Label = "adversarial-review"; Desc = "Cross-model adversarial review (poteto/noodle)"; Default = $true; Id = "review-adversarial" }
+            @{ Label = "adversarial-review"; Desc = "Cross-model adversarial review (poteto/noodle); needs codex CLI"; Default = $false; Id = "review-adversarial" }
             @{ Label = "Codex CLI"; Desc = "Codex adversarial review (openai/codex)"; Default = $false; Id = "review-codex" }
         )}
         @{ Label = "Workflow"; Hint = "planning, iteration, code quality, meta-config"; Items = @(
@@ -2491,7 +2491,10 @@ function Main {
         $doDeepXiv = $true
         $deepXivSkills = @("deepxiv-cli", "deepxiv-trending-digest", "deepxiv-baseline-table")
         $pluginGroups = @("all")
-        $reviewAdversarial = $true
+        # Both OFF so CLAUDE.md points at the code-reviewer agent: -All does not
+        # install the codex CLI, and adversarial-review hard-requires `codex exec`.
+        # The skill files themselves are still installed by -All.
+        $reviewAdversarial = $false
         $reviewCodex = $false
         $selectedPlugins = @("code-review@claude-plugins-official")
         $selectedSkills = @()

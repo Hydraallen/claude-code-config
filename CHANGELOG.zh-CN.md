@@ -2,6 +2,26 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [2.21.0] - 2026-08-15
+
+### 新功能
+- **`adversarial-review` 不再默认安装。** 两个安装器（`install.sh`、`install.ps1`）Review 分组里的这一项由默认勾选改为默认不勾选，`--all` / `-All` 分支（同时也是非 TTY 下 `curl | bash` 的回退路径）也不再置上 review 标志。该项仍然留在选择器里：用户手动勾选后，skill 照常安装、CLAUDE.md 的规则照常指向它。没有删除任何东西 —— `skills/adversarial-review/` 原样保留，`--all` 依旧会拷贝包括它在内的全部内置 skill。
+- **CLAUDE.md 里 Code Review 那句话的默认版本改为 `code-reviewer` agent。** 两个 review 标志都为 false 时，`install_claude_md()` 走它原有的 `else` 分支，写入 "use the `code-reviewer` agent to perform it"。三个分支的措辞本身没有改动。
+
+### 修复
+- **在 macOS 上，无论选了什么，安装器写进 CLAUDE.md 的都是仓库里自带的那句措辞。** 这一行原本靠 `sed '/^Whenever a code review is needed/c\'"$review_line"` 替换，而 BSD sed 直接拒绝这种写法 —— `sed: 1: "/^Whenever a code revie ...": extra characters after \ at the end of c command`，退出码 1 —— 于是 `&& mv` 从未执行，临时文件保留的还是仓库默认文本。因此每一次 Mac 安装拿到的都是 adversarial-review 那句话，包括选了 Codex 的和两个都没选的。现改用 `awk` 完成替换，它是 POSIX 的，两个平台行为一致。这个 bug 是既有的、不是本次引入的，但正是它会让上面那个默认值改动在占多数的平台上被静默吞掉。
+
+### 设计理由
+- **这个 skill 有一条默认安装满足不了的硬依赖。** `skills/adversarial-review/SKILL.md:16` 明确要求 reviewer 必须经由对面模型的 CLI（`codex exec`）运行，并明令禁止用 subagent 或 Agent tool 顶替。而默认安装里没有任何一步会带来 `codex` —— `review-codex` 一直是默认关闭的，何况两者本来就互斥。所以此前的默认值等于给用户一份 CLAUDE.md，其 Code Review 规则指向一条在没装 codex CLI 的机器上根本跑不通的路径。那句话里的 fallback 子句能兜底，但第一条指令仍然点名了一个跑不起来的 skill。默认关掉之后，默认规则链的终点是一个永远可用的位置。
+- **`--all` 也置为 false，尽管"全都装"的语义看起来支持 true。** 这个标志并不决定 skill 装不装 —— `SELECTED_SKILLS` 为空时 `install_skills()` 会拷贝 `skills/` 下的每一个目录，而 `--all` 恰恰就是这种情况 —— 它只决定 CLAUDE.md 里落哪一句话。而 `--all` 并**不**安装 codex CLI（`review-codex` 在那里同样是关的），所以保持 true 会凑出最差的组合：一份要求 codex 的 review 规则，配上一个刻意不含 codex 的安装。`--all` 仍然会装上 skill 文件，只是不再把规则接到它上面。`install.ps1` 的 `-All` 同理。
+- **交互式的"全选"键（`a`）仍然保留 adversarial 开启。** 那条路径必须以某种方式打破 adversarial/codex 互斥，而既有的选择 —— adversarial 胜出、codex 关闭 —— 是用户主动按键要求装满该分组的结果，不是默认值。这次只订正了注释，因为它把这个状态描述成了"(default)"。
+
+### 注意事项
+- **存量安装不做迁移。** 本次发布之前装过的用户，仍然保留 adversarial-review skill 和 adversarial 版本的 CLAUDE.md 那句话，直到重新跑一次安装器。交互式重跑且不勾选该项会把两者都清掉（`install_skills()` 里的未选中 skill 清理逻辑负责删目录）；用 `--all` 重跑则会改写 CLAUDE.md 那一行、但按上述理由保留 skill 文件。
+- **两个安装器里该项的描述文案加上了 "needs codex CLI"**，让这条依赖在做选择的当下就可见，而不是等到 skill 跑不起来才发现。
+- **已验证**：`bash -n` 在 bash 5.3 与系统 bash 3.2.57 下均通过；`install.sh --dry-run` 退出码 0，输出 `Code Review: adversarial=false codex=false`，同时仍然列出 `skills/adversarial-review/` 的拷贝动作；`install_claude_md()` 针对沙箱 `CLAUDE_DIR` 跑遍三种标志组合，分别产出 code-reviewer、adversarial、codex 三句话（在 awk 修复之前，三种组合产出的都是 adversarial 那句）；互斥辅助函数在两项都关闭的初始状态下重跑，确认它只在"打开某项"时触发，两项都关是稳定状态而非异常分支。
+- **`install.ps1` 未实际执行。** 验证机器上没有 PowerShell；它的两处改动是照 `install.sh` 镜像修改的，只做了静态阅读检查。
+
 ## [2.20.0] - 2026-08-14
 
 ### 新功能

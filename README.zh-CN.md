@@ -34,7 +34,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 ```
   > [5/5] Core                   全局指令、设置、规则...
     [0/3] Language Rules          Python / TypeScript / Go
-    [2/3] Review                  code-review + adversarial-review
+    [1/3] Review                  code-review（adversarial-review 需手动勾选）
     [8/8] Workflow                karpathy、superpowers、update-config...
     [3/3] Integrations            context7、github、playwright
     [3/4] Design & Content        document-skills、example-skills、humanizer...
@@ -72,7 +72,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 | 项目 | 来源 | 功能 | 默认 |
 |------|------|------|------|
 | **code-review** | claude-plugins-official（插件） | 基于置信度的 PR 代码审查 | 开启 |
-| [**adversarial-review**](https://github.com/poteto/noodle/blob/main/.agents/skills/adversarial-review/SKILL.md) | 内置 skill | 跨模型审查（Skeptic / Architect / Minimalist 视角） | 开启 |
+| [**adversarial-review**](https://github.com/poteto/noodle/blob/main/.agents/skills/adversarial-review/SKILL.md) | 内置 skill | 跨模型审查（Skeptic / Architect / Minimalist 视角），需要 `codex` CLI | 关闭 |
 | [**codex**](https://github.com/openai/codex-plugin-cc) | openai-codex（插件） | Codex CLI 驱动的对抗式审查 | 关闭 |
 
 **Workflow (8)** — 规划、迭代、代码质量、元配置。

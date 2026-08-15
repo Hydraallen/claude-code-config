@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.21.0] - 2026-08-15
+
+### Features
+- **`adversarial-review` is no longer installed by default.** Its selector entry in the Review group flips from default-on to default-off in both installers (`install.sh`, `install.ps1`), and the `--all` / `-All` path — which is also the non-TTY `curl | bash` fallback — no longer sets the review flag. The item stays in the selector and still installs, with the CLAUDE.md rule pointed at it, whenever the user ticks it. Nothing was removed: `skills/adversarial-review/` is untouched, and `--all` still copies every bundled skill including this one.
+- **The default CLAUDE.md Code Review rule is now the `code-reviewer` agent.** With both review flags off, `install_claude_md()` takes its existing `else` branch and writes "use the `code-reviewer` agent to perform it". The three branch wordings themselves are unchanged.
+
+### Fixed
+- **On macOS the installer wrote the bundled Code Review wording no matter what was selected.** The line was rewritten with `sed '/^Whenever a code review is needed/c\'"$review_line"`, which BSD sed rejects outright — `sed: 1: "/^Whenever a code revie ...": extra characters after \ at the end of c command`, exit 1 — so the `&& mv` never ran and the temp file kept the repo's default text. Every Mac install therefore got the adversarial-review sentence, including installs that selected Codex or selected neither. Replaced with an `awk` pass, which is POSIX and behaves the same on both platforms. This was pre-existing, not introduced here, but it is what would have silently swallowed the default change above on the majority platform.
+
+### Design Rationale
+- **The skill has a hard dependency the default install does not satisfy.** `skills/adversarial-review/SKILL.md:16` states that reviewers MUST run via the opposite model's CLI (`codex exec`) and explicitly forbids substituting a subagent or the Agent tool. Nothing in the default install brings in `codex` — `review-codex` has always been default-off, and the two are mutually exclusive anyway. So the previous default handed users a CLAUDE.md whose Code Review rule pointed at a path that could not execute on a machine without the codex CLI. The fallback clause in that sentence softens it, but the first instruction still names a skill that cannot run. Defaulting off makes the default rule chain end somewhere that always works.
+- **`--all` sets the flag to false even though "install everything" argues for true.** The flag does not control whether the skill is installed — `install_skills()` copies every directory under `skills/` whenever `SELECTED_SKILLS` is empty, which is exactly the `--all` case — it only controls which sentence lands in CLAUDE.md. And `--all` does *not* install the codex CLI (`review-codex` stays off there too), so leaving it true would have produced the worst combination: a review rule that requires codex on an install that deliberately omits codex. `--all` still installs the skill files; it just no longer wires the rule to them. The same reasoning applies to `-All` in `install.ps1`.
+- **The interactive "select all" key (`a`) still leaves adversarial on.** That path has to break the adversarial/codex mutex somehow, and the pre-existing choice — adversarial wins, codex off — is a deliberate keystroke by a user who asked for everything in the group, not a default. Only the comment was corrected, since it described the state as "(default)".
+
+### Notes & Caveats
+- **Existing installs are not migrated.** Anyone who installed before this release keeps the adversarial-review skill and the adversarial CLAUDE.md sentence until they re-run the installer. Re-running interactively without ticking the item removes both (the unselected-skill cleanup in `install_skills()` handles the directory); re-running with `--all` rewrites the CLAUDE.md line but leaves the skill files in place, by the reasoning above.
+- **The selector item description now says "needs codex CLI"** in both installers, so the dependency is visible at the point of choice rather than only after the skill fails to run.
+- **Verified**: `bash -n` under bash 5.3 and system bash 3.2.57; `install.sh --dry-run` exits 0 and reports `Code Review: adversarial=false codex=false` while still listing `skills/adversarial-review/` among the copies; `install_claude_md()` exercised against a sandbox `CLAUDE_DIR` for all three flag combinations, producing the code-reviewer, adversarial, and codex sentences respectively (before the awk fix, all three produced the adversarial sentence); the mutex helper re-run against a both-off starting state, confirming it fires only on toggle-on and that both-off is a stable state rather than an error path.
+- **`install.ps1` was not executed.** No PowerShell on the verification machine; its two changes were made to mirror `install.sh` and checked by reading only.
+
 ## [2.20.0] - 2026-08-14
 
 ### Features

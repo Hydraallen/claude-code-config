@@ -925,7 +925,7 @@ Go rules|gofmt, table-driven tests, gosec|0|rules-go")
     GROUP_LABELS+=("Review")
     GROUP_HINTS+=("adversarial-review and Codex are mutually exclusive")
     GROUP_ITEMS+=("code-review plugin|PR code review (claude-plugins-official)|1|review-code-review
-adversarial-review|Cross-model adversarial review (poteto/noodle)|1|review-adversarial
+adversarial-review|Cross-model adversarial review (poteto/noodle); needs codex CLI|0|review-adversarial
 Codex CLI|Codex adversarial review (openai/codex)|0|review-codex")
 
     # Group 3: Workflow
@@ -1304,7 +1304,7 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
                 ;;
             ALL)
                 for (( i=0; i<n; i++ )); do selected[$i]=1; done
-                # Enforce review mutex: adversarial ON (default), codex OFF
+                # Enforce review mutex: "select all" keeps adversarial ON, codex OFF
                 for (( j=${GROUP_START[2]}; j<=${GROUP_END[2]}; j++ )); do
                     [[ "${ALL_IDS[$j]}" == "review-codex" ]] && selected[$j]=0 || true
                 done
@@ -1467,9 +1467,37 @@ install_claude_md() {
         # Prepare new content in a temp file
         local new_claude_md; new_claude_md="$(mktemp)"
         cp "$SCRIPT_DIR/CLAUDE.md" "$new_claude_md"
-        if command -v sed &>/dev/null; then
-            local _sedtmp="$new_claude_md._sedtmp"
-            sed '/^Whenever a code review is needed/c\'"$review_line" "$new_claude_md" > "$_sedtmp" && mv "$_sedtmp" "$new_claude_md"
+        # Rewrite the Code Review line to match the selected review backend.
+        # awk, not `sed …c\…`: BSD sed (macOS) rejects text on the same line as
+        # the `c` command ("extra characters after \ at the end of c command"),
+        # so the sed form failed on every Mac and shipped the repo's default
+        # wording no matter what was selected. The replacement text is passed
+        # through the environment so awk cannot reinterpret backslashes in it.
+        if command -v awk &>/dev/null; then
+            local _awktmp="$new_claude_md._awktmp"
+            local _awkrc=0
+            # The END block exits 9 when the anchor matched nothing. In that case
+            # awk still copied every input line verbatim, so the output is safe to
+            # keep — but the substitution silently did nothing, which is exactly the
+            # failure mode of the old `sed …c\…` form. Exit 9 is ours alone; a real
+            # awk failure (crash, unwritable temp file) surfaces as 1/2 and takes the
+            # other branch, so the two cases stay distinguishable.
+            REVIEW_LINE="$review_line" awk '
+                /^Whenever a code review is needed/ { print ENVIRON["REVIEW_LINE"]; matched = 1; next }
+                { print }
+                END { if (!matched) exit 9 }
+            ' "$new_claude_md" > "$_awktmp" || _awkrc=$?
+            if [[ $_awkrc -eq 0 ]]; then
+                mv "$_awktmp" "$new_claude_md"
+            elif [[ $_awkrc -eq 9 ]]; then
+                warn "CLAUDE.md anchor 'Whenever a code review is needed' matched no line; the Code Review rule stays as the bundled template text. Update the installer's anchor if CLAUDE.md was reworded."
+                mv "$_awktmp" "$new_claude_md"
+            else
+                warn "Could not rewrite the CLAUDE.md Code Review line; using the bundled default"
+                rm -f "$_awktmp"
+            fi
+        else
+            warn "awk not found; the CLAUDE.md Code Review rule stays as the bundled template text"
         fi
 
         # Compare with existing — skip if identical
@@ -4688,8 +4716,12 @@ main() {
         INSTALL_PLUGINS=true
         # All backend profiles; each is just a template until credentials are added
         SELECTED_PROFILES=("glm" "gpt" "ccr")
-        # Review defaults for --all: adversarial ON, codex OFF
-        REVIEW_ADVERSARIAL=true
+        # Review defaults for --all: both OFF, so CLAUDE.md points at the
+        # code-reviewer agent. --all does not install the codex CLI, and the
+        # adversarial-review skill hard-requires `codex exec`, so flipping this
+        # on here would wire the review rule to a path that cannot run.
+        # The skill files themselves are still installed by --all.
+        REVIEW_ADVERSARIAL=false
         # Curated mattpocock/skills subset is on by default
         INSTALL_MATTPOCOCK=true
         if $EXPLICIT_ALL; then
