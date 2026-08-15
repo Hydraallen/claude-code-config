@@ -11,5 +11,6 @@
     "CLAUDE_AGENT_API_BASE_URL",
     "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
   ],
-  "env": {}
+  "env": {},
+  "effort": "medium"
 }

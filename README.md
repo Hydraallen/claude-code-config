@@ -163,7 +163,7 @@ The installer writes `~/.claude/profiles/*.json`, but every backend except `clau
 - **`or` has no 5h quota bar** in the statusline, and OpenRouter has no 5h rolling window to show one for; the reason is spelled out in [docs/BACKENDS.md](docs/BACKENDS.md#quota-in-the-statusline). OpenRouter also only *guarantees* its native Anthropic endpoint for Anthropic first-party models, so the DeepSeek slots this profile ships are best-effort and have not been tested against a live key.
 - **`gpt` and `ccr` are no longer selected by default** in the installer. They are still shipped in full: tick them in the "Model Backends" group to install them, `--all` still includes them, and an existing `~/.claude/profiles/gpt.json` / `ccr.json` is never removed by an upgrade.
 
-Then `cl_glm` / `cl_or` / `cl_gpt` / `cl_ccr` launches that backend, and `cl_switch <name>` makes it the default for a bare `cl`. Every launch prints the backend and the model it resolved to. To pick a model without editing JSON, pass claude's own flag — `cl_glm --model glm-5v-turbo` — or set `CL_MODEL=sonnet` for one launch.
+Then `cl_glm` / `cl_or` / `cl_gpt` / `cl_ccr` launches that backend, and `cl_switch <name>` makes it the default for a bare `cl`. Every launch prints the backend and the model it resolved to. To pick a model without editing JSON, pass claude's own flag — `cl_glm --model glm-5v-turbo` — or set `CL_MODEL=sonnet` for one launch. Reasoning effort works the same way per backend: an optional top-level `"effort"` key in the profile (`low|medium|high|xhigh|max`) becomes that launcher's `--effort` default — shipped as `medium` for `claude`/`or`, `xhigh` for `glm` — and `cl_glm --effort high` or `CL_EFFORT=high` overrides it for one launch.
 
 ## Image Generation
 

@@ -1,7 +1,10 @@
 {
   "label": "GLM Coding Plan (Zhipu BigModel, Anthropic-compatible)",
   "note": "Official Anthropic-compatible endpoint. Set ANTHROPIC_AUTH_TOKEN to your BigModel API key. Coding Plan covers glm-5.3 / glm-5-turbo / glm-4.7 only; glm-5 and glm-5.1 are auto-routed to glm-5.3 upstream. CAVEAT: CLAUDE_CODE_MAX_CONTEXT_TOKENS is one client-wide value, not per-slot. It is set to 1000000 to match glm-5.3 (the opus slot and the launcher default). glm-5-turbo and glm-4.7 only accept 200K, so if you route to haiku (glm-5-turbo) the client will happily grow the context past what the server takes and auto-compact will not rescue you — keep those sessions under 200K. Vision: glm-5v-turbo (200K) is reachable with `cl_glm --model glm-5v-turbo`. Docs: https://docs.bigmodel.cn/cn/coding-plan/tool/claude",
-  "credentialKeys": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"],
+  "credentialKeys": [
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL"
+  ],
   "service": null,
   "unset": [],
   "env": {
@@ -27,5 +30,6 @@
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "128000",
     "API_TIMEOUT_MS": "3000000"
-  }
+  },
+  "effort": "xhigh"
 }

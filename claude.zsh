@@ -2,7 +2,7 @@
 #
 # Multi-backend launcher. Every backend is one JSON file in ~/.claude/profiles/:
 #
-#   { label, note, credentialKeys[], service|null, unset[], env{} }
+#   { label, note, credentialKeys[], service|null, unset[], env{}, effort? }
 #
 # Adding a backend = dropping a JSON file in that directory. No code changes:
 # cl_<name> and cl_<name>_auto are generated at source time from whatever is there.
@@ -24,6 +24,16 @@
 #   CL_MODEL=sonnet cl_glm          change the default alias for a launch
 #
 # With neither, the default is `--model opus`, i.e. the profile's opus slot.
+#
+# Reasoning effort follows the same shape. A profile may set an optional top
+# level "effort" key (low|medium|high|xhigh|max) as that backend's default;
+# claude's own flag and CL_EFFORT override it for one launch:
+#
+#   cl_glm --effort high        one launch, explicit level
+#   CL_EFFORT=high cl_glm       same, via environment
+#
+# The level only applies at launch: a /effort change inside the session works
+# for that session but the profile default reasserts on the next launch.
 
 _CL_PROFILE_DIR="$HOME/.claude/profiles"
 _CL_LEGACY_GLM="$HOME/.claude/glm-env.json"
@@ -746,6 +756,37 @@ _cl_profile_run() {
   endpoint=$(jq -r '(.env // .).ANTHROPIC_BASE_URL // "native"' "$file" 2>/dev/null)
   print -u2 "$tag: backend '$name' ($endpoint, $injected vars)"
 
+  # Reasoning effort, in precedence order (mirrors --model handling in _cl_run):
+  #   1. --effort / --effort=X in the caller's own args
+  #   2. $CL_EFFORT
+  #   3. the profile's "effort" key; absent means launch with no --effort
+  # A caller-supplied --effort must win, so scan for one and only append the
+  # default when there is none — extra_args would otherwise land after "$@".
+  local profile_effort=""
+  if [[ -n "${CL_EFFORT:-}" ]]; then
+    profile_effort="$CL_EFFORT"
+  else
+    profile_effort=$(jq -r '.effort // empty' "$file" 2>/dev/null)
+  fi
+  local -a effort_args=()
+  if [[ -n "$profile_effort" ]]; then
+    local _has_effort=0 _epending=0 _ea
+    for _ea in "$@"; do
+      if (( _epending )); then _epending=0; continue; fi
+      case "$_ea" in
+        --effort=*) _has_effort=1 ;;
+        # Bare `--effort` with no value: leave it to claude to report.
+        --effort)   _has_effort=1; _epending=1 ;;
+      esac
+    done
+    if (( _has_effort )); then
+      print -u2 "$tag: effort (caller-supplied, profile default '$profile_effort' skipped)"
+    else
+      effort_args+=(--effort "$profile_effort")
+      print -u2 "$tag: effort $profile_effort"
+    fi
+  fi
+
   # `always` covers every normal and failing return path; the traps cover a
   # signal arriving while claude runs, which would otherwise leave the backend's
   # token exported in this shell and silently redirect other Anthropic tooling.
@@ -757,7 +798,7 @@ _cl_profile_run() {
 
   local rc
   {
-    _cl_run "$tag" "$skip_permissions" "$@"
+    _cl_run "$tag" "$skip_permissions" "$@" "${effort_args[@]}"
     rc=$?
   } always {
     _cl_restore_env

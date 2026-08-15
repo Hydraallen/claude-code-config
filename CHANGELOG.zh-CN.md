@@ -2,6 +2,20 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [3.2.0] - 2026-08-15
+
+### 新功能
+- **每个后端独立的默认推理等级。** profile 顶层新增可选 `"effort"` 键（`low|medium|high|xhigh|max`），launcher 启动时把它作为 `--effort` 传入，因此每个后端可以有自己的 thinking 默认值（`claude.json` → medium、`glm.json` → xhigh、`or.json` → medium）。优先级与 `--model` 完全一致：调用者手动传的 `--effort` 最优先，其次是 `CL_EFFORT` 环境变量，最后才是 profile 键；没写该键的 profile 启动行为与之前完全相同。
+- 启动报告现在会打印实际生效的 effort 等级（调用者自带 flag 跳过 profile 默认值时也会注明）。
+
+### 设计取舍
+- **用启动参数 `--effort`，而不是把 `CLAUDE_CODE_EFFORT_LEVEL` 塞进 profile 的 env。** 该环境变量在所有 effort 设置中优先级最高 —— 连会话内 `/effort` 的调整都会被它压掉 —— 那会把等级锁死，破坏"会话中随时调整 thinking"的现有行为。启动 flag 只设定起始等级：`/effort` 在会话内照常可用，下次启动 profile 默认值重新生效。
+- **effort 属于 launcher 的职责，不是后端 API 环境的一部分。** 该键与 `label`/`unset` 平级而不是放进 `env{}`，因为它配置的是 launcher 如何调用 `claude`，与后端 API 环境无关；不进 `env` 也避免它像凭据一样被导出再还原。
+
+### 注意事项
+- **会话内 `/effort` 的修改不会按后端持久化。** 交互式修改由 Claude Code 全局保存，且下一次 `cl_*` 启动会被启动 flag 掩盖 —— 启动时 profile 默认值总是胜出。要真正做到按后端独立持久化，需要每个后端单独的 `CLAUDE_CONFIG_DIR`（历史、插件、登录状态全部分裂），此方案已明确否决。
+- **`or.json` 带着 `effort: medium` 出厂，但没有声明任何 effort capabilities**（其 `note` 记录了 OpenRouter/DeepSeek 翻译 capability 参数曾导致偶发 400）。Claude Code 会回退到所设等级以下最高的受支持等级，因此在 capabilities 重新加回并测试之前，该 flag 预计是无效的。
+
 ## [3.1.0] - 2026-08-15
 
 ### 新功能

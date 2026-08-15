@@ -163,7 +163,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 - **`or` 没有 5h 配额条**，OpenRouter 本身也不存在 5h 滚动窗口可供展示；原因见 [docs/BACKENDS.zh-CN.md](docs/BACKENDS.zh-CN.md)。另外 OpenRouter 官方只*保证* Anthropic 自家模型能走它的原生 Anthropic 端点，因此本 profile 里的 DeepSeek 槽位属于 best-effort，且尚未用真实 key 实测过。
 - **`gpt` / `ccr` 在安装器中已改为默认不勾选。** 功能完整保留：在 "Model Backends" 分组里勾上即可安装，`--all` 仍然包含它们，已存在的 `~/.claude/profiles/gpt.json` / `ccr.json` 也不会被升级删除。
 
-配好之后，`cl_glm` / `cl_or` / `cl_gpt` / `cl_ccr` 直接以对应后端启动，`cl_switch <name>` 则把它设为裸 `cl` 的默认后端。每次启动都会打印实际使用的后端与模型。想换模型不必改 JSON —— 直接传 claude 自己的参数（`cl_glm --model glm-5v-turbo`），或用 `CL_MODEL=sonnet` 改这一次的默认。
+配好之后，`cl_glm` / `cl_or` / `cl_gpt` / `cl_ccr` 直接以对应后端启动，`cl_switch <name>` 则把它设为裸 `cl` 的默认后端。每次启动都会打印实际使用的后端与模型。想换模型不必改 JSON —— 直接传 claude 自己的参数（`cl_glm --model glm-5v-turbo`），或用 `CL_MODEL=sonnet` 改这一次的默认。推理等级（effort）同理，且每个后端独立：profile 顶层可选 `"effort"` 键（`low|medium|high|xhigh|max`）就是该 launcher 的 `--effort` 默认值 —— 出厂设为 `claude`/`or` = `medium`、`glm` = `xhigh` —— 用 `cl_glm --effort high` 或 `CL_EFFORT=high` 可临时覆盖单次启动。
 
 ## 图像生成
 

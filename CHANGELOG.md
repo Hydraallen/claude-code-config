@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.2.0] - 2026-08-15
+
+### Features
+- **Per-backend default reasoning effort.** Profiles accept an optional top-level `"effort"` key (`low|medium|high|xhigh|max`); the launcher passes it as `--effort` at startup, so each backend gets its own thinking default (`claude.json` → medium, `glm.json` → xhigh, `or.json` → medium). Precedence mirrors `--model`: a caller-supplied `--effort` flag wins, then `CL_EFFORT`, then the profile key; a profile without the key launches exactly as before.
+- Startup report now includes the applied effort level (or notes when a caller-supplied flag skipped the profile default).
+
+### Design Rationale
+- **`--effort` at launch, not `CLAUDE_CODE_EFFORT_LEVEL` in the profile env.** The environment variable has the highest precedence of any effort setting — it overrides even in-session `/effort` changes — which would lock the level and break the existing behaviour of adjusting thinking mid-session. The launch flag only sets the starting level: `/effort` still works within a session, and the profile default reasserts on the next launch.
+- **Effort is a launcher concern, not an env concern.** The key lives beside `label`/`unset` rather than inside `env{}` because it configures how the launcher invokes `claude`, not the backend's API environment; keeping it out of `env` avoids it being exported and restored like a credential.
+
+### Notes & Caveats
+- **Session-level `/effort` changes do not persist per backend.** An interactive change is stored by Claude Code globally and is masked by the launch flag on the next `cl_*` start — the profile default always wins at startup. Fully independent persistence would require separate `CLAUDE_CONFIG_DIR`s per backend (splitting history, plugins, and login state), which was deliberately not taken.
+- **`or.json` ships `effort: medium` but declares no effort capabilities** (its `note` records that OpenRouter/DeepSeek translation of capability params caused sporadic 400s). Claude Code falls back to the highest supported level at or below the requested one, so the flag is expected to be a no-op there until capabilities are re-added and tested.
+
 ## [3.1.0] - 2026-08-15
 
 ### Features
