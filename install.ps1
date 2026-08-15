@@ -433,10 +433,10 @@ function Show-InteractiveMenu {
             @{ Label = "Lessons";         Desc = "lessons.md template + SessionStart hook"; Default = $true; Id = "lessons" }
             @{ Label = "Search agent";    Desc = "Jeff read-only web search agent"; Default = $true; Id = "agents" }
         )}
-        @{ Label = "Language Rules"; Hint = "only install what your projects need"; Items = @(
-            @{ Label = "Python rules";    Desc = "PEP 8, pytest, type hints, bandit"; Default = $false; Id = "rules-python" }
-            @{ Label = "TypeScript rules"; Desc = "Zod, Playwright, immutability";    Default = $false; Id = "rules-ts" }
-            @{ Label = "Go rules";        Desc = "gofmt, table-driven tests, gosec";  Default = $false; Id = "rules-go" }
+        @{ Label = "Language Rules"; Hint = "Python/TypeScript/Go are enabled by default; uncheck what you don't need"; Items = @(
+            @{ Label = "Python rules";    Desc = "PEP 8, pytest, type hints, bandit"; Default = $true;  Id = "rules-python" }
+            @{ Label = "TypeScript rules"; Desc = "Zod, Playwright, immutability";    Default = $true;  Id = "rules-ts" }
+            @{ Label = "Go rules";        Desc = "gofmt, table-driven tests, gosec";  Default = $true;  Id = "rules-go" }
         )}
         @{ Label = "Review"; Hint = "adversarial-review and Codex are mutually exclusive"; Items = @(
             @{ Label = "code-review plugin"; Desc = "PR code review (claude-plugins-official)"; Default = $true; Id = "review-code-review" }

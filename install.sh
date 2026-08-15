@@ -938,10 +938,10 @@ CCR gateway|claude-code-router: GLM + GPT merged into one /model list; manual we
 
     # Group 2: Language Rules
     GROUP_LABELS+=("Language Rules")
-    GROUP_HINTS+=("only install what your projects need")
-    GROUP_ITEMS+=("Python rules|PEP 8, pytest, type hints, bandit|0|rules-python
-TypeScript rules|Zod, Playwright, immutability|0|rules-ts
-Go rules|gofmt, table-driven tests, gosec|0|rules-go")
+    GROUP_HINTS+=("Python/TypeScript/Go are enabled by default; uncheck what you don't need")
+    GROUP_ITEMS+=("Python rules|PEP 8, pytest, type hints, bandit|1|rules-python
+TypeScript rules|Zod, Playwright, immutability|1|rules-ts
+Go rules|gofmt, table-driven tests, gosec|1|rules-go")
 
     # Group 2: Review
     GROUP_LABELS+=("Review")
