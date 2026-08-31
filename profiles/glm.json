@@ -1,6 +1,6 @@
 {
   "label": "GLM Coding Plan (Zhipu BigModel, Anthropic-compatible)",
-  "note": "Official Anthropic-compatible endpoint. Set ANTHROPIC_AUTH_TOKEN to your BigModel API key. Coding Plan covers glm-5.3 / glm-5-turbo / glm-4.7 only; glm-5 and glm-5.1 are auto-routed to glm-5.3 upstream. CAVEAT: CLAUDE_CODE_MAX_CONTEXT_TOKENS is one client-wide value, not per-slot. It is set to 1000000 to match glm-5.3 (the opus slot and the launcher default). glm-5-turbo and glm-4.7 only accept 200K, so if you route to haiku (glm-5-turbo) the client will happily grow the context past what the server takes and auto-compact will not rescue you — keep those sessions under 200K. Vision: glm-5v-turbo (200K) is reachable with `cl_glm --model glm-5v-turbo`. Docs: https://docs.bigmodel.cn/cn/coding-plan/tool/claude",
+  "note": "Official Anthropic-compatible endpoint. Set ANTHROPIC_AUTH_TOKEN to your BigModel API key. Coding Plan covers glm-5.3 / glm-5.3-flash / glm-5-turbo / glm-4.7; glm-5 and glm-5.1 are auto-routed to glm-5.3 upstream. opus and sonnet route to glm-5.3; haiku and fable route to glm-5.3-flash (added to the plan 2026-08-26 at 3x glm-5.3's quota; natively multimodal, thinking cannot be turned off). CAVEAT: CLAUDE_CODE_MAX_CONTEXT_TOKENS is one client-wide value, not per-slot. It is set to 1000000, which matches every slot the profile ships (glm-5.3 and glm-5.3-flash both take 1M in / 128K out). glm-5-turbo and glm-4.7 only accept 200K, so if you pin one via --model keep that session under 200K. Vision: haiku/fable (glm-5.3-flash) are natively multimodal; glm-5v-turbo (200K) is also reachable with `cl_glm --model glm-5v-turbo`. Docs: https://docs.bigmodel.cn/cn/coding-plan/tool/claude",
   "credentialKeys": [
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL"
@@ -10,9 +10,9 @@
   "env": {
     "ANTHROPIC_AUTH_TOKEN": "YOUR_GLM_API_KEY",
     "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5-turbo",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": "GLM-5-Turbo",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION": "智谱 GLM-5-Turbo 通用模型 (服务端 200K；客户端上限按 glm-5.3 设为 1M，勿超过 200K)",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5.3-flash",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": "GLM-5.3-Flash",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION": "智谱 GLM-5.3-Flash 轻量多模态模型 (1M 上下文 / 128K 输出；原生视觉；强制开启思考)",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES": "effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.3",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "GLM-5.3",
@@ -22,9 +22,9 @@
     "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "GLM-5.3",
     "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION": "智谱 GLM-5.3 旗舰推理模型 (1M 上下文 / 128K 输出)",
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES": "effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL": "glm-5.3",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME": "GLM-5.3",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION": "智谱 GLM-5.3 旗舰推理模型 (1M 上下文 / 128K 输出)",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "glm-5.3-flash",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME": "GLM-5.3-Flash",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION": "智谱 GLM-5.3-Flash 轻量多模态模型 (1M 上下文 / 128K 输出；原生视觉；强制开启思考)",
     "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES": "effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking",
     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1000000",
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000",

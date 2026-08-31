@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.3.0] - 2026-08-31
+
+### Features
+- **GLM haiku/fable slots remapped to `glm-5.3-flash`.** Zhipu added GLM-5.3-Flash (released 2026-08-26) to the GLM Coding Plan at 3x glm-5.3's quota, and it takes the same 1M in / 128K out as glm-5.3 — so the two budget-priced slots now run a 1M-context, natively multimodal model instead of the 200K `glm-5-turbo`. opus and sonnet stay on `glm-5.3`. `profiles/glm.json` (slot bindings, `_NAME`/`_DESCRIPTION`, `note`), both BACKENDS docs, and the installer's launcher hint table updated to match.
+
+### Design Rationale
+- **The 200K mismatch is gone by construction, not by warning.** The old profile asked users to "keep haiku sessions under 200K" because `CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000` is client-wide while glm-5-turbo accepted only 200K. glm-5.3-flash accepts 1M, so every slot the profile ships now matches the client limit; the caveat shrinks to hand-pinned `glm-5-turbo` / `glm-4.7` sessions.
+- **flash fits how Claude Code actually uses the background slots.** The fable slot carries compact/title/quota traffic the user never issues; flash's 18B-active sparse architecture trades peak reasoning for cost — the right trade there — while opus/sonnet keep full glm-5.3. Bonus: haiku/fable become the profile's first natively multimodal slots.
+
+### Notes & Caveats
+- **Thinking cannot be disabled on glm-5.3-flash** (`thinking.type` supports `enabled` only). Capabilities lists are unchanged and effort levels still apply; the profile-wide `effort: "xhigh"` startup default governs as before.
+- **Not smoke-tested against the live endpoint.** Z.ai documents GLM-5.3-Flash as Coding-Plan-covered for Claude Code, but `open.bigmodel.cn/api/anthropic` was not exercised with this id during this change — run one `cl_glm --model haiku` check after installing.
+- Existing installs pick the new mapping up on the next installer run (credentials are preserved on upgrade); a machine that never re-runs the installer keeps the old slot bindings until then.
+
 ## [3.2.0] - 2026-08-15
 
 ### Features

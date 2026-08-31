@@ -2771,7 +2771,7 @@ cl_commands_hint() {
     echo "      | 命令             | 后端 / Backend              | /model 列表                  |"
     echo "      |------------------|----------------------------|------------------------------|"
     cl_launcher_row claude "| cl_claude /_auto | 官方 Claude 订阅            | Opus / Sonnet / Haiku        |"
-    cl_launcher_row glm    "| cl_glm    /_auto | 智谱 GLM (BigModel)        | glm-5.3 / glm-5-turbo / 4.7  |"
+    cl_launcher_row glm    "| cl_glm    /_auto | 智谱 GLM (BigModel)        | glm-5.3 / glm-5.3-flash      |"
     cl_launcher_row or     "| cl_or     /_auto | OpenRouter (直连)          | DeepSeek V4 Pro / V4 Flash   |"
     cl_launcher_row gpt    "| cl_gpt    /_auto | ChatGPT 订阅 (CLIProxyAPI) | GPT / Codex (代理暴露的模型) |"
     cl_launcher_row ccr    "| cl_ccr    /_auto | CCR gateway                | GLM + GPT 合并成一个列表     |"

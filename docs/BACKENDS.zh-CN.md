@@ -69,15 +69,17 @@ CL_MODEL=sonnet cl_glm          # change the default alias for one launch
 cl_glm
 ```
 
-Coding Plan 只覆盖 **`glm-5.3`（1M 输入 / 128K 输出）、`glm-5-turbo`（200K）、
-`glm-4.7`（200K）** 这三个模型 —— opus、sonnet 和 fable 都路由到 `glm-5.3`，haiku
-路由到 `glm-5-turbo`（`glm-4.7` 计划内覆盖，但不绑定到任何槽位）。
+Coding Plan 覆盖 **`glm-5.3`（1M 输入 / 128K 输出）、`glm-5.3-flash`（1M 输入 /
+128K 输出）、`glm-5-turbo`（200K）、`glm-4.7`（200K）** —— opus 和 sonnet 路由到
+`glm-5.3`，haiku 和 fable 路由到 `glm-5.3-flash`（2026-08-26 加入套餐，额度是
+glm-5.3 的 3 倍；原生多模态，思考不可关闭）。`glm-5-turbo` 和 `glm-4.7` 计划内
+覆盖，但不绑定到任何槽位。
 `fable` 是 Claude Code 的后台槽位（compact、会话标题、配额探测）。它和其他别名一样可以
 显式选择，但客户端还会拿它发**你没主动发起**的请求 —— 所以留空会在这些请求上失败，
 字面量 `claude-fable-5` 直接发出去然后 400。
 `glm-5` 和 `glm-5.1` 在上游会被自动路由到 `glm-5.3`，所以不要固定写它们。
-视觉模型 **`glm-5v-turbo`（200K）** 没有自己的槽位；用
-`cl_glm --model glm-5v-turbo` 访问。
+视觉方面，haiku/fable 槽位的 `glm-5.3-flash` 本身就是原生多模态；
+**`glm-5v-turbo`（200K）** 没有自己的槽位，用 `cl_glm --model glm-5v-turbo` 访问。
 
 #### 解锁 glm-5.3 的 1M 上下文
 
@@ -94,11 +96,12 @@ Coding Plan 只覆盖 **`glm-5.3`（1M 输入 / 128K 输出）、`glm-5-turbo`�
 服务端不需要任何额外配置 —— 不用加 header，模型 id 后面也不用加 `[1m]` 后缀。
 **不要**把模型名改成 `glm-5.3[1m]`：那不是一个 Z.ai 模型代号，而且它会被原样发到线上。
 
-> **注意 —— 一个上限，三个模型。** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 是一个客户端级别的
-> 全局值，不是按槽位区分的。它是按 glm-5.3 配的，glm-5.3 同时占 opus 和 sonnet 两个槽位、
-> 也是启动器的默认模型。只有 **haiku（`glm-5-turbo`，200K）** 偏小：切到它时客户端会放任
-> 上下文涨过服务端能接受的长度，而自动压缩救不了你。haiku 会话请控制在 200K 以内，或者
-> `cl_switch` 到一个尺寸匹配的后端。
+> **注意 —— 一个上限，四个模型。** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 是一个客户端级别的
+> 全局值，不是按槽位区分的。它按 glm-5.3 和 glm-5.3-flash（都是 1M）配置，两者现已占满
+> 全部四个出厂槽位，所以 profile 绑定的槽位不再有偏小的。偏小的只剩你手动固定的模型 ——
+> **`glm-5-turbo` / `glm-4.7`（200K）**：固定其中一个时，客户端会放任上下文涨过服务端
+> 能接受的长度，而自动压缩救不了你。这类会话请控制在 200K 以内，或者 `cl_switch` 到一个
+> 尺寸匹配的后端。
 
 文档：<https://docs.bigmodel.cn/cn/coding-plan/tool/claude>
 

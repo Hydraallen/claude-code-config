@@ -75,15 +75,18 @@ Paste your BigModel API key into `.env.ANTHROPIC_AUTH_TOKEN` of
 cl_glm
 ```
 
-Coding Plan covers **`glm-5.3` (1M in / 128K out), `glm-5-turbo` (200K),
-`glm-4.7` (200K)** only — opus, sonnet and fable all route to `glm-5.3`, haiku
-routes to `glm-5-turbo` (`glm-4.7` is covered by the plan but wired to no slot).
+Coding Plan covers **`glm-5.3` (1M in / 128K out), `glm-5.3-flash` (1M in /
+128K out), `glm-5-turbo` (200K), `glm-4.7` (200K)** — opus and sonnet route to
+`glm-5.3`, haiku and fable route to `glm-5.3-flash` (added to the plan
+2026-08-26 at 3x the glm-5.3 quota; natively multimodal, thinking always on).
+`glm-5-turbo` and `glm-4.7` are covered by the plan but wired to no slot.
 `fable` is Claude Code's background slot (compact, session titles, quota probes).
 It is a selectable alias like the others, but the client also uses it for requests
 you never issue — so leaving it unmapped fails on traffic you did not ask for, with
 the literal id `claude-fable-5` going out and 400ing.
 `glm-5` and `glm-5.1` are auto-routed to `glm-5.3` upstream, so don't pin them.
-The vision model **`glm-5v-turbo` (200K)** has no slot of its own; reach it with
+For vision, the haiku/fable model `glm-5.3-flash` is natively multimodal;
+**`glm-5v-turbo` (200K)** has no slot of its own but is reachable with
 `cl_glm --model glm-5v-turbo`.
 
 #### Unlocking glm-5.3's 1M context
@@ -103,12 +106,13 @@ Nothing extra is needed server-side — no header, no `[1m]` suffix on the model
 id. Do **not** rename the model to `glm-5.3[1m]`: that is not a Z.ai model code
 and it would go out on the wire.
 
-> **Caveat — one limit, three models.** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is a
-> single client-wide value, not per-slot. It matches glm-5.3, which fills both
-> the opus and sonnet slots and is the launcher default. Only **haiku
-> (`glm-5-turbo`, 200K)** is undersized: if you route to it the client will let
-> the context grow past what the server accepts and auto-compact will not save
-> you. Keep haiku sessions under 200K, or `cl_switch` to a backend sized for
+> **Caveat — one limit, four models.** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is a
+> single client-wide value, not per-slot. It matches glm-5.3 and glm-5.3-flash
+> (1M each), which now fill all four shipped slots, so no slot the profile
+> wires is undersized any more. Only models you pin by hand — **`glm-5-turbo` /
+> `glm-4.7` (200K)** — are: with one of those pinned the client will let the
+> context grow past what the server accepts and auto-compact will not save
+> you. Keep such sessions under 200K, or `cl_switch` to a backend sized for
 > them.
 
 Docs: <https://docs.bigmodel.cn/cn/coding-plan/tool/claude>

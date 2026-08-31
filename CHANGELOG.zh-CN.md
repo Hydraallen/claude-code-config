@@ -2,6 +2,20 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [3.3.0] - 2026-08-31
+
+### 新功能
+- **GLM 的 haiku/fable 槽位改绑 `glm-5.3-flash`。** 智谱于 2026-08-26 把 GLM-5.3-Flash 加入 GLM Coding Plan（额度是 glm-5.3 的 3 倍），且它与 glm-5.3 一样接受 1M 输入 / 128K 输出 —— 两个低价槽位由此从 200K 的 `glm-5-turbo` 换成 1M 上下文的原生多模态模型。opus 和 sonnet 仍绑 `glm-5.3`。`profiles/glm.json`（槽位绑定、`_NAME`/`_DESCRIPTION`、`note`）、两份 BACKENDS 文档、安装器的启动器提示表已同步更新。
+
+### 设计取舍
+- **200K 错配靠构造消除，而不是靠提醒。** 旧 profile 要求"haiku 会话控制在 200K 以内"，因为 `CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000` 是客户端全局值而 glm-5-turbo 只收 200K。glm-5.3-flash 接受 1M，出厂槽位全部与客户端上限对齐；注意事项收缩为手动固定 `glm-5-turbo` / `glm-4.7` 的会话。
+- **flash 契合 Claude Code 对后台槽位的真实用法。** fable 槽承载的是用户从未主动发起的 compact/标题/配额流量；flash 以 18B 激活的稀疏架构用峰值推理换成本 —— 对这类流量是正确的取舍 —— opus/sonnet 仍保留完整的 glm-5.3。附带收益：haiku/fable 成为该 profile 首批原生多模态槽位。
+
+### 注意事项
+- **glm-5.3-flash 的思考无法关闭**（`thinking.type` 仅支持 `enabled`）。capabilities 列表不变、effort 等级照常生效；profile 级的 `effort: "xhigh"` 启动默认值不受影响。
+- **未对线上端点做冒烟测试。** Z.ai 文档写明 GLM-5.3-Flash 在 Coding Plan 内可用于 Claude Code，但本次修改没有用该 id 实际调过 `open.bigmodel.cn/api/anthropic` —— 安装后请跑一次 `cl_glm --model haiku` 验证。
+- 已有安装要在下一次运行安装器时才会拿到新映射（升级时凭据会保留）；不再运行安装器的机器在此之前保持旧槽位绑定。
+
 ## [3.2.0] - 2026-08-15
 
 ### 新功能
