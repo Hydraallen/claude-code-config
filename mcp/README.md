@@ -6,13 +6,27 @@
 
 | Server | Transport | Default | Purpose |
 |--------|-----------|---------|---------|
-| **playwright** | stdio | on | Browser automation via `@playwright/mcp` |
+| **playwright** | stdio | **off (opt-in)** | Browser automation via `@playwright/mcp` |
 | **[Lark-MCP](https://github.com/larksuite/lark-openapi-mcp)** | stdio | **off (opt-in)** | Official Feishu/Lark OpenAPI — call Lark platform APIs from AI assistants |
 
-Only `playwright` ships in the default [`mcp-servers.json`](./mcp-servers.json) template
-(auto-loaded by the `claude.zsh` shell wrapper on each launch). Lark-MCP is **not**
-enabled by default: it requires Feishu App credentials and each session it runs costs
-roughly 1 GB of RAM. Add it explicitly only if you use it.
+Both are opt-in; a default install registers neither.
+
+`playwright` is off because the official **playwright plugin** claims the same
+server name. A user-scope MCP entry shadows the plugin's, so installing both
+leaves the plugin one silently never started — `claude mcp list` shows a single
+`playwright` and no hint that the other exists. Enable this standalone server
+only if you deselect that plugin. To undo an existing duplicate:
+`claude mcp remove playwright`.
+
+Lark-MCP is off because it requires Feishu App credentials and each session it
+runs costs roughly 1 GB of RAM.
+
+Only `playwright` ships in the [`mcp-servers.json`](./mcp-servers.json) template,
+which the `claude.zsh` wrapper auto-loads on each launch if you copy it to
+`~/.claude/mcp/mcp-servers.json`. The wrapper passes it via `--mcp-config` per
+launch rather than writing `~/.claude.json`, so a server added this way also
+shadows a same-named plugin, and removing the `~/.claude.json` entry alone will
+not stop it coming back.
 
 ## Installation
 

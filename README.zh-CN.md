@@ -140,7 +140,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 
 | 项目 | 来源 | 功能 | 默认 |
 |------|------|------|------|
-| **Playwright MCP** | `mcp/` | 浏览器自动化（`@playwright/mcp`） | 开启 |
+| **Playwright MCP** | `mcp/` | 浏览器自动化（`@playwright/mcp`）— 可选；与上方 **playwright 插件**占用同一个 server 名并会把它遮蔽，二者只能选其一。[详情](mcp/README.md) | **关闭** |
 | [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | 飞书 / Lark 集成 — 可选；需 Feishu App ID/Secret，每会话约占用 1 GB 内存。分步指引：[docs/LARK-MCP.zh-CN.md](docs/LARK-MCP.zh-CN.md) | **关闭** |
 
 **重跑安装器会对账插件。** 插件阶段会把机器上*所有*已安装插件对齐到本次勾选：没勾中的一律卸载 —— **包括你手工装的第三方插件** —— 以及不再被任何存活插件需要的 marketplace。加 `--keep-foreign-plugins`（PowerShell：`-KeepForeignPlugins`）可把对账范围收回本目录内。卸载不可逆，建议先用 `--dry-run` 预览。一个插件都没勾选时，对账不做任何动作。

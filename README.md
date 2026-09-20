@@ -140,7 +140,7 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 
 | Item | Source | What It Does | Default |
 |------|--------|--------------|---------|
-| **Playwright MCP** | `mcp/` | Browser automation via `@playwright/mcp` | on |
+| **Playwright MCP** | `mcp/` | Browser automation via `@playwright/mcp` — opt-in; claims the same server name as the **playwright plugin** above and shadows it, so pick only one. [Details](mcp/README.md) | **off** |
 | [**Lark MCP server**](https://github.com/larksuite/lark-openapi-mcp) | `mcp/` | Feishu / Lark integration — opt-in; needs Feishu App ID/Secret and uses ~1 GB RAM/session. Walkthrough: [docs/LARK-MCP.md](docs/LARK-MCP.md) | **off** |
 
 **Re-running the installer reconciles your plugins.** The plugin stage aligns *every* plugin installed on the machine with the selection you make this run: anything not selected is uninstalled — including third-party plugins you installed by hand — along with any marketplace no remaining plugin needs. Pass `--keep-foreign-plugins` (PowerShell: `-KeepForeignPlugins`) to limit reconciliation to this catalogue. Uninstalls are not reversible, so preview with `--dry-run` first. Selecting no plugins at all reconciles nothing.

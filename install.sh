@@ -1006,11 +1006,15 @@ deepxiv-trending-digest|Trending paper digest generation|0|deepxiv-trending-dige
 deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-table")
 
     # Group 9: MCP Servers
-    #   Playwright is default-on. Lark/Feishu is opt-in (default off): it needs
-    #   App ID/Secret credentials and each session costs ~1GB RAM.
+    #   Both are opt-in (default off). The standalone Playwright MCP registers
+    #   under the name `playwright` — the same name the official playwright
+    #   plugin uses — and a user-scope entry shadows the plugin's, so enabling
+    #   both leaves the plugin one silently never started. Pick this only if
+    #   you deselect the playwright plugin in the Plugins group.
+    #   Lark/Feishu needs App ID/Secret credentials and ~1GB RAM per session.
     GROUP_LABELS+=("MCP Servers")
     GROUP_HINTS+=("")
-    GROUP_ITEMS+=("Playwright MCP|Browser automation MCP server|1|mcp
+    GROUP_ITEMS+=("Playwright MCP|Standalone server — shadows the playwright plugin, pick only without it|0|mcp
 Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/session|0|mcp-lark")
 
     local num_groups=${#GROUP_LABELS[@]}
@@ -5189,7 +5193,11 @@ main() {
         # Curated mattpocock/skills subset is on by default
         INSTALL_MATTPOCOCK=true
         if $EXPLICIT_ALL; then
-            # Explicit --all: install everything including MCP, DeepXiv, and all plugin groups
+            # Explicit --all: install everything including MCP, DeepXiv, and all plugin groups.
+            # This deliberately keeps the standalone playwright MCP, even though
+            # it shadows the playwright plugin that --all also installs: --all
+            # means everything, and the duplicate is resolvable afterwards with
+            # `claude mcp remove playwright`.
             INSTALL_MCP=true
             INSTALL_LARK=true   # --all means everything; lark still self-skips without credentials
             INSTALL_DEEPXIV=true
@@ -5199,14 +5207,15 @@ main() {
             SELECTED_PLUGINS+=("code-review@claude-plugins-official")
         else
             # Implicit (non-TTY fallback): essential plugins plus the
-            # default-selected third-party plugins and MCP servers, so a
-            # `curl | bash` install without --all still brings them along.
+            # default-selected third-party plugins, so a `curl | bash` install
+            # without --all still brings them along.
             # claude-mem is default OFF and only ships with explicit --all.
-            # (lark-mcp is skipped non-interactively as it needs credentials;
-            # playwright MCP installs fine.)
+            # No MCP server is registered here: lark-mcp needs credentials, and
+            # the standalone playwright MCP would take the `playwright` name at
+            # user scope and shadow the playwright plugin this same branch
+            # installs. Opt in with --mcp or the interactive selector.
             PLUGIN_GROUPS=("essential")
             SELECTED_PLUGINS+=("${PLUGINS_OPTIONAL[@]+"${PLUGINS_OPTIONAL[@]}"}")
-            INSTALL_MCP=true
         fi
     fi
 

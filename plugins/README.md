@@ -68,3 +68,52 @@ claude plugin install frontend-slides@frontend-slides
 claude plugin install ppt-master@ppt-master
 # ... repeat for each plugin above
 ```
+
+## Plugins that need configuration
+
+### github — requires `GITHUB_PERSONAL_ACCESS_TOKEN`
+
+The plugin talks to `https://api.githubcopilot.com/mcp/` and sends
+`Authorization: Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}`. The installer does not
+set that variable, and Claude Code does not read your `gh` login for it. Without
+it the header goes out as a bare `Bearer `, which GitHub rejects — every session
+then opens with:
+
+```
+plugin:github:github (400): "Error POSTing to endpoint: bad request:
+Authorization header is badly formatted"
+```
+
+That message names neither the variable nor the plugin's config file, so it is
+easy to misread as a broken install. Export the variable in your shell rc — if
+the `gh` CLI is already logged in, its token works and needs no separate PAT:
+
+```bash
+# ~/.zshrc  (or ~/.bashrc)
+if command -v gh >/dev/null 2>&1; then
+  export GITHUB_PERSONAL_ACCESS_TOKEN="$(gh auth token 2>/dev/null)"
+fi
+```
+
+Open a new shell and confirm with `claude mcp list` — `plugin:github:github`
+should report `✔ Connected`. Note this only reaches Claude Code when it is
+launched from an interactive shell; started from Spotlight or the Dock it
+inherits no rc, and the plugin stays broken.
+
+If you would rather not touch your shell rc, put the token in the `env` block of
+`~/.claude/settings.json` instead — plaintext either way, so treat the file
+accordingly.
+
+### playwright — do not also enable the standalone Playwright MCP
+
+The plugin and the standalone MCP server in [`../mcp/`](../mcp/README.md) both
+register under the name `playwright`. A user-scope MCP entry shadows the
+plugin's, so enabling both leaves the plugin one silently never started. The
+standalone server is default-off in the installer for this reason; if you
+already have the duplicate, drop it with `claude mcp remove playwright`.
+
+### context7 — optional `CONTEXT7_API_KEY`
+
+Its header is `${CONTEXT7_API_KEY:-}`, so an unset key is not an error: the
+server connects anonymously and is rate-limited. Set the variable only if you
+hit throttling.

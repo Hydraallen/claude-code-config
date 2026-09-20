@@ -485,8 +485,13 @@ function Show-InteractiveMenu {
             @{ Label = "deepxiv-trending-digest"; Desc = "Trending paper digest generation"; Default = $false; Id = "deepxiv-trending-digest" }
             @{ Label = "deepxiv-baseline-table"; Desc = "Baseline comparison table from papers"; Default = $false; Id = "deepxiv-baseline-table" }
         )}
+        # Both are opt-in (default off). The standalone Playwright MCP registers
+        # under the name `playwright` -- the same name the official playwright
+        # plugin uses -- and a user-scope entry shadows the plugin's, so enabling
+        # both leaves the plugin one silently never started. Pick this only if
+        # you deselect the playwright plugin in the Plugins group.
         @{ Label = "MCP Servers"; Hint = ""; Items = @(
-            @{ Label = "Playwright MCP"; Desc = "Browser automation MCP server";        Default = $true;  Id = "mcp" }
+            @{ Label = "Playwright MCP"; Desc = "Standalone server -- shadows the playwright plugin, pick only without it"; Default = $false; Id = "mcp" }
             @{ Label = "Lark/Feishu MCP"; Desc = "Feishu/Lark integration -- needs App ID/Secret, ~1GB RAM/session"; Default = $false; Id = "mcp-lark" }
         )}
     )
@@ -2220,7 +2225,7 @@ function Install-NerdFont {
 
 function Install-Mcp {
     param(
-        [bool]$InstallPlaywright = $true,
+        [bool]$InstallPlaywright = $false,
         [bool]$InstallLark = $false
     )
     Write-Info "Installing MCP servers..."
@@ -2907,6 +2912,10 @@ function Main {
         $doLessons = $true
         $doHooks = $true
         $doPlugins = $true
+        # This deliberately keeps the standalone playwright MCP, even though it
+        # shadows the playwright plugin that -All also installs: -All means
+        # everything, and the duplicate is resolvable afterwards with
+        # `claude mcp remove playwright`.
         $doMcp = $true
         $doLark = $true   # -All means everything; lark still self-skips without credentials
         $doDeepXiv = $true
@@ -2960,14 +2969,15 @@ function Main {
             $doPlugins = $true
             $pluginGroups = @("essential")
             $selectedPlugins = $PLUGINS_OPTIONAL
-            $doMcp = $true
         }
     } else {
         # Non-interactive fallback: essential plugins plus the default-selected
-        # third-party plugins and MCP servers, so a `irm | iex` install without
-        # -All still brings them along. claude-mem is default OFF and only ships
-        # with explicit -All. (lark-mcp is skipped non-interactively
-        # as it needs credentials; playwright MCP installs fine.)
+        # third-party plugins, so a `irm | iex` install without -All still
+        # brings them along. claude-mem is default OFF and only ships with
+        # explicit -All. No MCP server is registered here: lark-mcp needs
+        # credentials, and the standalone playwright MCP would take the
+        # `playwright` name at user scope and shadow the playwright plugin this
+        # same branch installs. Opt in with -All or the interactive menu.
         $doClaudeMd = $true
         $doSettings = $true
         $doRules = $true
@@ -2977,7 +2987,6 @@ function Main {
         $doPlugins = $true
         $pluginGroups = @("essential")
         $selectedPlugins = $PLUGINS_OPTIONAL
-        $doMcp = $true
     }
 
     # Auto-enable settings.json when StatusLine, Lessons, or Plugins need it for config
