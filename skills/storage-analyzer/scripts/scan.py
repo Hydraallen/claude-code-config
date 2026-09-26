@@ -372,8 +372,8 @@ LINUX_SUDO_TARGETS = [
     ("/var/cache/apt/archives", "sudo apt clean"),
     ("/var/cache/pacman/pkg", "sudo pacman -Sc"),
     ("/var/cache/dnf", "sudo dnf clean all"),
-    ("/var/lib/snapd/snaps", "sudo snap set system refresh.retain=2"),
-    ("/var/tmp", "sudo systemd-tmpfiles --clean"),
+    ("/var/lib/snapd/snaps", "snap list --all 后 sudo snap remove <名称> --revision=<编号>"),
+    ("/var/tmp", "systemd-tmpfiles --cat-config 确认有 /var/tmp 规则后 sudo systemd-tmpfiles --clean；无规则时按项查看后手动删除"),
     ("/nix/store", "nix-collect-garbage -d"),
 ]
 

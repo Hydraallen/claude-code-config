@@ -1,25 +1,11 @@
 # Project Lessons
 
 > Project-specific corrections for `awesome-claude-code-config`.
-> Format: date, context, mistake, rule. Cross-project rules belong in `~/.codex/lessons.md`.
+> Format: date, context, mistake, rule. Cross-project rules belong in the working agent's own global lessons file: `~/.claude/lessons.md` for Claude, `~/.codex/lessons.md` for Codex.
 
 ---
 
 <!-- Keep repository-specific corrections here so they travel with this project. -->
-
-<!--
-Example lessons (invisible to `cat`, visible in editors):
-
-## 2025-01-15
-**Context**: Editing Python files
-**Mistake**: Used `print()` for debugging in production code
-**Rule**: Always use `logging` module instead of `print()`. Remove all `print()` before committing.
-
-## 2025-02-03
-**Context**: Running shell commands on user's machine
-**Mistake**: Modified ~/.zshrc without being asked
-**Rule**: Never modify shell config files (~/.bashrc, ~/.profile, ~/.zshrc) unless explicitly requested. Prefer project-local or user-space alternatives.
--->
 
 ## 2026-07-15 - Codex branch skills must be installed under `~/.codex`
 **Context**: Fixing the split where updated Codex-branch skills appeared under `~/.agents/skills` while stale copies remained under `~/.codex/skills`.

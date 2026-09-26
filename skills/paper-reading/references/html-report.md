@@ -52,7 +52,7 @@ On narrow screens, collapse that same navigation above the article; keep one nav
 
 ### Basic information
 
-Use the original vertical list, not a table or definition-list grid. Keep technical extraction provenance outside the visible report. Link principal authors and the explicitly identified corresponding author (or a clearly labelled verified paper contact when none is identified) to their homepages. For affiliations, link the lab or research group that actually hosts the named authors—not the university root:
+Use a vertical list, not a table or definition-list grid. Keep technical extraction provenance outside the visible report. Link principal authors and the explicitly identified corresponding author (or a clearly labelled verified paper contact when none is identified) to their homepages. For affiliations, link the lab or research group that actually hosts the named authors—not the university root:
 
 ```html
 <ul class="paper-facts" data-paper-facts>

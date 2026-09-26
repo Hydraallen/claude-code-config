@@ -51,7 +51,8 @@
 | `/var/cache/apt/archives` | `sudo apt clean` | Debian/Ubuntu 标准可清项 |
 | `/var/cache/pacman/pkg` | `sudo pacman -Sc` | Arch |
 | `/var/cache/dnf` | `sudo dnf clean all` | Fedora/RHEL |
-| `/var/lib/snapd/snaps` | `sudo snap set system refresh.retain=2` + 删旧 revision | snap 默认留 3 个版本，每个都是完整镜像 |
+| `/var/lib/snapd/snaps` | `snap list --all` 找出注记列为 `disabled`（中文界面为「已禁用」）的旧 revision，逐个 `sudo snap remove <名称> --revision=<编号>` | 每个 revision 是一份完整的 squashfs 镜像。classic 系统默认保留 2 个 revision，Ubuntu Core 默认 3 个；`refresh.retain` 最小值为 2，只有在 Ubuntu Core 上设为 2 才会减少保留数 |
+| `/var/tmp` | `sudo systemd-tmpfiles --clean` | 跨重启保留的临时文件。该命令只清理 tmpfiles.d 为 `/var/tmp` 配置了过期时间的内容；先用 `systemd-tmpfiles --cat-config` 查看是否有这条规则，没有时该命令不释放 `/var/tmp` 的空间，改为按项查看后手动删除 |
 | `/nix/store` | `nix-collect-garbage -d` | NixOS |
 | 旧内核 | `sudo apt autoremove --purge` | `/boot` 是独立小分区时最容易先满 |
 
@@ -60,7 +61,7 @@
 - `docker system prune -a` / `docker builder prune` —— 悬空镜像和构建缓存
 - `conda clean -a`、`pip cache purge`、`uv cache clean`、`npm cache clean --force`
 - `journalctl --vacuum-time=7d` 常态化，或改 `/etc/systemd/journald.conf` 的 `SystemMaxUse`
-- snap 旧 revision 清理 + `refresh.retain=2`
+- snap 旧 revision 清理（`snap list --all` 中注记为 `disabled` 的 revision）
 - `sudo apt autoremove --purge` 清旧内核和孤儿包
 - 可视化工具：`ncdu`（终端首选）、`baobab`（GNOME 磁盘用量分析器）、`filelight`（KDE）
 - 大文件归档到外置盘 / NAS；`/home` 独立分区时考虑扩容而非反复清理

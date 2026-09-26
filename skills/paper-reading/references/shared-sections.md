@@ -4,7 +4,7 @@ Keep this sequence recognizable in every paper type. Use the same complete, conc
 
 ## 1. Basic information
 
-Follow the original compact list shape rather than a table or metadata grid:
+Use a compact vertical list rather than a table or metadata grid:
 
 - **Title**
 - **Authors** — link each principal author to an official or personal homepage.

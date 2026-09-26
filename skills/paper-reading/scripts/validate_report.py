@@ -646,7 +646,7 @@ def _validate_basic_information(source: str) -> list[str]:
         errors.append("basic information requires one vertical data-paper-facts list")
     if re.search(r"<(?:table|dl)\b", body, re.IGNORECASE):
         errors.append(
-            "basic information must use the original list template, not a table"
+            "basic information must use a vertical list, not a table"
         )
     fields = {match.group("field").lower() for match in BASIC_FIELD_RE.finditer(body)}
     for field_name in sorted(REQUIRED_BASIC_FIELDS - fields):

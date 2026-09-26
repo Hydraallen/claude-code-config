@@ -25,6 +25,8 @@
 
 Claude 的跨项目纠错写入本 home 的 lessons.md，项目纠错写入当前 Claude 项目的 memory/MEMORY.md。模板和真实记录均与 Codex 独立；已有 lessons 不替换为新的空白模板。
 
+Claude Code 对自动注入的内容有两项长度上限（已在 Claude Code 2.1.220 与 2.1.280 上核实）：SessionStart hook 的单次输出超过 10,000 字符时，模型只收到前 2,000 字符的预览和保存全文的文件路径；skill 列表超过 `skillListingBudgetFraction` 对应的字符预算（默认 0.01；1M 上下文窗口的模型，如 Fable 5.1、Opus 5.5，约为 30,000 字符）时，使用记录较少的 skill 只列名称、不列 description。模板 `lessons-hooks.json` 的两条命令在 lessons.md 小于 9,000 字节时输出全文，否则只输出文件路径、字节数和用 Read 工具读取的要求；9,000 字节低于 10,000 字符上限，修改阈值时两条命令一并更新。部署或更新 lessons、skills 与插件后，用 `wc -c` 核对 lessons.md 的字节数，并在新会话中检查 skill 列表是否出现只有名称的条目；超过上限时，向用户说明受影响的内容和可选处理方式（压缩 lessons、`skillOverrides`、`skillListingBudgetFraction` 或停用插件）。
+
 <a id="plugins"></a>
 ## 原生插件
 

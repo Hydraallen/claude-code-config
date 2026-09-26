@@ -46,7 +46,7 @@ After deploying the corrected AGENTS instructions, remove the old lessons overri
 uv run --with tomlkit==0.13.3 python scripts/managed_files.py --root "$target_dir" merge platforms/codex/templates/import-sync.toml config.toml --item lessons --replace /desktop/external-agent-import-sync-enabled --remove model_instructions_file
 ```
 
-Do not supply `--remove` if that value is absent or points elsewhere. Permissions, hooks, status lines and agents have separate template patches and catalogue IDs; merge only what was selected.
+Do not supply `--remove` if that value is absent or points elsewhere. Permissions, lessons hooks and status lines have separate template patches and catalogue IDs; merge only what was selected.
 
 ## Recovery and records
 

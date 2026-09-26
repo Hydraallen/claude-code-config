@@ -1,6 +1,6 @@
 # Working in this repository
 
-This repository provides agent-guided setup for Claude and Codex. Read `lessons.md` before changes.
+This repository provides agent-guided setup for Claude and Codex. Read `lessons.md` before changes. It is a dated correction log kept as history: a later entry replaces an earlier entry on the same subject, and entries about the retired `install.sh` / `install.ps1` installer or the `codex-dev` / `agent-config-for-agents` branches are provenance. Where an entry differs from the current INSTALL.md, MAINTAIN.md, catalog.md or edit-config, follow the current files.
 
 - For **installing this repository**, follow [INSTALL.md](INSTALL.md). Present the current target agent's complete options, uses and recommendations directly in the conversation; prefer available native multi-select questions under [the selection procedure](INSTALL.md#choose-options). Generate a selection document only when the user requests an export.
 - For **inspecting, adding, changing, removing, repairing or updating agent configuration**, invoke [edit-config](skills/edit-config/SKILL.md). It routes installed changes to INSTALL and repository changes to MAINTAIN. Queries remain read-only; a repository checkout alone does not authorize installation.

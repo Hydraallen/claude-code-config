@@ -291,7 +291,7 @@ def test_validator_rejects_canned_equation_explanation_labels(
         (
             '<ul class="paper-facts" data-paper-facts>',
             "<table data-paper-facts>",
-            "original list template",
+            "vertical list, not a table",
         ),
         (
             'data-paper-field="title"',

@@ -52,6 +52,9 @@
   macOS 为访达，Windows 为资源管理器，Linux 及其他平台为文件管理器。旧数据没有该字段时按
   `system.os` 整词匹配，`Darwin` 不再被判为 Windows。
 - Linux 根盘在 `system.disks` 中的条目改用与 `disk_name` 相同的名称，报告的「其他磁盘」不再重复列出 `/`。
+- snap 清理建议（`references/linux.md` 与 `scan.py` 的 cleanup_hint）改为删除 `snap list --all` 中注记为 `disabled` 的旧 revision。原建议 `sudo snap set system refresh.retain=2` 在 classic 系统上不减少保留数（classic 默认保留 2 个 revision，Ubuntu Core 默认 3 个）。
+- `references/linux.md` 新增 `/var/tmp` 行，`scan.py` 的对应提示同步：`sudo systemd-tmpfiles --clean` 只在 tmpfiles.d 为 `/var/tmp` 配置了过期规则时释放空间，没有规则时按项查看后手动删除。
+- `SKILL.md`：只读规则限定为被分析的数据，skill 自身的输出文件与本地服务不在此限；安全模型与 `app_paths` 说明按 `server.py` 更正（`open` 另允许红灯 `app_paths`，以及 `/Applications`、`/opt`、`/usr/local`、`/usr/share`、`/var/lib/flatpak`、`/snap` 下的路径）；「删除命令只展示，不执行」一条删去对全局红线的引用，改为写明执行前需要用户对具体路径和命令明确同意；橙灯项的口吻要求改为只描述对象本身，不写分析过程中的发现经过；description 的近义触发短语改为按意图分类；平台状态改为引用本文件「验证状态」。
 
 ## 验证状态
 

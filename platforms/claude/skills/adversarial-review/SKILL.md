@@ -4,7 +4,6 @@ description: >-
   Adversarial code review using the opposite model. Spawns 1–3 reviewers on the
   opposing model (Claude spawns Codex, Codex spawns Claude) to challenge work from
   distinct critical lenses. Triggers: "adversarial review".
-schedule: "After cook sessions that produce large diffs (200+ lines), implement plan phases, or complete a planning session"
 ---
 
 # Adversarial Review
@@ -56,11 +55,11 @@ Determine which model you are, then spawn reviewers on the opposite:
 **If you are Claude** → spawn Codex reviewers via `codex exec`:
 
 ```sh
-codex exec --skip-git-repo-check -o "$REVIEW_DIR/skeptic.md" "prompt" 2>/dev/null
+codex exec --skip-git-repo-check -s read-only -o "$REVIEW_DIR/skeptic.md" "prompt" < /dev/null 2>/dev/null
 ```
 
-Use `--profile edit` only if the reviewer needs to run tests. Default to read-only.
-Run with `run_in_background: true`, monitor via `TaskOutput` with `block: true, timeout: 600000`.
+If a reviewer must run tests, give that reviewer `-s workspace-write` in place of `-s read-only`. Keep the sandbox flag explicit: it overrides `sandbox_mode` in the user's Codex config, which may grant full access.
+Run each reviewer with `run_in_background: true`; Claude Code reports when each background command exits. Start Step 4 after every reviewer has exited.
 
 **If you are Codex** → spawn Claude reviewers via `claude` CLI:
 
@@ -78,12 +77,14 @@ Each reviewer gets a single prompt containing:
 
 1. The stated intent (from Step 2)
 2. Their assigned lens (full text from references/reviewer-lenses.md)
-3. The principles relevant to their lens (file contents, not summaries)
+3. When `brain/principles.md` exists, the principles relevant to their lens (file contents, not summaries)
 4. The code or diff to review
 5. Instructions: "You are an adversarial reviewer. Your job is to find real problems, not
    validate the work. Be specific — cite files, lines, and concrete failure scenarios.
    Rate each finding: high (blocks ship), medium (should fix), low (worth noting).
-   Write findings as a numbered markdown list to your output file."
+   Your final message is captured as the review output, so make it the numbered
+   markdown list of findings itself: no plan, acknowledgement, or file path in its
+   place. Do not edit the code under review or write the findings to a file."
 
 Spawn all reviewers in parallel.
 
@@ -96,8 +97,9 @@ echo "reviewer_cli=codex|claude"
 ls "$REVIEW_DIR"/*.md
 ```
 
-If any output file is missing or empty, note the failure in the verdict — do not silently skip
-a reviewer.
+If any output file is missing or empty, or holds only a plan or an acknowledgement (neither numbered
+findings nor a statement that the reviewer found no problems), note that reviewer as failed in the
+verdict — do not silently skip a reviewer.
 
 Read each reviewer's output file from `$REVIEW_DIR/`. Deduplicate overlapping findings.
 Produce a single verdict:

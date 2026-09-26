@@ -171,7 +171,6 @@ These are values from the current templates, applied only when the corresponding
 | Claude | `model` / `effortLevel` | `opus` / `xhigh` | Model and reasoning effort |
 | Claude | `tui` | `fullscreen` | Fullscreen terminal interface |
 | Claude | `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | `1` | Enable the agent-teams experiment |
-| Claude | `env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` | `1` | Request fixed thinking where the model supports it |
 | Claude | `permissions.defaultMode` | `auto` | Separate permissions template also contains broad tool allowances |
 | Codex | `model` / `model_reasoning_effort` | `gpt-5.6-sol` / `max` | Model and reasoning effort |
 | Codex | `web_search` | `live` | Live web search |

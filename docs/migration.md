@@ -67,7 +67,7 @@ root lessons.md 保留本仓库纠错历史，安装使用各自 platforms/claud
 
 本地目录不是安装能力的全集。[catalog.md](../catalog.md) 和 [sources.md](../platforms/sources.md) 还覆盖：
 
-- main settings 中的 20 个原生插件 selector（15 个启用、5 个关闭）加上安装菜单的 Matt 插件，共 21 个可选插件，以及 DeepXiv、ResearchStudio Idea 和 lieflat-charts 源码入口。
+- main settings 中的 20 个原生插件 selector（15 个启用、5 个关闭）加上安装菜单的 Matt 插件，共 21 个可选插件，以及 DeepXiv、ResearchStudio Idea 和 lieflat-charts 源码入口。其中 claude-mem 已退役，见下方。
 - Codex 的 Matt v1.1.0 工作流目前包含上游 handoff 共二十项，另有独立 code-review；Superpowers 十四项；Karpathy。原 PUA 三项的退役见下方。
 - Anthropic 文档四项、Codex examples 精选三项、独立 frontend-design；frontend-slides、PPT Master。
 - AI Research 原六组精选（24 项）已全部纳入新的两端统一 31 项整包；另外保留 DeepXiv 三项、ResearchStudio Idea 三项与 Reel 五项，以及既有 MCP 配置能力。
@@ -169,4 +169,4 @@ Codex 旧六组共 24 项，仍属于待迁移的部分范围。新整包增加 
 
 macOS、Linux、Windows 与 WSL 共用相同的 agent 流程，分别检测本地 CLI、shell、配置目录和运行前提。Windows 与 WSL 不混用 home；Codex App、CLI、IDE 的内置能力也应分别核对。
 
-本开发环境是 macOS。Windows/WSL 的实际原生命令与 hooks 执行仍需对应环境验收；凭据类 MCP 需要用户授权及原生初始化。纯源码安装成功不代表可选业务依赖已经就绪。相关既有 skill 测试保留；只服务已退役终端安装器的断言随旧代码移除，新的开发验收脚本留在仓库之外。
+2026-09-12 编写本节时的开发环境为 macOS。Windows/WSL 的实际原生命令与 hooks 执行仍需对应环境验收；凭据类 MCP 需要用户授权及原生初始化。纯源码安装成功不代表可选业务依赖已经就绪。相关既有 skill 测试保留；只服务已退役终端安装器的断言随旧代码移除，新的开发验收脚本留在仓库之外。

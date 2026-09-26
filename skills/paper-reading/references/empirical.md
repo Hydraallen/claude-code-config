@@ -23,7 +23,7 @@ Use the shared backbone and insert these modules after Key Insight.
 
 ### Module anatomy — required
 
-Create one module card for every load-bearing component. Preserve the original technical template by filling every field:
+Create one module card for every load-bearing component and fill every field:
 
 1. **Purpose:** the module's responsibility and why it exists.
 2. **Exact inputs:** assign every paper/code symbol explicitly; render symbols, shapes, dimensions, and ranges with LaTeX-derived inline MathML; use an unordered list when there is more than one input.

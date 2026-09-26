@@ -7,8 +7,8 @@ Paths below use the default Codex home. Resolve them against the actual `CODEX_H
 ### Architecture
 
 - `~/.codex/AGENTS.md`: global instructions, auto-loaded
-- `~/.codex/lessons.md`: cross-project/global correction source-of-truth (append-only)
-- `<project-root>/lessons.md`: project-specific correction source-of-truth (append-only)
+- `~/.codex/lessons.md`: cross-project/global correction source-of-truth. Append new corrections; when a correction restates an existing rule, extend that entry instead of adding a near-duplicate. Merge or delete entries only when the user asks.
+- `<project-root>/lessons.md`: project-specific correction source-of-truth, maintained the same way
 
 ### Session Startup Flow
 
@@ -24,8 +24,8 @@ Before the first substantive response in a session, ensure lessons context is lo
 
 **After a correction**:
 1. Classify the correction's scope before continuing: a correction tied to the current repository, its code, branches, tooling, or workflow is project-specific by default; only a rule that genuinely applies across projects is global
-2. Immediately append a project-specific lesson to `<project-root>/lessons.md`; create the correction log there when absent while preserving any existing content
-3. Append to `~/.codex/lessons.md` only when the correction is genuinely global; when uncertain, prefer the project log
+2. Immediately record a project-specific lesson in `<project-root>/lessons.md`: append a new entry, or extend the existing entry when the correction restates it; create the correction log there when absent while preserving any existing content
+3. Record the lesson in `~/.codex/lessons.md` the same way only when the correction is genuinely global; when uncertain, prefer the project log
 4. Record date, context, mistake, and a concrete actionable rule
 5. Continue task execution only after recording
 
@@ -68,7 +68,7 @@ When making version-level changes to a project (new features, major refactors, a
 
 ## Rule Set
 
-- Use the project's documented standards and language-specific skills that are actually installed. This repository does not install additional language skills implicitly.
+- Use the project's documented standards and the language-specific skills that are installed.
 
 ## Code Review
 

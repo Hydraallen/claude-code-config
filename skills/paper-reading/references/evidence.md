@@ -13,7 +13,7 @@
 Assign stable coordinates in reading order:
 
 - `C1`, `C2`, ... — a material claim or inference.
-- `E1`, `E2`, ... — paper, code, external-primary-source, or run evidence.
+- `E1`, `E2`, ... — paper, code, or external-primary-source evidence.
 - `L1`, `L2`, ... — a limitation, failed assumption, or evidence gap.
 
 Do not create coordinates for decorative metadata or every sentence. Create them for every material result and criticism.

@@ -171,7 +171,6 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 | Claude | `model` / `effortLevel` | `opus` / `xhigh` | 模型与推理强度 |
 | Claude | `tui` | `fullscreen` | 全屏终端界面 |
 | Claude | `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | `1` | 开启 agent teams 实验功能 |
-| Claude | `env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` | `1` | 在支持的模型上请求固定思考预算 |
 | Claude | `permissions.defaultMode` | `auto` | 独立权限模板还包含宽泛的工具放行规则 |
 | Codex | `model` / `model_reasoning_effort` | `gpt-5.6-sol` / `max` | 模型与推理强度 |
 | Codex | `web_search` | `live` | 实时网络搜索 |

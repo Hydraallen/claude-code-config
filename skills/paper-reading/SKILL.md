@@ -5,17 +5,17 @@ description: Read, summarize, and critically analyze an academic paper from a PD
 
 # Paper reading
 
-Treat a paper report as an argument with inspectable evidence, not a longer abstract. Preserve the familiar paper-type structure and the original technical template while cutting any sentence that adds no mechanism, evidence, comparison, limitation, or implication.
+Treat a paper report as an argument with inspectable evidence, not a longer abstract. Use the report structure that the references define for the paper's type, and cut any sentence that adds no mechanism, evidence, comparison, limitation, or implication.
 
 Resolve `<skill-dir>` as the directory containing this file before using bundled scripts or assets.
 
 In examples, `PYTHON_EXE` means the actual interpreter of a compatible active or isolated environment—for example `python3`, `python`, `py -3`, or an absolute venv executable. Resolve it for the current platform; do not run the token literally or assume one command name exists.
 
-## 1. Choose only the output format
+## 1. Choose the output format
 
 Honor an explicit or clearly implied format. Otherwise ask once whether the user wants **Markdown or HTML**, then wait. Explain briefly: Markdown is light and editable; HTML adds the designed reading surface, one section outline, static mathematics, and click-to-enlarge visuals.
 
-Do not ask for a reading level. Use one standard throughout: read the complete argument, retain all load-bearing technical detail, and write it concisely. Do not run reproduction experiments as part of this workflow.
+Every report uses one depth, including requests worded as a quick overview such as “快速看懂”: read the complete argument, retain all load-bearing technical detail, and write it concisely. Do not run reproduction experiments as part of this workflow.
 
 **Gate:** record `format`; do not silently choose it when genuinely ambiguous.
 
@@ -53,7 +53,7 @@ Always read [shared-sections.md](references/shared-sections.md). A cross-type pa
 
 ## 4. Read the complete argument
 
-Read the full paper and appendices that qualify the method, evidence, assumptions, negative results, or limitations. Build the report while reading rather than postponing synthesis.
+Read the full paper and appendices that qualify the method, evidence, assumptions, negative results, or limitations.
 
 Resolve:
 
@@ -63,7 +63,7 @@ Resolve:
 - main results, baselines, ablations, failure cases, and conditions under which the result changes;
 - what the authors claim, what the evidence supports, and what remains inference.
 
-For empirical and systems work, preserve the original module-level engineering anatomy. For every load-bearing module state its purpose, exact inputs, exact outputs, architecture and key parameters, training data and supervision, training method/objective/optimization, inference-time role, interfaces to adjacent modules, and code evidence. Put one full-width paper-grounded SVG directly below the module title and above its fields, with a horizontal inputs → core transformation → outputs flow. Give every distinct input and output its own non-overlapping node. Give symbolic inputs and outputs explicit LaTeX notation rendered as static inline MathML, including shapes/ranges when known. Use unordered lists for parallel items instead of packing enumerations into prose. Use `not applicable`, `frozen`, or `not reported` explicitly instead of omitting a field.
+For empirical and systems work, write a module-level engineering anatomy. For every load-bearing module state its purpose, exact inputs, exact outputs, architecture and key parameters, training data and supervision, training method/objective/optimization, inference-time role, interfaces to adjacent modules, and code evidence. Put one full-width paper-grounded SVG directly below the module title and above its fields, with a horizontal inputs → core transformation → outputs flow. Give every distinct input and output its own non-overlapping node. Give symbolic inputs and outputs explicit LaTeX notation rendered as static inline MathML, including shapes/ranges when known. Use unordered lists for parallel items instead of packing enumerations into prose. Use `not applicable`, `frozen`, or `not reported` explicitly instead of omitting a field.
 
 **Gate:** a technically literate reader can reconstruct the system boundary and data flow without guessing, and no important field vanished merely to make the report shorter.
 
@@ -85,9 +85,9 @@ Separate what the authors claim, what code confirms, what the report infers, and
 
 **Gate:** every material statement resolves to an exact paper, code, or primary-source anchor, and inference is visibly labelled.
 
-## 7. Audit and render visuals
+## 7. Choose and render visuals
 
-For HTML, read both [visuals.md](references/visuals.md) and [html-report.md](references/html-report.md). Run the diagram-opportunity audit before drawing anything.
+For HTML, read both [visuals.md](references/visuals.md) and [html-report.md](references/html-report.md).
 
 Outside module anatomy there is no SVG quota. Use prose, an aligned list, a table, an original figure, HTML/CSS, or SVG according to explanatory gain. Module anatomy is the explicit exception: every load-bearing module gets one quiet, full-width horizontal interface SVG above its fields so the reader can see the local data flow before reading detail. Never compress it into a narrow side rail or merge distinct interface values merely to save space. Keep those diagrams simple and specific, then render-inspect every SVG. Every image and SVG in HTML must open in the lightbox.
 
@@ -118,7 +118,7 @@ Keep HTML CSS and JavaScript inline; keep high-resolution paper assets in `asset
 Before delivery:
 
 1. Remove scaffold markers and every sentence that adds no mechanism, evidence, comparison, limitation, or implication.
-2. Check local links, coordinates, captions, equations, code anchors, and asset paths. Keep the visible basic-information section to the original concise list: title, linked authors/contact/labs or research groups, publication, link, paper type, and one-line summary. Keep hashes, page conventions, extraction directories, and asset counts internal.
+2. Check local links, coordinates, captions, equations, code anchors, and asset paths. Keep the visible basic-information section to a concise vertical list: title, linked authors/contact/labs or research groups, publication, link, paper type, and one-line summary. Keep hashes, page conventions, extraction directories, and asset counts internal.
 3. For empirical/systems reports, verify that every load-bearing module has all nine anatomy fields, one full-width horizontal input→transform→output SVG above them, a separate node for every distinct input/output, unordered lists for genuine enumerations, and LaTeX-derived inline MathML for symbolic inputs/outputs; the overview still explains module-to-module flow.
 4. For HTML, render at desktop and narrow-mobile widths; verify the single outline navigation, title hierarchy, MathML, symbol-complete explanations, atomic inline math, every visual, wheel/pinch zoom, keyboard close, print, and reduced-motion behavior.
 5. Run the validator until it passes, then state source boundaries and code-inspection status without overstating certainty.

@@ -1,15 +1,33 @@
 # 变更记录
 
-## [Unreleased]
+## [4.1.0] - 2026-09-27
+
+### Features
+- Claude lessons hooks：Claude Code（已在 2.1.220 与 2.1.280 上核实）对超过 10,000 字符的 SessionStart hook 输出只把前 2,000 字符的预览交给模型。`platforms/claude/templates/lessons-hooks.json` 中的启动与 compaction 两条命令现在只在 `lessons.md` 小于 9,000 字节时输出全文；否则输出文件路径和字节数，并要求模型用 Read 工具读取（会话开始时读全文，compaction 后读与当前任务相关的条目）。hook 不再要求模型确认已加载 lessons。
+- Codex AGENTS 模板：全局与项目 lessons 默认追加；新纠正重复已有规则时扩展原条目，合并或删除条目只在用户要求时进行。Self-correction 步骤按同一规则执行。Rule Set 一行删除「This repository does not install additional language skills implicitly」：该模板部署为全局 AGENTS.md 后，「this repository」会被读作当前打开的项目。
+- `platforms/claude/README.md` 记录 hook 输出与 skill 列表的长度上限，以及部署 lessons、skills 或插件后的核对方法。
 
 ### Bug Fixes
 - `storage-analyzer`：Linux 上 HTML 报告的按钮、说明、确认框和状态提示都使用 macOS 的文件管理器名「访达」；`system.os` 为 `Darwin` 时还会得到 Windows 的「资源管理器」。报告模板现在按 `system.platform`（`scan.py` 写入的 `sys.platform`）选择名称：macOS 为访达，Windows 为资源管理器，Linux 及其他平台为文件管理器。analysis JSON 缺少 `platform` 时按 `system.os` 整词匹配。
 - `storage-analyzer`：Linux 上根文件系统在「其他磁盘」中重复出现。原因是 `disk_name` 使用设备名（`/dev/nvme0n1p2 (/)`），而 `system.disks` 中对应条目使用挂载点（`/`）。根盘条目现在与 `disk_name` 同名；macOS 与 Windows 原本一致。
+- Claude settings 模板：删除 `env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING`。Claude Code 只在 Opus 4.6 与 Sonnet 4.6 上读取该变量；模板的 `opus` 别名解析为 Claude Opus 5.5，其 thinking 始终开启，深度由 `effortLevel` 设置。两份 README 的默认值表删除对应行。
+- Claude 全局指令模板：删除 `Extended thinking: ultrathink`（Claude Code 只在用户消息中识别该关键词）、三步以上任务一律进入 Plan Mode 的规则、「Highest Priority」标题标注和「When in doubt, treat it as a correction」；lessons 一行改为说明 hook 的实际行为。
+- `adversarial-review`（Claude）：Codex reviewer 显式使用只读 sandbox（只有需要运行测试的 reviewer 使用 `-s workspace-write`），stdin 重定向到 `/dev/null`；reviewer 以最终消息返回审查发现，由 `codex exec -o` 保存，不修改被审代码，也不把审查发现写入文件；输出只有计划或确认时记为该 reviewer 失败。删除 `TaskOutput` 轮询说明（Claude Code 2.1.280 已不提供该工具）和 Claude Code 不识别的 `schedule` frontmatter 字段；`brain/principles.md` 改为可选。`UPSTREAM.md` 已记录这些修改。
+- `storage-analyzer`：更正 `references/linux.md` 与 `scan.py` 提示中的 snap 清理建议（`refresh.retain=2` 在 classic 系统上不减少保留数，改为删除 disabled revision），并补充有条件的 `/var/tmp` 说明；只读规则限定为被分析的数据，skill 自身的输出与本地服务不在此限；`server.py` 的路径白名单与 `app_paths` 规则按实际实现描述（装在 `Program Files` 的 Windows 应用不给 `app_paths`）；平台状态改为引用 `UPSTREAM.md` 的验证状态；触发描述按意图分类。`UPSTREAM.md` 已记录这些修改。
+- `paper-reading`：删除 SKILL.md、references 与校验脚本报错信息中与旧版本对比的措辞（如「original technical template」「original list template」）、强制填写的作图审计表（第 7 节改名为「Choose and render visuals」），以及证据坐标中的运行类证据（该流程不运行实验）；写明快速概览类请求使用同一深度。
+- 文档：`AGENTS.md` 说明项目 `lessons.md` 的读取方式（同一主题以较晚条目为准，已退役安装器与分支的条目用于追溯，与当前文件不一致时以当前文件为准）；项目 `lessons.md` 文件头写明两端各自的全局 lessons 位置，并删除模板示例块；catalog.md、docs/agent-setup-spec.md、docs/migration.md、scripts/README.md 与 TypeScript hooks 规则的措辞更正（Stop hook 在每次回复结束时运行）。
+
+### Design Rationale
+- 除 2026-09-17 的两项 storage-analyzer 修复（文件管理器名称与根盘）外，模板、skill 与文档的修改来自 Claude Code 的 `/claude-api prompt-audit`，目标模型为 Claude Fable 5.1 与 Claude Opus 5.5。每项修改都对应一条发现；涉及 Claude Code 行为的发现已对照 Claude Code 2.1.280 二进制和 claude-api 迁移文档核实。环境事实、用户偏好、精确命令和项目历史保持不变。
+- 上限由 Claude Code 设定，所以 hook 按文件大小选择输出方式；用户可以保留完整的 lessons 文件，内容不会被截成 2,000 字符的预览。
+- Claude 模板中的删除只针对 Claude 模型核实。Codex AGENTS 模板保留「(Highest Priority)」标题与计划要求，`adversarial-review` 的 Codex 历史副本不变。
+- 项目 `lessons.md` 按 MAINTAIN.md 保留原始条目；条目的优先关系由 AGENTS.md 说明，不改写条目本身。
 
 ### Notes & Caveats
-- 磁盘修复改的是扫描输出，本次修改之前生成的 analysis JSON 仍会重复列出 `/`，重新扫描即可。
-- 在 Ubuntu 24.04.4 上验证了静态报告与服务模式渲染。macOS 与 Windows 只用代表性的 `system` 数据块做了渲染检查，未在真机上运行。
-- 这两项修复不在 khazix-skills#50 中，已记录在 `skills/storage-analyzer/UPSTREAM.md`。
+- 已安装的 CLAUDE.md、AGENTS.md 在 edit-config 合并新模板之前保持原文，ultrathink、Plan Mode 两行在此之前仍然存在。`scripts/managed_files.py merge` 只新增或更新键、追加 hook 条目，因此合并新的 settings 与 lessons-hooks 模板后，已安装的 `env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` 仍然保留，旧的 SessionStart `startup`、`compact` 条目与新条目同时存在；需经用户确认后从 settings.json 中另行删除。
+- `lessons.md` 达到 9,000 字节时，其内容只能通过 hook 输出要求的 Read 调用进入上下文，每次会话开始都读取全文并占用相应上下文；文件小于该值时恢复直接注入。
+- storage-analyzer 的磁盘修复修改了扫描输出，修改前生成的 analysis JSON 仍会重复列出 `/`，重新扫描即可。文件管理器名称与根盘两项修复在 Ubuntu 24.04.4 上验证了静态报告与服务模式渲染；macOS 与 Windows 只用代表性的 `system` 数据块做了渲染检查。本版本的 storage-analyzer 修改都不在 khazix-skills#50 中，已记录在 `skills/storage-analyzer/UPSTREAM.md`。
+- 提示词修改没有在实际任务上做行为对比。
 
 ## [4.0.0] - 2026-09-17
 

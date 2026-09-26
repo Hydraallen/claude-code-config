@@ -10,4 +10,4 @@ This rule describes optional hooks. Configure them only when requested in the ac
 
 ## Stop Hooks
 
-- **console.log audit**: Check all modified files for `console.log` before session ends
+- **console.log audit**: Check all modified files for `console.log` at the end of each response

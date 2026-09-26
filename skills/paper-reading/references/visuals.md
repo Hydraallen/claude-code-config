@@ -1,13 +1,8 @@
 # Visual reasoning policy
 
-## Diagram-opportunity audit
+## Comprehension bottlenecks
 
-Before composing HTML, list the paper's genuine comprehension bottlenecks. For each, record:
-
-| Bottleneck | Why prose is hard | Candidate medium | Chosen treatment | Source anchor | Render checked |
-|---|---|---|---|---|---|
-
-Audit at least the core mechanism, experimental comparison, and decisive limitation. “No visual needed” is a valid treatment when prose or a compact table is clearer.
+Give each genuine comprehension bottleneck the treatment with the most explanatory gain, anchored to its source and render-checked. Cover at least the core mechanism, the experimental comparison, and the decisive limitation. “No visual needed” is a valid treatment when prose or a compact table is clearer.
 
 There is no general minimum or maximum SVG count. Empirical/systems module anatomy is the one explicit exception: every load-bearing module needs one full-width horizontal local-interface SVG above its detail fields. These diagrams are not decoration; they let the reader scan exact inputs → transformation → outputs before reading implementation detail. Give distinct inputs and outputs separate nodes, and never force the diagram into a narrow side rail. All other SVG decisions remain explanatory rather than quota-driven.
 

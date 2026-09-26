@@ -2,9 +2,9 @@
 
 2026-09-12。设计决策已通过 grilling 问答确认：用户与已有的 Claude/Codex 对话完成选型和安装。此前的 Go 二进制、终端菜单和通用安装核心提案已撤回。本文件是当前实现的验收依据；Codex 配置由本仓库显式管理。
 
-本仓库是 Claude/Codex 统一的主要开发线。安装、更新与维护只依赖当前仓库内容及所选外部上游。2026-09-17 作者已授权将当前开发成果提升至 main，仓库改名 awesome-agent-config，暂存其他分支并发布 changelog、tag 与 release。
+本仓库是 Claude/Codex 统一的主要开发线，main 为开发与发布主线。安装、更新与维护只依赖当前仓库内容及所选外部上游。
 
-2026-09-13 追加要求：移除 Lark / Feishu MCP、Claude-Mem、PUA 三语言包；删除 Claude 原八个 Common rules，将完整八条写作要求及全部示例译成英文，作为独立 rules/writing-style.md。语言规则仍可单独选择，并清理失效依赖。两端配置查询与增删改统一调用共享 edit-config，明确关联 agent-config-for-agents；查询只读。全面核对目录、模板、来源、安装及更新说明的一致性。
+2026-09-13 追加要求：移除 Lark / Feishu MCP、Claude-Mem、PUA 三语言包；删除 Claude 原八个 Common rules，将完整八条写作要求及全部示例译成英文，作为独立 rules/writing-style.md。语言规则仍可单独选择，并清理失效依赖。两端配置查询与增删改统一调用共享 edit-config，并在 skill 中写明更新来源分支（当前为 main，见 2026-09-17 正式发布条目）；查询只读。全面核对目录、模板、来源、安装及更新说明的一致性。
 
 2026-09-17 交互纠正：安装时直接在当前对话展示目标 agent 的完整支持项、用途、作者推荐和安装状态，并优先使用实际可用的多选问答。单选/文本工具接收多个编号；没有问答工具时直接在聊天中提问。不以生成 Markdown、报告或文件链接替代选型；仅用户要求导出时生成文档。推荐名单及安装范围不因交互方式变化而改变。
 
@@ -97,7 +97,7 @@ Codex 的 Matt 包继续固定现有 commit，包含其上游 handoff，原生�
 
 ## 实施验收
 
-- 将已审查的统一开发成果快进到 main，并以其提交发布 v4.0.0 tag 和正式 GitHub release。仓库改名 awesome-agent-config；旧 main 的 d65cbda0058be09e4771f4603ccf45b3a589583b 保存到 archive/legacy-claude，其他分支改为 archive/legacy-<原名称>（原名称中的 / 改为 -），保留历史 tags/releases，不改写已有历史。
+- main 是统一开发与发布主线；v4.0.0 tag 与正式 GitHub release 基于 main 的提交发布，仓库名为 awesome-agent-config。旧 main 的 d65cbda0058be09e4771f4603ccf45b3a589583b 保存在 archive/legacy-claude，其他分支为 archive/legacy-<原名称>（原名称中的 / 改为 -）；保留历史 tags/releases，不改写已有历史。
 - 当前仓库独立保存自有和保留的定制 skill payload；未退役的第三方原版与外部 skill 组均有上游安装说明，不从历史 Claude/Codex 分支安装或更新。
 - handoff 仅在 Matt 包中；AI Research 六组归为一个 31 项安装选择，活动目录共 39 个 ID；退役集成（含两端 GitHub MCP）、Common rules、旧更新入口、Codex 角色预设及 24 项范围在迁移说明中有明确处理。
 - Codex 不再提供三个自定义角色的模板或注册 patch；基础配置保留原生多 agent 功能，不安装替代角色或改动已有用户的 agents 目录。

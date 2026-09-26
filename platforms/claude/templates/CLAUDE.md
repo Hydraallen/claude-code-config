@@ -2,12 +2,12 @@
 
 Paths below use the default Claude home. Resolve them against the actual `CLAUDE_CONFIG_DIR` when set.
 
-## Memory System (Highest Priority)
+## Memory System
 
 ### Architecture
 
 - `~/.claude/CLAUDE.md`: Global instructions, auto-loaded
-- `~/.claude/lessons.md`: **Global** corrections & lessons (cross-project), read at startup; also injected when the optional SessionStart hook is enabled
+- `~/.claude/lessons.md`: **Global** corrections & lessons (cross-project), read at startup; the optional SessionStart hook prints it, or asks for a Read when the file is 9,000 bytes or larger
 - Project `MEMORY.md`: `~/.claude/projects/<path>/memory/MEMORY.md`, **Project-level** preferences & context (current project only), auto-loaded
 
 ### Storage Decision
@@ -18,7 +18,7 @@ When the user asks to "remember X", determine the scope first:
 
 ### Self-Correction
 
-**Identifying corrections** (low threshold): user points out errors, says "remember/don't again...", shows frustration, same operation fails 2+ times. When in doubt, treat it as a correction.
+**Identifying corrections** (low threshold): user points out errors, says "remember/don't again...", shows frustration, same operation fails 2+ times.
 
 **Post-correction flow**:
 1. **Determine scope** (see Storage Decision above), write to the appropriate file
@@ -29,7 +29,6 @@ When the user asks to "remember X", determine the scope first:
 
 ## Core Settings
 
-- Extended thinking: ultrathink
 - Language: respond in the user's preferred language; code comments may use English; keep technical terms in English
 - Shell: Zsh (`~/.zshrc`) on macOS/Linux; Bash (Git Bash) on Windows
 
@@ -55,7 +54,6 @@ Invoke `edit-config` when the user wants to inspect, add, change, remove, repair
 ## Workflow
 
 - Web search: before searching, determine the current real date — prefer system command (`date '+%Y-%m-%d'` / `Get-Date -Format 'yyyy-MM-dd'`), fall back to web time API if system clock may be inaccurate. Include the year (and month if relevant) in search queries. Never rely solely on model knowledge or system prompt for the date.
-- Non-trivial tasks (3+ steps): enter Plan Mode first; re-plan on deviation
 - Subagent strategy: one task per subagent, keep main context clean
 - Verify before marking done (run tests, check logs)
 - Fix bugs directly — don't ask for repeated confirmation
