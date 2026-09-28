@@ -1,5 +1,7 @@
 # 更新日志
 
+> 上游（Mizoreww）的归档历史。其中 2.9.0 – 3.2.0 是上游版本，与根目录 [CHANGELOG.zh-CN.md](../../CHANGELOG.zh-CN.md) 中本 fork 同一区间的版本号重名；号码相同，内容不同。
+
 ## [3.2.0] - 2026-09-03
 
 ### Features

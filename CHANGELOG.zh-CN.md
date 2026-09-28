@@ -2,6 +2,40 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.2.0] - 2026-09-28
+
+### Features
+- **合并上游 awesome-agent-config 4.1.0**（`33cb7ed`，见下方区块）：通过 `INSTALL.md`、`catalog.md`、`platforms/claude` / `platforms/codex` 与共享 `edit-config` skill 的 agent 引导安装，写作规则，lessons hooks 的 9,000 字节保护，以及上游的 `paper-reading`、`storage-analyzer`、`adversarial-review` 与 `scripts/check-readme-sync.sh`。
+- **两条安装路径。** `install.sh` / `install.ps1` 仍是完整的 Claude Code 脚本安装器，与 agent 引导安装并存，二者读取 `platforms/claude/templates/` 下的同一批模板。安装器用 jq（缺失时用 python3）把 `settings.json`、`permissions.json` 与 fork 的 `plugins.json` 合成 `settings.json`，选中对应项时再加入 `statusline.json` 与 `lessons-hooks.json`。lessons 来自 `templates/lessons.md`；状态栏来自 `templates/hooks/statusline.sh`，支持 `CLAUDE_CONFIG_DIR`。
+- **退役并主动清理：** GitHub MCP / `github@claude-plugins-official` 插件、`claude-mem@thedotmack`、`pua@pua-skills`。安装器每次运行（包括 `--only`）都会卸载它们，移除 `thedotmack` 与 `pua-skills` marketplace，并在旧的 user scope `github` MCP 指向 `api.githubcopilot.com/mcp/` 时移除它。菜单 ID `plug-github`、`plug-claude-mem`、`plug-pua` 已删除。
+- **保留 Lark / 飞书 MCP**（上游已退役）：菜单 `mcp-lark`、`mcp/`、`docs/LARK-MCP*` 不变；catalog 新增 `lark` 行及 agent 路径配方，用户提供凭据前记为待配置，之后用 `scripts/check_mcp.py` 验证。
+- **两个安装器新增默认关闭的条目：** `skill-neat-freak`、`lieflat-charts`、`skill-storage-analyzer`（新的 Storage 分组）、`researchstudio-idea`，以及 `ai-research`——它把六个 AI Research 插件 ID（`plug-tokenization`、`plug-fine-tuning`、`plug-post-training`、`plug-inference-serving`、`plug-distributed-training`、`plug-optimization`）合并为一项。install.sh 现有 11 个分组共 47 项（29 项默认开启）；install.ps1 为 10 个分组共 40 项。PowerShell 的 StatusLine ID 改为 `statusline`，旧 ID `hooks` 仍可用。
+- **新参数：** `--only <ids>` / `-Only` 只安装列出的菜单项，且为增量安装：不对账插件、不重建 `enabledPlugins`、不写版本戳。`--list-ids` / `-ListIds` 列出菜单 ID。`--prune-foreign-plugins` / `-PruneForeignPlugins` 让对账也处理安装器不管理的插件。`cleanup-claude-data.sh` 的 `--include-mem` 仍被接受，但不再起作用。
+- **插件对账范围默认改为 `catalogue`：** 重跑时只卸载安装器自己目录中未勾选的插件（外加退役条目），不再卸载用户手动安装的第三方插件。
+- **humanizer** 改为安装上游插件 `humanizer@humanizer`（blader/humanizer，需要 Claude Code 2.1.142 或更高），调用名 `/humanizer:humanizer`。**humanizer-zh** 固定在 op7418/Humanizer-zh@`91f3d39`。旧的内置副本只在未修改时删除。
+- **写作规则取代 Common rules**（菜单 `rules-writing-style`，默认开启）。已有的 `~/.claude/rules/common/` 只给出警告，不会删除。
+- **共享选择记录：** 安装器写入 `~/.claude/agent-config/selection.json`（仓库 URL、revision、更新策略，以及标记为 `"source": "script"` 的逐项记录），便于 `edit-config` 接管；安装器装的固定版本上游 skill 记录在 `agent-config/files.json`。`update-config` 与 `edit-config` 改为指向 Hydraallen/claude-code-config。
+- **目录同步：** `catalog.md` 新增 fork 条目（feature-dev、ralph-loop、commit-commands、ecc、update-config、cheatsheet-creator、playwright-mcp、lark）以及写明 `install.sh --only <id>` 的脚本安装条目（搜索 agent、shell wrapper、co-author、四个模型后端、image-gen）。Claude 的 matt-workflow 标为 fork 的 6 项精选子集；frontend-design、claude-health 与 Claude 的 Matt code-review 标为本 fork 不提供。新增 `scripts/check-catalog-sync.sh`，校验 catalog.md 与两个安装器一致。
+- 文档：AGENTS.md、INSTALL.md、MAINTAIN.md、scripts/README.md 与安装方案把脚本安装器列为受支持的替代路径；`docs/migration.md` 说明 fork 的仓库来源、退役条目、菜单 ID 变化与 humanizer 的切换；两份 README 介绍两条路径与新参数。
+
+### Design Rationale
+- 保留两条安装路径，是为了同时照顾想一次性勾选菜单的用户和希望 agent 逐项解释的用户；共用模板与 `selection.json` 避免两边分叉，`check-catalog-sync.sh` 负责发现目录与菜单之间的偏差。
+- claude-mem、PUA、GitHub 采用主动清理，因为只从菜单隐藏的插件会继续从旧安装中运行。GitHub MCP 的清理只匹配本仓库曾经注册的 URL，用户自己配置的 `github` 服务不受影响。
+- Lark 因 fork 作者仍在使用而保留；由于需要凭据且内存占用高，继续默认关闭、不推荐。
+- 对账范围改为 `catalogue`，重跑不会再卸载用户手动安装的插件；原先处理全部插件的行为仍可通过参数启用。
+- `--only` 设计为增量安装，agent 路径与脚本自动化可以只加一项，而不必对账其他全部内容。
+- `edit-config` 把上游仓库视为不同来源而不是别名，因为 fork 的目录、安装器与默认值都与上游不同。
+
+### Notes & Caveats
+- **claude-mem 用户注意：** 升级到 4.2.0 后第一次运行安装器就会卸载 claude-mem 插件及其 marketplace。数据目录不会删除，但插件和它的 hooks 不再运行。升级前请阅读 `docs/migration.md#removed-integrations`。
+- **版本号重名：** 上游也发布过 2.9.0 – 3.2.0（归档在 `platforms/claude/CHANGELOG.previous.zh-CN.md`），本 fork 下方同一区间也有自己的版本；号码相同，内容不同。本 fork 合并上游 4.1.0 后直接升到 4.2.0；本地的上游 tag 不推送。
+- **install.ps1 仍有缺口：** 尚不支持模型后端、shell wrapper、co-author 与 Matt skills（见 `check-catalog-sync.sh` 中的 `PS1_MISSING_MENU_IDS`）。
+- **本版本没有在 PowerShell 中实际运行 install.ps1**（环境中没有 `pwsh`），只做了静态检查。
+- `--uninstall` 不会移除 code-review 与 codex 插件。
+- 脚本路径注册 Lark 时没有带 `-t preset.light`（安装器自己的提示与文档都建议加上），因此脚本安装的 Lark 暴露的是该包的默认工具预设。
+- 脚本默认值与 catalog 推荐在少数地方有意不同：语言规则在脚本中默认开启，但上游不推荐；neat-freak 与 adversarial-review 在上游推荐，但脚本中默认关闭。详见 catalog.md 的推荐依据。
+- 已有安装在安装器或 edit-config 重新部署之前，保留原来的 CLAUDE.md、规则与设置。
+
 ## [上游合并：4.1.0] - 2026-09-28
 
 > 合并自上游 [Mizoreww/awesome-agent-config](https://github.com/Mizoreww/awesome-agent-config) v4.1.0（`33cb7ed`）。以下上游条目按原文收录，标题降一级；本 fork 的取舍记录在本 fork 的 4.2.0 条目中。本 fork 中 `install.sh` / `install.ps1` 仍是完整的脚本安装器，与上游的 agent 引导安装并存，Lark/飞书 MCP 也继续保留。上游 2.9.0 – 3.2.0 归档在 `platforms/claude/CHANGELOG.previous.zh-CN.md`，这些版本号与下方本 fork 自己的 2.9.0 – 3.3.0 条目重名。

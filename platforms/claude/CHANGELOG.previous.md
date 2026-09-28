@@ -1,5 +1,7 @@
 # Changelog
 
+> Archived upstream (Mizoreww) history. Entries from 2.9.0 to 3.2.0 are upstream releases whose version numbers collide with this fork's own releases in that range (root [CHANGELOG.md](../../CHANGELOG.md)); same number, different release.
+
 ## [3.2.0] - 2026-09-03
 
 ### Features

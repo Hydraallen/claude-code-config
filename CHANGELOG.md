@@ -1,5 +1,39 @@
 # Changelog
 
+## [4.2.0] - 2026-09-28
+
+### Features
+- **Merged upstream awesome-agent-config 4.1.0** (`33cb7ed`, block below): agent-guided setup through `INSTALL.md`, `catalog.md`, `platforms/claude` / `platforms/codex`, the shared `edit-config` skill, the writing-style rule, the 9,000-byte guard in the lessons hooks, and the upstream `paper-reading`, `storage-analyzer`, `adversarial-review` and `scripts/check-readme-sync.sh`.
+- **Two install paths.** `install.sh` / `install.ps1` stay full script installers for Claude Code next to the agent-guided path. Both read the same templates under `platforms/claude/templates/`. The installers build `settings.json` (with jq, or python3 as a fallback) from `settings.json`, `permissions.json` and the fork's `plugins.json`, then add `statusline.json` and `lessons-hooks.json` when those items are selected. Lessons come from `templates/lessons.md`; the statusline from `templates/hooks/statusline.sh`, which honours `CLAUDE_CONFIG_DIR`.
+- **Retired with active tombstones:** the GitHub MCP / `github@claude-plugins-official` plugin, `claude-mem@thedotmack` and `pua@pua-skills`. Every installer run, `--only` included, uninstalls them, removes the `thedotmack` and `pua-skills` marketplaces, and drops the old user-scope `github` MCP server when it points at `api.githubcopilot.com/mcp/`. Menu IDs `plug-github`, `plug-claude-mem` and `plug-pua` are gone.
+- **Lark / Feishu MCP retained** (upstream retired it): menu `mcp-lark`, `mcp/`, `docs/LARK-MCP*`, plus a `lark` catalogue row and an agent-path recipe that leaves the item pending until the user supplies credentials and verifies it with `scripts/check_mcp.py`.
+- **New default-off items in both installers:** `skill-neat-freak`, `lieflat-charts`, `skill-storage-analyzer` (new Storage group), `researchstudio-idea`, and `ai-research`, which replaces the six AI Research plugin IDs (`plug-tokenization`, `plug-fine-tuning`, `plug-post-training`, `plug-inference-serving`, `plug-distributed-training`, `plug-optimization`) with one item. install.sh now has 47 menu items in 11 groups (29 on by default); install.ps1 has 40 in 10 groups. The PowerShell StatusLine ID is now `statusline`; the old `hooks` ID is still accepted.
+- **New flags:** `--only <ids>` / `-Only` installs just the listed menu items, additively: no plugin reconciliation, no `enabledPlugins` rebuild, no version stamp. `--list-ids` / `-ListIds` prints the menu IDs. `--prune-foreign-plugins` / `-PruneForeignPlugins` opts in to reconciling plugins the installer does not manage. `--include-mem` for `cleanup-claude-data.sh` is accepted and ignored.
+- **Plugin prune scope defaults to `catalogue`:** a re-run uninstalls only unselected plugins from the installer's own catalogue (plus the tombstones), never hand-installed third-party plugins.
+- **humanizer** now installs the upstream `humanizer@humanizer` plugin (blader/humanizer, Claude Code 2.1.142 or later), called as `/humanizer:humanizer`. **humanizer-zh** is pinned to op7418/Humanizer-zh@`91f3d39`. The old bundled copies are removed only when unmodified.
+- **Writing-style rule replaces Common rules** (menu `rules-writing-style`, on by default). An existing `~/.claude/rules/common/` gets a warning and is not deleted.
+- **Shared selection record:** the installers write `~/.claude/agent-config/selection.json` (repository URL, revision, update policy, per-item records marked `"source": "script"`) so `edit-config` can take over; pinned upstream skills they install are recorded in `agent-config/files.json`. `update-config` and `edit-config` now point at Hydraallen/claude-code-config.
+- **Catalogue sync:** `catalog.md` gains fork rows (feature-dev, ralph-loop, commit-commands, ecc, update-config, cheatsheet-creator, playwright-mcp, lark) and script-installed rows (search agent, shell wrapper, co-author, the four model backends, image-gen) that name `install.sh --only <id>`. matt-workflow is the fork's 6-skill subset on Claude; frontend-design, claude-health and the Claude Matt code-review are marked as not offered in this fork. New `scripts/check-catalog-sync.sh` checks catalog.md against both installers.
+- Docs: AGENTS.md, INSTALL.md, MAINTAIN.md, scripts/README.md and the setup spec name the script installers as a supported alternative; `docs/migration.md` covers the fork's source identity, the retirements, the menu ID changes and the humanizer switch; the READMEs describe both paths and the new flags.
+
+### Design Rationale
+- Keeping both install paths serves users who want a one-shot menu and users who prefer the agent to explain options; sharing templates and `selection.json` keeps them from drifting, and `check-catalog-sync.sh` catches drift between the catalogue and the menus.
+- Tombstones actively uninstall claude-mem, PUA and GitHub because a merely hidden plugin keeps running from an earlier install. The GitHub MCP removal only matches the URL this repository once registered, so a user's own `github` server is left alone.
+- Lark stays because the fork's author uses it; it remains default-off and unrecommended because of its credential and memory cost.
+- The `catalogue` prune scope stops re-runs from uninstalling plugins the user added by hand; the old all-plugins behaviour is still available behind a flag.
+- `--only` is additive so the agent path and scripted automation can add one item without reconciling everything else.
+- `edit-config` treats the upstream repository as a different source rather than an alias, because the fork's catalogue, installers and defaults differ from upstream's.
+
+### Notes & Caveats
+- **claude-mem users:** the first 4.2.0 installer run uninstalls the claude-mem plugin and its marketplace. Its data directory is not deleted, but the plugin and its hooks stop running. Read `docs/migration.md#removed-integrations` before upgrading.
+- **Version numbers collide:** upstream also published 2.9.0 – 3.2.0 (archived in `platforms/claude/CHANGELOG.previous.md`), and this fork has its own releases in that range below. Same number, different release. This fork jumps to 4.2.0 after merging upstream 4.1.0; local upstream tags are not pushed.
+- **install.ps1 parity gaps:** it still lacks the model backends, shell wrapper, co-author and the Matt skills (`PS1_MISSING_MENU_IDS` in `check-catalog-sync.sh`).
+- **install.ps1 was not run under PowerShell for this release** (`pwsh` was unavailable); it is covered only by static checks.
+- `--uninstall` does not remove the code-review and codex plugins.
+- The script path registers Lark without `-t preset.light` (its own hint and the docs recommend that flag), so script-installed Lark exposes the package's default tool preset.
+- The script and catalogue defaults differ on purpose in a few places: language rules are on in the script but not recommended upstream; neat-freak and adversarial-review are recommended upstream but off in the script. See catalog.md's recommendations section.
+- Existing installs keep their previous CLAUDE.md, rules and settings until the installer or edit-config redeploys them.
+
 ## [Upstream merge: 4.1.0] - 2026-09-28
 
 > Merged from upstream [Mizoreww/awesome-agent-config](https://github.com/Mizoreww/awesome-agent-config) v4.1.0 (`33cb7ed`). The upstream entries below are reproduced verbatim with headings demoted one level; fork-specific decisions are recorded in this fork's 4.2.0 entry. In this fork `install.sh` / `install.ps1` remain full script installers alongside the upstream agent-guided setup, and Lark/Feishu MCP stays available. Upstream 2.9.0 – 3.2.0 are archived in `platforms/claude/CHANGELOG.previous.md`; those version numbers collide with this fork's own 2.9.0 – 3.3.0 entries below.
