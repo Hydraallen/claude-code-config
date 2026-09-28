@@ -876,6 +876,7 @@ RETIRED_MARKETPLACES=(
 PLUGINS_REMOVED=(
     "frontend-design@claude-plugins-official"
     "everything-claude-code@everything-claude-code"
+    "health@claude-health"
     "github@claude-plugins-official"
     "claude-mem@thedotmack"
     "pua@pua-skills"
