@@ -935,34 +935,30 @@ parse_args() {
     fi
 }
 
-# --- Interactive menu ---------------------------------------------------
+# --- Menu definition ----------------------------------------------------
+#
+# Single source of truth for the selectable items: the interactive selector,
+# --only and scripts/check-catalog-sync.sh all read it through
+# load_menu_groups / menu_item_ids. install.ps1 mirrors the same items and IDs.
+MENU_GROUP_LABELS=()
+MENU_GROUP_HINTS=()
+MENU_GROUP_ITEMS=()
 
-interactive_menu() {
-    # Open a file descriptor for keyboard input.
-    # Prefer stdin when it's a real tty (normal execution); fall back to /dev/tty
-    # for piped installs (curl | bash) where stdin carries the script.
-    if [[ -t 0 ]]; then
-        exec 3<&0
-    elif ! exec 3</dev/tty 2>/dev/null; then
-        warn "Cannot open terminal for interactive input, falling back to default install"
-        INSTALL_ALL=true
-        return
-    fi
-
+load_menu_groups() {
     # --- Two-level menu data structure ---
     # Each group has: label, hint, and an array of items.
     # Item format: "label|description|default_on|id"
     # Groups are navigated in the main menu; Enter opens sub-menu.
     # Mutual exclusion: review-adversarial and review-codex (handled in toggle logic).
 
-    local -a GROUP_LABELS=()
-    local -a GROUP_HINTS=()
-    local -a GROUP_ITEMS=()    # pipe-separated list of items per group
+    MENU_GROUP_LABELS=()
+    MENU_GROUP_HINTS=()
+    MENU_GROUP_ITEMS=()    # newline-separated list of items per group
 
     # Group 0: Core
-    GROUP_LABELS+=("Core")
-    GROUP_HINTS+=("")
-    GROUP_ITEMS+=("CLAUDE.md|Global instructions template|1|claude-md
+    MENU_GROUP_LABELS+=("Core")
+    MENU_GROUP_HINTS+=("")
+    MENU_GROUP_ITEMS+=("CLAUDE.md|Global instructions template|1|claude-md
 settings.json|Smart-merged Claude Code settings|1|settings
 Writing style rule|Complete English writing rule (rules/writing-style.md)|1|rules-writing-style
 StatusLine|Gradient bars + Anthropic/GLM 5h quota|1|statusline
@@ -975,31 +971,31 @@ Co-authored-by|Add Claude as co-author in commits|0|co-author")
     # Each backend is a profile JSON consumed by claude.zsh. Installing a profile
     # is free — it only writes a template. The proxy binaries a profile needs are
     # fetched lazily by the launcher on first use, not here.
-    GROUP_LABELS+=("Model Backends")
-    GROUP_HINTS+=("cl_<name> per backend; credentials are never overwritten on upgrade")
-    GROUP_ITEMS+=("GLM Coding Plan|Zhipu BigModel, Anthropic-compatible endpoint|1|backend-glm
+    MENU_GROUP_LABELS+=("Model Backends")
+    MENU_GROUP_HINTS+=("cl_<name> per backend; credentials are never overwritten on upgrade")
+    MENU_GROUP_ITEMS+=("GLM Coding Plan|Zhipu BigModel, Anthropic-compatible endpoint|1|backend-glm
 OpenRouter|Direct Anthropic-compatible endpoint; DeepSeek V4 slots|1|backend-or
 ChatGPT via CLIProxyAPI|Reuse a ChatGPT Plus/Pro subscription (Codex OAuth); needs cliproxyapi|0|backend-gpt
 CCR gateway|claude-code-router: GLM + GPT merged into one /model list; manual web-UI setup|0|backend-ccr")
 
     # Group 2: Language Rules
-    GROUP_LABELS+=("Language Rules")
-    GROUP_HINTS+=("Python/TypeScript/Go are enabled by default; uncheck what you don't need")
-    GROUP_ITEMS+=("Python rules|PEP 8, pytest, type hints, bandit|1|rules-python
+    MENU_GROUP_LABELS+=("Language Rules")
+    MENU_GROUP_HINTS+=("Python/TypeScript/Go are enabled by default; uncheck what you don't need")
+    MENU_GROUP_ITEMS+=("Python rules|PEP 8, pytest, type hints, bandit|1|rules-python
 TypeScript rules|Zod, Playwright, immutability|1|rules-ts
 Go rules|gofmt, table-driven tests, gosec|1|rules-go")
 
     # Group 2: Review
-    GROUP_LABELS+=("Review")
-    GROUP_HINTS+=("adversarial-review and Codex are mutually exclusive")
-    GROUP_ITEMS+=("code-review plugin|PR code review (claude-plugins-official)|1|review-code-review
+    MENU_GROUP_LABELS+=("Review")
+    MENU_GROUP_HINTS+=("adversarial-review and Codex are mutually exclusive")
+    MENU_GROUP_ITEMS+=("code-review plugin|PR code review (claude-plugins-official)|1|review-code-review
 adversarial-review|Cross-model adversarial review (poteto/noodle); needs codex CLI|0|review-adversarial
 Codex CLI|Codex adversarial review (openai/codex)|0|review-codex")
 
     # Group 3: Workflow
-    GROUP_LABELS+=("Workflow")
-    GROUP_HINTS+=("planning, iteration, code quality, meta-config")
-    GROUP_ITEMS+=("andrej-karpathy-skills|Karpathy coding guidelines (Think-First, Simplicity, Surgical)|1|plug-andrej-karpathy-skills
+    MENU_GROUP_LABELS+=("Workflow")
+    MENU_GROUP_HINTS+=("planning, iteration, code quality, meta-config")
+    MENU_GROUP_ITEMS+=("andrej-karpathy-skills|Karpathy coding guidelines (Think-First, Simplicity, Surgical)|1|plug-andrej-karpathy-skills
 superpowers|Planning, brainstorming, TDD, debugging|1|plug-superpowers
 mattpocock/skills|6 curated agent skills via npx: grilling, grill-me, teach, prototype, handoff, codebase-design (mattpocock)|1|skill-mattpocock
 feature-dev|Guided feature development|1|plug-feature-dev
@@ -1010,29 +1006,29 @@ ecc|Everything Claude Code: TDD, security, database, Go/Python/Spring Boot|1|plu
 update-config|Configure Claude Code via settings.json (skill)|1|skill-update-config")
 
     # Group 4: Integrations
-    GROUP_LABELS+=("Integrations")
-    GROUP_HINTS+=("external tools & services")
-    GROUP_ITEMS+=("context7|Real-time library documentation|1|plug-context7
+    MENU_GROUP_LABELS+=("Integrations")
+    MENU_GROUP_HINTS+=("external tools & services")
+    MENU_GROUP_ITEMS+=("context7|Real-time library documentation|1|plug-context7
 playwright|Browser automation & E2E testing|1|plug-playwright")
 
     # Group 5: Design & Content
-    GROUP_LABELS+=("Design & Content")
-    GROUP_HINTS+=("documents, UI, creative artifacts, humanization")
-    GROUP_ITEMS+=("document-skills|Document processing (PDF, DOCX, PPTX, XLSX)|1|plug-document-skills
+    MENU_GROUP_LABELS+=("Design & Content")
+    MENU_GROUP_HINTS+=("documents, UI, creative artifacts, humanization")
+    MENU_GROUP_ITEMS+=("document-skills|Document processing (PDF, DOCX, PPTX, XLSX)|1|plug-document-skills
 example-skills|Frontend/design/canvas/algorithmic-art skills|1|plug-example-skills
 humanizer|Remove AI writing patterns (English, blader) (skill)|1|skill-humanizer
 humanizer-zh|Remove AI writing patterns (Chinese, op7418) (skill)|0|skill-humanizer-zh")
 
     # Group 6: Slides
-    GROUP_LABELS+=("Slides")
-    GROUP_HINTS+=("AI slide / PPTX generation · default off")
-    GROUP_ITEMS+=("frontend-slides|HTML slide generator with PPT conversion (zarazhangrui)|0|plug-frontend-slides
+    MENU_GROUP_LABELS+=("Slides")
+    MENU_GROUP_HINTS+=("AI slide / PPTX generation · default off")
+    MENU_GROUP_ITEMS+=("frontend-slides|HTML slide generator with PPT conversion (zarazhangrui)|0|plug-frontend-slides
 ppt-master|Editable PPTX from PDF/DOCX/URL/Markdown; needs pip install (hugohe3)|0|plug-ppt-master")
 
     # Group 8: Academic Research (AI Research plugins + DeepXiv skills + paper-reading)
-    GROUP_LABELS+=("Academic Research")
-    GROUP_HINTS+=("training/inference plugins + paper-reading & DeepXiv skills")
-    GROUP_ITEMS+=("paper-reading|Research paper summarization (skill)|1|skill-paper-reading
+    MENU_GROUP_LABELS+=("Academic Research")
+    MENU_GROUP_HINTS+=("training/inference plugins + paper-reading & DeepXiv skills")
+    MENU_GROUP_ITEMS+=("paper-reading|Research paper summarization (skill)|1|skill-paper-reading
 cheatsheet-creator|Exam cheatsheet from lectures/homework/past exams (skill)|1|skill-cheatsheet-creator
 tokenization|Tokenizer training & usage|0|plug-tokenization
 fine-tuning|Model fine-tuning|0|plug-fine-tuning
@@ -1051,10 +1047,131 @@ deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-
     #   both leaves the plugin one silently never started. Pick this only if
     #   you deselect the playwright plugin in the Plugins group.
     #   Lark/Feishu needs App ID/Secret credentials and ~1GB RAM per session.
-    GROUP_LABELS+=("MCP Servers")
-    GROUP_HINTS+=("")
-    GROUP_ITEMS+=("Playwright MCP|Standalone server — shadows the playwright plugin, pick only without it|0|mcp
+    MENU_GROUP_LABELS+=("MCP Servers")
+    MENU_GROUP_HINTS+=("")
+    MENU_GROUP_ITEMS+=("Playwright MCP|Standalone server — shadows the playwright plugin, pick only without it|0|mcp
 Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/session|0|mcp-lark")
+
+}
+
+# Print every menu item as "id|default_on|group label", one per line.
+menu_item_ids() {
+    load_menu_groups
+    local g line _l _d _df _id
+    for (( g=0; g<${#MENU_GROUP_LABELS[@]}; g++ )); do
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            IFS='|' read -r _l _d _df _id <<< "$line"
+            printf '%s|%s|%s\n' "$_id" "$_df" "${MENU_GROUP_LABELS[$g]}"
+        done <<< "${MENU_GROUP_ITEMS[$g]}"
+    done
+}
+
+# 0 when $1 is a known menu item id.
+is_menu_item_id() {
+    local needle="$1" entry
+    while IFS= read -r entry; do
+        [[ "${entry%%|*}" == "$needle" ]] && return 0
+    done < <(menu_item_ids)
+    return 1
+}
+
+# Map a plug-* menu ID to its package name (bash 3.2 compatible, no associative arrays).
+plug_id_to_pkg() {
+    case "$1" in
+        plug-andrej-karpathy-skills) echo "andrej-karpathy-skills@karpathy-skills" ;;
+        plug-everything-claude-code) echo "ecc@ecc" ;;
+        plug-superpowers)       echo "superpowers@claude-plugins-official" ;;
+        plug-frontend-slides)   echo "frontend-slides@frontend-slides" ;;
+        plug-ppt-master)        echo "ppt-master@ppt-master" ;;
+        plug-context7)          echo "context7@claude-plugins-official" ;;
+        plug-commit-commands)   echo "commit-commands@claude-plugins-official" ;;
+        plug-document-skills)   echo "document-skills@anthropic-agent-skills" ;;
+        plug-playwright)        echo "playwright@claude-plugins-official" ;;
+        plug-feature-dev)       echo "feature-dev@claude-plugins-official" ;;
+        plug-code-simplifier)   echo "code-simplifier@claude-plugins-official" ;;
+        plug-ralph-loop)        echo "ralph-loop@claude-plugins-official" ;;
+        plug-example-skills)    echo "example-skills@anthropic-agent-skills" ;;
+        plug-tokenization)      echo "tokenization@ai-research-skills" ;;
+        plug-fine-tuning)       echo "fine-tuning@ai-research-skills" ;;
+        plug-post-training)     echo "post-training@ai-research-skills" ;;
+        plug-inference-serving) echo "inference-serving@ai-research-skills" ;;
+        plug-distributed-training) echo "distributed-training@ai-research-skills" ;;
+        plug-optimization)      echo "optimization@ai-research-skills" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Apply one selected menu item ID to the install flags. Shared by the
+# interactive selector and --only.
+apply_menu_id() {
+    local item_id="$1"
+    case "$item_id" in
+        # Core
+        claude-md)              INSTALL_CLAUDE_MD=true ;;
+        settings)               INSTALL_SETTINGS=true ;;
+        rules-writing-style)    INSTALL_RULES=true; INSTALL_WRITING_STYLE=true ;;
+        statusline)             INSTALL_STATUSLINE=true ;;
+        lessons)                INSTALL_LESSONS=true ;;
+        agents)                 INSTALL_AGENTS=true ;;
+        shell-wrapper)          INSTALL_SHELL_WRAPPER=true ;;
+        co-author)              CO_AUTHOR=true ;;
+        # Model backends (profile JSON consumed by claude.zsh)
+        backend-glm)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("glm") ;;
+        backend-or)             INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("or") ;;
+        backend-gpt)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("gpt") ;;
+        backend-ccr)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("ccr") ;;
+        # Language rules
+        rules-python)           INSTALL_RULES=true; RULE_LANGS+=("python") ;;
+        rules-ts)               INSTALL_RULES=true; RULE_LANGS+=("typescript") ;;
+        rules-go)               INSTALL_RULES=true; RULE_LANGS+=("golang") ;;
+        # Review
+        review-code-review)     INSTALL_PLUGINS=true; SELECTED_PLUGINS+=("code-review@claude-plugins-official") ;;
+        review-adversarial)     REVIEW_ADVERSARIAL=true; INSTALL_SKILLS=true; SELECTED_SKILLS+=("adversarial-review") ;;
+        review-codex)           REVIEW_CODEX=true; INSTALL_PLUGINS=true; SELECTED_PLUGINS+=("codex@openai-codex") ;;
+        # Skills
+        skill-paper-reading)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("paper-reading") ;;
+        skill-cheatsheet-creator) INSTALL_SKILLS=true; SELECTED_SKILLS+=("cheatsheet-creator") ;;
+        skill-humanizer)        INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer") ;;
+        skill-humanizer-zh)     INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer-zh") ;;
+        skill-update-config)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("update-config") ;;
+        skill-mattpocock)       INSTALL_MATTPOCOCK=true ;;
+        # DeepXiv
+        deepxiv-cli)            INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-cli") ;;
+        deepxiv-trending-digest) INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-trending-digest") ;;
+        deepxiv-baseline-table) INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-baseline-table") ;;
+        # MCP
+        mcp)                    INSTALL_MCP=true ;;
+        mcp-lark)               INSTALL_LARK=true ;;
+        # Plugins (all plug-* ids)
+        plug-*)
+            INSTALL_PLUGINS=true
+            local pkg
+            pkg="$(plug_id_to_pkg "$item_id")"
+            [[ -n "$pkg" ]] && SELECTED_PLUGINS+=("$pkg") || true
+            ;;
+    esac
+}
+
+# --- Interactive menu ---------------------------------------------------
+
+interactive_menu() {
+    # Open a file descriptor for keyboard input.
+    # Prefer stdin when it's a real tty (normal execution); fall back to /dev/tty
+    # for piped installs (curl | bash) where stdin carries the script.
+    if [[ -t 0 ]]; then
+        exec 3<&0
+    elif ! exec 3</dev/tty 2>/dev/null; then
+        warn "Cannot open terminal for interactive input, falling back to default install"
+        INSTALL_ALL=true
+        return
+    fi
+
+    # Menu data comes from load_menu_groups (shared with --only).
+    load_menu_groups
+    local -a GROUP_LABELS=("${MENU_GROUP_LABELS[@]}")
+    local -a GROUP_HINTS=("${MENU_GROUP_HINTS[@]}")
+    local -a GROUP_ITEMS=("${MENU_GROUP_ITEMS[@]}")
 
     local num_groups=${#GROUP_LABELS[@]}
     # Index of the Review group (its adversarial/codex items are mutually
@@ -1408,82 +1525,9 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
     RULE_LANGS_EXPLICIT=true
     INSTALL_WRITING_STYLE=false
 
-    # Helper: map plug-* ID to package name (bash 3.2 compatible, no associative arrays)
-    _plug_id_to_pkg() {
-        case "$1" in
-            plug-andrej-karpathy-skills) echo "andrej-karpathy-skills@karpathy-skills" ;;
-            plug-everything-claude-code) echo "ecc@ecc" ;;
-            plug-superpowers)       echo "superpowers@claude-plugins-official" ;;
-            plug-frontend-slides)   echo "frontend-slides@frontend-slides" ;;
-            plug-ppt-master)        echo "ppt-master@ppt-master" ;;
-            plug-context7)          echo "context7@claude-plugins-official" ;;
-            plug-commit-commands)   echo "commit-commands@claude-plugins-official" ;;
-            plug-document-skills)   echo "document-skills@anthropic-agent-skills" ;;
-            plug-playwright)        echo "playwright@claude-plugins-official" ;;
-            plug-feature-dev)       echo "feature-dev@claude-plugins-official" ;;
-            plug-code-simplifier)   echo "code-simplifier@claude-plugins-official" ;;
-            plug-ralph-loop)        echo "ralph-loop@claude-plugins-official" ;;
-            plug-example-skills)    echo "example-skills@anthropic-agent-skills" ;;
-            plug-tokenization)      echo "tokenization@ai-research-skills" ;;
-            plug-fine-tuning)       echo "fine-tuning@ai-research-skills" ;;
-            plug-post-training)     echo "post-training@ai-research-skills" ;;
-            plug-inference-serving) echo "inference-serving@ai-research-skills" ;;
-            plug-distributed-training) echo "distributed-training@ai-research-skills" ;;
-            plug-optimization)      echo "optimization@ai-research-skills" ;;
-            *) echo "" ;;
-        esac
-    }
-
     for (( i=0; i<n; i++ )); do
         [[ ${selected[$i]} -eq 0 ]] && continue
-
-        local item_id="${ALL_IDS[$i]}"
-
-        case "$item_id" in
-            # Core
-            claude-md)              INSTALL_CLAUDE_MD=true ;;
-            settings)               INSTALL_SETTINGS=true ;;
-            rules-writing-style)    INSTALL_RULES=true; INSTALL_WRITING_STYLE=true ;;
-            statusline)             INSTALL_STATUSLINE=true ;;
-            lessons)                INSTALL_LESSONS=true ;;
-            agents)                 INSTALL_AGENTS=true ;;
-            shell-wrapper)          INSTALL_SHELL_WRAPPER=true ;;
-            co-author)              CO_AUTHOR=true ;;
-            # Model backends (profile JSON consumed by claude.zsh)
-            backend-glm)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("glm") ;;
-            backend-or)             INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("or") ;;
-            backend-gpt)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("gpt") ;;
-            backend-ccr)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("ccr") ;;
-            # Language rules
-            rules-python)           INSTALL_RULES=true; RULE_LANGS+=("python") ;;
-            rules-ts)               INSTALL_RULES=true; RULE_LANGS+=("typescript") ;;
-            rules-go)               INSTALL_RULES=true; RULE_LANGS+=("golang") ;;
-            # Review
-            review-code-review)     INSTALL_PLUGINS=true; SELECTED_PLUGINS+=("code-review@claude-plugins-official") ;;
-            review-adversarial)     REVIEW_ADVERSARIAL=true; INSTALL_SKILLS=true; SELECTED_SKILLS+=("adversarial-review") ;;
-            review-codex)           REVIEW_CODEX=true; INSTALL_PLUGINS=true; SELECTED_PLUGINS+=("codex@openai-codex") ;;
-            # Skills
-            skill-paper-reading)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("paper-reading") ;;
-            skill-cheatsheet-creator) INSTALL_SKILLS=true; SELECTED_SKILLS+=("cheatsheet-creator") ;;
-            skill-humanizer)        INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer") ;;
-            skill-humanizer-zh)     INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer-zh") ;;
-            skill-update-config)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("update-config") ;;
-            skill-mattpocock)       INSTALL_MATTPOCOCK=true ;;
-            # DeepXiv
-            deepxiv-cli)            INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-cli") ;;
-            deepxiv-trending-digest) INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-trending-digest") ;;
-            deepxiv-baseline-table) INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-baseline-table") ;;
-            # MCP
-            mcp)                    INSTALL_MCP=true ;;
-            mcp-lark)               INSTALL_LARK=true ;;
-            # Plugins (all plug-* ids)
-            plug-*)
-                INSTALL_PLUGINS=true
-                local pkg
-                pkg="$(_plug_id_to_pkg "$item_id")"
-                [[ -n "$pkg" ]] && SELECTED_PLUGINS+=("$pkg") || true
-                ;;
-        esac
+        apply_menu_id "${ALL_IDS[$i]}"
     done
 
     # Auto-enable settings.json when StatusLine, Lessons, Co-author, or Plugins need it for config
