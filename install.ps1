@@ -312,6 +312,10 @@ $PLUGINS_REMOVED = @(
 # Retired standalone GitHub MCP registration (very early releases). Removed
 # only while the user-scope "github" entry still points at this URL.
 $RETIRED_GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/"
+# Which lark-mcp tool preset to register. Without -t the package defaults to
+# preset.default, which upstream's FAQ ties to "token limit exceeded" after the
+# MCP service starts. preset.light is the smallest set. Mirrors install.sh.
+$LARK_MCP_PRESET = "preset.light"
 
 $MARKETPLACE_LIST = @(
     @{ Name = "anthropic-agent-skills"; Repo = "anthropics/skills" }
@@ -2758,7 +2762,7 @@ function Install-Mcp {
             # Non-interactive or piped mode: skip with warning
             Write-Warn "Skipping lark-mcp (requires interactive credential input)"
             Write-Warn "  Run interactively to set up, or add manually:"
-            Write-Warn "  claude mcp add --scope user --transport stdio lark-mcp -- npx -y `"@larksuiteoapi/lark-mcp`" mcp -a <APP_ID> -s <APP_SECRET>"
+            Write-Warn "  claude mcp add --scope user --transport stdio lark-mcp -- npx -y `"@larksuiteoapi/lark-mcp`" mcp -a <APP_ID> -s <APP_SECRET> -t $LARK_MCP_PRESET"
         } else {
             # Interactive mode: prompt for credentials
             Write-Host ""
@@ -2770,7 +2774,7 @@ function Install-Mcp {
                 Write-Warn "Empty credentials -- skipping lark-mcp (add manually later)"
             } else {
                 $ok = Invoke-Retry -MaxAttempts 3 -DelaySeconds 3 -Description "Add MCP server lark-mcp" -Action {
-                    & claude mcp add --scope user --transport stdio lark-mcp -- npx -y "@larksuiteoapi/lark-mcp" mcp -a $larkAppId -s $larkAppSecret 2>$null
+                    & claude mcp add --scope user --transport stdio lark-mcp -- npx -y "@larksuiteoapi/lark-mcp" mcp -a $larkAppId -s $larkAppSecret -t $LARK_MCP_PRESET 2>$null
                 }
                 if ($ok) { Write-Ok "MCP server added: lark-mcp" }
                 else { Write-Warn "MCP server lark-mcp could not be added, skipping" }
@@ -3975,7 +3979,7 @@ function Main {
     Write-Host "  1. Restart Claude Code for changes to take effect"
     Write-Host "  2. Customize CLAUDE.md for your specific projects"
     if (-not $doLark) {
-        Write-Host "  3. Lark/Feishu MCP is off by default. To add it: claude mcp add --scope user --transport stdio lark-mcp -- npx -y `"@larksuiteoapi/lark-mcp`" mcp -a <APP_ID> -s <APP_SECRET>"
+        Write-Host "  3. Lark/Feishu MCP is off by default. To add it: claude mcp add --scope user --transport stdio lark-mcp -- npx -y `"@larksuiteoapi/lark-mcp`" mcp -a <APP_ID> -s <APP_SECRET> -t $LARK_MCP_PRESET"
     }
     Write-Host ""
     Write-Info "GPT backend auto-configuration and the cl_gpt launcher are macOS/Linux only (bash/zsh). Windows has no cl_gpt runtime yet — see docs/BACKENDS.md."

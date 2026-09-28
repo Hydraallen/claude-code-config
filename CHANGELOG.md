@@ -30,7 +30,6 @@
 - **install.ps1 parity gaps:** it still lacks the model backends, shell wrapper, co-author and the Matt skills (`PS1_MISSING_MENU_IDS` in `check-catalog-sync.sh`).
 - **install.ps1 was not run under PowerShell for this release** (`pwsh` was unavailable); it is covered only by static checks.
 - `--uninstall` does not remove the code-review and codex plugins.
-- The script path registers Lark without `-t preset.light` (its own hint and the docs recommend that flag), so script-installed Lark exposes the package's default tool preset.
 - The script and catalogue defaults differ on purpose in a few places: language rules are on in the script but not recommended upstream; neat-freak and adversarial-review are recommended upstream but off in the script. See catalog.md's recommendations section.
 - Existing installs keep their previous CLAUDE.md, rules and settings until the installer or edit-config redeploys them.
 

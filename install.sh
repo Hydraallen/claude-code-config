@@ -4251,7 +4251,7 @@ install_mcp() {
         elif ! can_interact; then
             warn "Skipping lark-mcp (requires interactive credential input)"
             warn "  Run interactively to set up, or add manually:"
-            warn "  claude mcp add --scope user --transport stdio lark-mcp -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET>"
+            warn "  claude mcp add --scope user --transport stdio lark-mcp -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET> -t $LARK_MCP_PRESET"
         else
             echo ""
             info "Lark MCP requires Feishu App credentials:"
@@ -4264,7 +4264,7 @@ install_mcp() {
             if [[ -z "$lark_app_id" || -z "$lark_app_secret" ]]; then
                 warn "Empty credentials — skipping lark-mcp (add manually later)"
             elif retry 3 3 "Add MCP server lark-mcp" claude mcp add --scope user --transport stdio lark-mcp \
-                -- npx -y @larksuiteoapi/lark-mcp mcp -a "$lark_app_id" -s "$lark_app_secret" 2>/dev/null; then
+                -- npx -y @larksuiteoapi/lark-mcp mcp -a "$lark_app_id" -s "$lark_app_secret" -t "$LARK_MCP_PRESET" 2>/dev/null; then
                 ok "MCP server added: lark-mcp"
             else
                 warn "MCP server lark-mcp could not be added, skipping"

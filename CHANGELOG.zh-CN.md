@@ -32,7 +32,6 @@
 - **install.ps1 仍有缺口：** 尚不支持模型后端、shell wrapper、co-author 与 Matt skills（见 `check-catalog-sync.sh` 中的 `PS1_MISSING_MENU_IDS`）。
 - **本版本没有在 PowerShell 中实际运行 install.ps1**（环境中没有 `pwsh`），只做了静态检查。
 - `--uninstall` 不会移除 code-review 与 codex 插件。
-- 脚本路径注册 Lark 时没有带 `-t preset.light`（安装器自己的提示与文档都建议加上），因此脚本安装的 Lark 暴露的是该包的默认工具预设。
 - 脚本默认值与 catalog 推荐在少数地方有意不同：语言规则在脚本中默认开启，但上游不推荐；neat-freak 与 adversarial-review 在上游推荐，但脚本中默认关闭。详见 catalog.md 的推荐依据。
 - 已有安装在安装器或 edit-config 重新部署之前，保留原来的 CLAUDE.md、规则与设置。
 
