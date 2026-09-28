@@ -301,7 +301,7 @@ function Remove-RetiredEnabledPlugins {
     $found = $false; foreach ($pkg in $PLUGINS_REMOVED) { if ($obj.enabledPlugins -and $obj.enabledPlugins.PSObject.Properties.Name -contains $pkg) { $found = $true; if ($DryRun) { Write-Info "Would remove retired enabled plugin: $pkg" } else { $obj.enabledPlugins.PSObject.Properties.Remove($pkg) } } }
     if (-not $found -or $DryRun) { return }
     $tmp = Join-Path (Split-Path $settings -Parent) ("settings.json.tmp." + [Guid]::NewGuid().ToString("N"))
-    try { $obj | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $tmp -Encoding UTF8; Get-Content -LiteralPath $tmp -Raw | ConvertFrom-Json | Out-Null; [System.IO.File]::Replace($tmp, $settings, $null); Write-Ok "Removed retired enabled plugin settings" } catch { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue; Write-Warn "Could not remove retired enabled plugins safely: $_" }
+    try { $obj | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $tmp -Encoding UTF8; Get-Content -LiteralPath $tmp -Raw | ConvertFrom-Json | Out-Null; [System.IO.File]::Replace($tmp, $settings, [NullString]::Value); Write-Ok "Removed retired enabled plugin settings" } catch { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue; Write-Warn "Could not remove retired enabled plugins safely: $_" }
 }
 function Remove-RetiredSkills { Remove-RetiredMattpocockSkills; Remove-RetiredHarnessWorkflow }
 
@@ -3198,7 +3198,7 @@ function Sync-EnabledPluginsSettings {
     try {
         $obj | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $tmp -Encoding UTF8
         Get-Content -LiteralPath $tmp -Raw | ConvertFrom-Json | Out-Null
-        [System.IO.File]::Replace($tmp, $settings, $null)
+        [System.IO.File]::Replace($tmp, $settings, [NullString]::Value)
         Write-Ok "Cleaned $($stale.Count) stale enabledPlugins entr(ies)"
     } catch {
         Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
