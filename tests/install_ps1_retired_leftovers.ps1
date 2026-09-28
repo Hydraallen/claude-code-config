@@ -105,6 +105,19 @@ Remove-RetiredLeftovers
 Check "unreadable state keeps cache" (Test-Path "$P/cache/thedotmack/claude-mem/1/x")
 Check "unreadable state keeps claude-mem data" (Test-Path "$h/.claude-mem/db")
 
+# 3b. Unknown installed_plugins.json shape (plugins not an object): nothing deleted.
+$h = New-Home; . $sb; Set-Fakes; $DryRun = $false; $script:FakeRunning = $false
+$P = "$h/.claude/plugins"
+Put "$P/cache/thedotmack/claude-mem/1/x"
+Put "$h/.claude-mem/db"
+'{"version": 2, "plugins": ["claude-mem@thedotmack"]}' | Set-Content "$P/installed_plugins.json"
+Remove-RetiredLeftovers
+Check "array-shaped state keeps cache" (Test-Path "$P/cache/thedotmack/claude-mem/1/x")
+Check "array-shaped state keeps claude-mem data" (Test-Path "$h/.claude-mem/db")
+'{"version": 3}' | Set-Content "$P/installed_plugins.json"
+Remove-RetiredLeftovers
+Check "state without plugins keeps cache" (Test-Path "$P/cache/thedotmack/claude-mem/1/x")
+
 # 4. temp_git_* age gate.
 $h = New-Home; . $sb; Set-Fakes; $DryRun = $false
 $P = "$h/.claude/plugins"
@@ -160,6 +173,15 @@ Set-Content -LiteralPath "$h/.claude.json" -Value '{"skillUsage": {"claude-mem:x
 Remove-RetiredLeftovers
 Check "invalid json untouched" ((Get-Content -Raw "$h/.claude.json") -eq '{"skillUsage": {"claude-mem:x": 1}')
 Check "invalid json no backup" (@(Get-ChildItem -LiteralPath $h -Force -Filter ".claude.json.*.bak").Count -eq 0)
+
+# 7b. A symlinked ~/.claude.json is never replaced.
+$h = New-Home; . $sb; Set-Fakes; $DryRun = $false
+New-Item -ItemType Directory -Path "$h/dotfiles" -Force | Out-Null
+Set-Content -LiteralPath "$h/dotfiles/claude.json" -Value $cfgJson -NoNewline
+New-Item -ItemType SymbolicLink -Path "$h/.claude.json" -Target "$h/dotfiles/claude.json" | Out-Null
+Remove-RetiredLeftovers
+Check "symlink kept" ((Get-Item -LiteralPath "$h/.claude.json" -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)
+Check "symlink target unchanged" ((Get-Content -Raw "$h/dotfiles/claude.json") -eq $cfgJson)
 
 # 8. Dry run previews with sizes and changes nothing.
 $h = New-Home; . $sb; Set-Fakes; $DryRun = $true; $script:FakeRunning = $false

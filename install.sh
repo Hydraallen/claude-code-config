@@ -4802,19 +4802,23 @@ RETIRED_CLAUDE_JSON_MAPS=("skillUsage" "pluginUsage")
 RETIRED_CLAUDE_MEM_PLUGIN="claude-mem"
 
 # Print installed plugin keys (plugin@marketplace), one per line. Returns 1
-# when installed_plugins.json exists but cannot be parsed: callers must then
-# treat every plugin as possibly installed and delete nothing.
+# when installed_plugins.json exists but cannot be parsed or has an unknown
+# shape (no "plugins" object): callers must then treat every plugin as
+# possibly installed and delete nothing.
 _leftover_installed_keys() {
     local state="$CLAUDE_DIR/plugins/installed_plugins.json"
     [[ -f "$state" ]] || return 0
     if command -v jq >/dev/null 2>&1; then
-        jq -r '(.plugins // {}) | keys[]' "$state" 2>/dev/null || return 1
+        jq -r 'if (.plugins | type) == "object" then .plugins | keys[] else error("unknown shape") end' "$state" 2>/dev/null || return 1
     elif command -v python3 >/dev/null 2>&1; then
         python3 - "$state" <<'PY' 2>/dev/null || return 1
 import json, sys
 with open(sys.argv[1]) as fh:
     data = json.load(fh)
-for key in (data.get("plugins") or {}):
+plugins = data.get("plugins") if isinstance(data, dict) else None
+if not isinstance(plugins, dict):
+    sys.exit(1)
+for key in plugins:
     print(key)
 PY
     else
@@ -4973,6 +4977,10 @@ _leftover_json_array() {
 _leftover_prune_claude_json() {
     local keys="$1" cfg="$HOME/.claude.json" pats exact prefix suffix maps removals tmp sum_before bak
     [[ -f "$cfg" ]] || return 0
+    if [[ -L "$cfg" ]]; then
+        info "~/.claude.json is a symlink — not editing retired usage records in it"
+        return 0
+    fi
     pats="$(_leftover_claude_json_patterns "$keys")"
     exact="$(sed -n 1p <<< "$pats")"; prefix="$(sed -n 2p <<< "$pats")"; suffix="$(sed -n 3p <<< "$pats")"
     maps="$(_leftover_json_array "$(printf '%s\n' "${RETIRED_CLAUDE_JSON_MAPS[@]}")")"

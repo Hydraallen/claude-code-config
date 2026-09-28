@@ -17,7 +17,7 @@
 
 ### Design Rationale
 - `claude plugin uninstall` 与 `marketplace remove` 不会删除缓存、数据目录和使用记录。所以 4.2.0 的主动清理执行后，退役插件虽已卸载，但数 GB 的缓存和 claude-mem 数据库仍留在磁盘上。这一步和主动清理一样每次都运行，原因也相同：很多机器只会跑无人值守或 `--only` 运行。
-- 每项删除都必须同时满足两个条件：条目已退役，且没有已安装的插件仍在使用它。只要 `installed_plugins.json` 里还有 `*@<marketplace>` 或对应的 `plugin@marketplace`，就保留该退役 marketplace 的缓存和该退役插件的数据目录；只要还装着任何 `claude-mem@*` 插件，就保留 `~/.claude-mem`。`installed_plugins.json` 存在但无法解析时，什么都不删。dry-run 时，主动清理会先卸载的退役插件按已卸载计算，预览因此与实际运行一致。
+- 每项删除都必须同时满足两个条件：条目已退役，且没有已安装的插件仍在使用它。只要 `installed_plugins.json` 里还有 `*@<marketplace>` 或对应的 `plugin@marketplace`，就保留该退役 marketplace 的缓存和该退役插件的数据目录；只要还装着任何 `claude-mem@*` 插件，就保留 `~/.claude-mem`。`installed_plugins.json` 存在但无法解析或没有 `plugins` 对象时，什么都不删。dry-run 时，主动清理会先卸载的退役插件按已卸载计算，预览因此与实际运行一致。
 - 仍在注册中的 marketplace 克隆交给 `claude plugin marketplace remove` 处理。手动删除该目录会让 `known_marketplaces.json` 指向一个不存在的克隆。
 - `temp_git_*` 以其中任一文件的最新 mtime 判断，而不只看顶层目录，因此另一个会话正在写入的克隆不会被删除。
 - 删除 `~/.claude-mem`，是因为当初退役 claude-mem 的决定本来就包括删除它的数据。删除前会检查 claude-mem 进程（`pgrep -f claude-mem`，没有 pgrep 时用 `ps`；Windows 上检查进程命令行）。有进程在运行或检查失败时，保留目录并提示重跑命令，从不结束进程。
@@ -28,6 +28,7 @@
 - 两个安装器都不读取 `CLAUDE_CONFIG_DIR`（一律使用 `~/.claude` 与 `~/.claude.json`），这一步也一样。
 - install.ps1 只在 PowerShell 7 下清理 `~/.claude.json`；Windows PowerShell 5.1 会跳过这一步并给出提示。符号链接与 junction 只删除链接本身，不会跟随。
 - 有意不处理 `~/.claude/skills/learned` 与 `~/.claude/skills/synced`：前者由 ECC 的 continuous-learning hook 使用，后者存放从 claude.ai 同步的 skill。
+- `~/.claude.json` 是符号链接时（例如由 dotfiles 仓库管理）不做修改，以免链接被替换成普通文件。
 - 校验和检查仍有很小的时间窗口：若 Claude Code 恰好在检查与重命名之间写入，那次写入会丢失，这种情况可以用备份恢复。
 - 测试：`tests/test_retired_leftovers.py`（在临时 HOME 中 source install.sh，用桩 `claude` / `pgrep`，另含完整的 `--only` 与 `--uninstall` 运行），以及 `tests/install_ps1_retired_leftovers.ps1`（安装了 `pwsh` 时由 `tests/test_install_ps1_retired_leftovers.py` 运行）。
 

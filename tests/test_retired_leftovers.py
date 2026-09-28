@@ -170,6 +170,28 @@ def test_unreadable_plugin_state_deletes_nothing(h: Home) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("state", ['{"version": 2, "plugins": ["claude-mem@thedotmack"]}', '{"version": 3}', "[]"])
+def test_unknown_plugin_state_shape_deletes_nothing(h: Home, state: str) -> None:
+    seed_retired(h)
+    h.make(".claude-mem/claude-mem.db")
+    (h.plugins / "installed_plugins.json").write_text(state)
+    before = h.snapshot()
+    h.run()
+    assert h.snapshot() == before
+
+
+@pytest.mark.unit
+def test_symlinked_claude_json_not_replaced(h: Home) -> None:
+    real = h.home / "dotfiles" / "claude.json"
+    real.parent.mkdir()
+    real.write_text(json.dumps(UNRELATED_CFG))
+    (h.home / ".claude.json").symlink_to(real)
+    h.run()
+    assert (h.home / ".claude.json").is_symlink()
+    assert json.loads(real.read_text()) == UNRELATED_CFG
+
+
+@pytest.mark.unit
 def test_temp_git_only_old_ones_removed(h: Home) -> None:
     old = h.make(".claude/plugins/cache/temp_git_111/repo/file").parents[1]
     young = h.make(".claude/plugins/cache/temp_git_222/repo/file").parents[1]

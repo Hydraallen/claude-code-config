@@ -15,7 +15,7 @@
 
 ### Design Rationale
 - `claude plugin uninstall` and `marketplace remove` do not delete caches, data dirs or usage records. So after the 4.2.0 tombstones ran, the retired plugins were gone, but gigabytes of cache and the claude-mem database stayed on disk. The sweep runs on every run for the same reason the tombstones do: many machines only ever get unattended or `--only` runs.
-- Every deletion requires both conditions: the item is retired, and no installed plugin still uses it. A retired marketplace's cache and a retired plugin's data dir are kept while any `*@<marketplace>` / that `plugin@marketplace` key is still in `installed_plugins.json`. `~/.claude-mem` is kept while any `claude-mem@*` plugin is installed. If `installed_plugins.json` exists but cannot be parsed, the sweep deletes nothing. In a dry run, retired plugins that the tombstone sweep would uninstall first count as gone, so the preview matches a real run.
+- Every deletion requires both conditions: the item is retired, and no installed plugin still uses it. A retired marketplace's cache and a retired plugin's data dir are kept while any `*@<marketplace>` / that `plugin@marketplace` key is still in `installed_plugins.json`. `~/.claude-mem` is kept while any `claude-mem@*` plugin is installed. If `installed_plugins.json` exists but cannot be parsed, or has no `plugins` object, the sweep deletes nothing. In a dry run, retired plugins that the tombstone sweep would uninstall first count as gone, so the preview matches a real run.
 - A marketplace clone that is still registered is left to `claude plugin marketplace remove`. Deleting the directory by hand would leave `known_marketplaces.json` pointing at a missing clone.
 - A `temp_git_*` clone is judged by the newest mtime anywhere inside it, not just by the top-level directory. A clone being written by another session is therefore never removed.
 - `~/.claude-mem` is removed because retiring claude-mem was meant to remove its data too. The sweep checks for running claude-mem processes (`pgrep -f claude-mem`, else `ps`; on Windows, the process command lines). If any are running, or if the check fails, it keeps the directory and prints the command to re-run. It never kills processes.
@@ -26,6 +26,7 @@
 - Neither installer honours `CLAUDE_CONFIG_DIR` (both use `~/.claude` and `~/.claude.json`), so neither does this sweep.
 - install.ps1 cleans `~/.claude.json` only under PowerShell 7. Windows PowerShell 5.1 skips that one step with a notice. Symlinks and junctions are deleted as links, never followed.
 - `~/.claude/skills/learned` and `~/.claude/skills/synced` are deliberately not touched. `learned` belongs to the ECC continuous-learning hook, and `synced` holds skills synced from claude.ai.
+- A symlinked `~/.claude.json` (for example one managed by a dotfiles repo) is never edited, so the link is not replaced by a regular file.
 - The checksum check leaves a small window: a Claude Code write that lands between the check and the rename is lost. The backup covers that case.
 - Tests: `tests/test_retired_leftovers.py` (sources install.sh in a throwaway HOME with stubbed `claude` / `pgrep`, plus full `--only` and `--uninstall` runs) and `tests/install_ps1_retired_leftovers.ps1` (run through `tests/test_install_ps1_retired_leftovers.py` when `pwsh` is installed).
 

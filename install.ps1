@@ -3089,10 +3089,10 @@ function Get-LeftoverEffectiveKeys {
     if (Test-Path -LiteralPath $state -PathType Leaf) {
         try {
             $parsed = Get-Content -LiteralPath $state -Raw | ConvertFrom-Json
-            if ($null -eq $parsed) { return $null }
-            if ($parsed.PSObject.Properties['plugins'] -and $null -ne $parsed.plugins) {
-                $keys = @($parsed.plugins.PSObject.Properties | ForEach-Object { $_.Name })
-            }
+            # Unknown shape (no "plugins" object) counts as unreadable.
+            if ($null -eq $parsed -or -not $parsed.PSObject.Properties['plugins']) { return $null }
+            if ($parsed.plugins -isnot [System.Management.Automation.PSCustomObject]) { return $null }
+            $keys = @($parsed.plugins.PSObject.Properties | ForEach-Object { $_.Name })
         } catch { return $null }
     }
     if ($DryRun -and (Get-Command claude -ErrorAction SilentlyContinue)) {
@@ -3259,6 +3259,10 @@ function Remove-LeftoverClaudeJsonUsage {
     param([string[]]$Keys)
     $cfg = Join-Path $env:USERPROFILE ".claude.json"
     if (-not (Test-Path -LiteralPath $cfg -PathType Leaf)) { return }
+    if ((Get-Item -LiteralPath $cfg -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        Write-Info "~/.claude.json is a symlink - not editing retired usage records in it"
+        return
+    }
     $nodeType = "System.Text.Json.Nodes.JsonNode" -as [type]
     if (-not $nodeType) {
         Write-Info "Skipping retired usage records in ~/.claude.json (needs PowerShell 7)"
