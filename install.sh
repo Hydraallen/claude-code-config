@@ -1055,6 +1055,12 @@ deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-
 Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/session|0|mcp-lark")
 
     local num_groups=${#GROUP_LABELS[@]}
+    # Index of the Review group (its adversarial/codex items are mutually
+    # exclusive). Looked up by label so inserting a group cannot shift it.
+    local review_g=-1 _g
+    for (( _g=0; _g<num_groups; _g++ )); do
+        [[ "${GROUP_LABELS[$_g]}" == "Review" ]] && review_g=$_g
+    done
 
     # Flatten all items into parallel arrays for indexing
     local -a ALL_LABELS=() ALL_DESCS=() ALL_DEFAULTS=() ALL_IDS=()
@@ -1164,12 +1170,12 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
         if [[ ${selected[$toggled_idx]} -eq 1 ]]; then
             if [[ "$toggled_id" == "review-adversarial" ]]; then
                 # Find and turn off review-codex
-                for (( j=GROUP_START[2]; j<=GROUP_END[2]; j++ )); do
+                for (( j=GROUP_START[review_g]; j<=GROUP_END[review_g]; j++ )); do
                     [[ "${ALL_IDS[$j]}" == "review-codex" ]] && selected[$j]=0 || true
                 done
             elif [[ "$toggled_id" == "review-codex" ]]; then
                 # Find and turn off review-adversarial
-                for (( j=GROUP_START[2]; j<=GROUP_END[2]; j++ )); do
+                for (( j=GROUP_START[review_g]; j<=GROUP_END[review_g]; j++ )); do
                     [[ "${ALL_IDS[$j]}" == "review-adversarial" ]] && selected[$j]=0 || true
                 done
             fi
@@ -1340,8 +1346,8 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
                                 selected[$j]=1
                             done
                             # Re-enforce mutex only when in the Review group
-                            if (( sub_g == 2 )); then
-                                for (( j=GROUP_START[2]; j<=GROUP_END[2]; j++ )); do
+                            if (( sub_g == review_g )); then
+                                for (( j=GROUP_START[review_g]; j<=GROUP_END[review_g]; j++ )); do
                                     [[ "${ALL_IDS[$j]}" == "review-codex" ]] && selected[$j]=0 || true
                                 done
                             fi
@@ -1368,7 +1374,7 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
             ALL)
                 for (( i=0; i<n; i++ )); do selected[$i]=1; done
                 # Enforce review mutex: "select all" keeps adversarial ON, codex OFF
-                for (( j=${GROUP_START[2]}; j<=${GROUP_END[2]}; j++ )); do
+                for (( j=${GROUP_START[review_g]}; j<=${GROUP_END[review_g]}; j++ )); do
                     [[ "${ALL_IDS[$j]}" == "review-codex" ]] && selected[$j]=0 || true
                 done
                 ;;
