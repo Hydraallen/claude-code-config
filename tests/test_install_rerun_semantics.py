@@ -442,3 +442,26 @@ def test_dry_run_previews_every_removal_without_changes(tmp_path: Path) -> None:
         "Would remove marketplace (no remaining plugin needs it): openai-codex",
     ):
         assert needle in out, needle
+
+
+def test_pinned_upstream_skill_detected_and_backed_up_on_deselect(tmp_path: Path) -> None:
+    e = Env(tmp_path)
+    src = tmp_path / "stage" / "neat-freak"
+    src.mkdir(parents=True)
+    (src / "SKILL.md").write_text("---\nname: neat-freak\n---\npinned\n")
+    origin = "script-installer:https://github.com/KKKKhazix/khazix-skills@2b4a645cfdc894156ae347d897723562f719ce95"
+    subprocess.run(
+        ["python3", str(ROOT / "scripts" / "managed_files.py"), "--root", str(e.claude),
+         "install", str(src), "skills/neat-freak", "--item", "neat-freak", "--origin", origin],
+        check=True, capture_output=True,
+    )
+    e.run("--dry-run", menu="@initial", state_out=True)
+    assert e.menu_state()["skill-neat-freak"] == 1
+    (e.claude / "skills" / "neat-freak" / "SKILL.md").write_text("my edits\n")
+    out = e.run(menu="claude-md,settings").stdout
+    assert not (e.claude / "skills" / "neat-freak").exists()
+    assert "differed from the installed copy" in out
+    backups = list((e.claude / "agent-config" / "backups").glob("*/neat-freak/SKILL.md"))
+    assert [b.read_text() for b in backups] == ["my edits\n"]
+    files = json.loads((e.claude / "agent-config" / "files.json").read_text())["files"]
+    assert "skills/neat-freak" not in files
