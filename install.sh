@@ -1611,6 +1611,68 @@ _supports_auto_mode() {
     (( major > 2 || (major == 2 && minor > 1) || (major == 2 && minor == 1 && patch >= 80) ))
 }
 
+# Compose the incoming settings from the shared templates under
+# platforms/claude/templates/ (the same fragments the agent-guided path merges
+# one by one) plus the fork's plugins.json. statusline.json and
+# lessons-hooks.json are only included when that item is selected, so the
+# composed file never carries a statusLine or SessionStart hook the user did
+# not ask for. Objects are deep-merged in order; the fragments share no arrays.
+# Echoes the path of a temp file holding the result; the caller deletes it.
+compose_settings_template() {
+    local with_sl="$1" with_lh="$2"
+    local t="$CLAUDE_TEMPLATES_DIR"
+    local parts=("$t/settings.json" "$t/permissions.json" "$t/plugins.json")
+    [[ "$with_sl" == true ]] && parts+=("$t/statusline.json")
+    [[ "$with_lh" == true ]] && parts+=("$t/lessons-hooks.json")
+    local p
+    for p in "${parts[@]}"; do
+        if [[ ! -f "$p" ]]; then
+            error "Settings template missing: $p" >&2
+            return 1
+        fi
+    done
+    local out
+    out="$(mktemp)" || return 1
+    if command -v jq &>/dev/null; then
+        if ! jq -s 'reduce .[] as $x ({}; . * $x)' "${parts[@]}" > "$out"; then
+            rm -f "$out"
+            return 1
+        fi
+    elif command -v python3 &>/dev/null; then
+        if ! python3 - "${parts[@]}" > "$out" <<'PY'
+import json
+import sys
+
+
+def merge(base, over):
+    result = dict(base)
+    for key, value in over.items():
+        if isinstance(result.get(key), dict) and isinstance(value, dict):
+            result[key] = merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+composed = {}
+for path in sys.argv[1:]:
+    with open(path, encoding="utf-8") as handle:
+        composed = merge(composed, json.load(handle))
+json.dump(composed, sys.stdout, indent=2, ensure_ascii=False)
+sys.stdout.write("\n")
+PY
+        then
+            rm -f "$out"
+            return 1
+        fi
+    else
+        rm -f "$out"
+        error "Neither jq nor python3 is available to compose settings.json" >&2
+        return 1
+    fi
+    echo "$out"
+}
+
 install_settings() {
     info "Installing settings.json..."
 
@@ -1618,6 +1680,24 @@ install_settings() {
     # need it. Without this, fresh installs on jq-less machines silently skipped
     # the plugin filter (bug_003) when statusline+lessons were both kept default-on.
     install_jq || true
+
+    # Dry-run never reads the composed content (every dry-run branch below only
+    # prints), so skip the temp-file write to keep the preview side-effect-free.
+    local incoming=""
+    if ! $DRY_RUN; then
+        if ! incoming="$(compose_settings_template "$INSTALL_STATUSLINE" "$INSTALL_LESSONS")"; then
+            error "Could not compose settings.json from $CLAUDE_TEMPLATES_DIR"
+            (( INSTALL_CRITICAL++ )) || true
+            return
+        fi
+    fi
+    _install_settings_from "$incoming"
+    [[ -n "$incoming" ]] && rm -f "$incoming"
+    return 0
+}
+
+_install_settings_from() {
+    local incoming="$1"
 
     # Auto mode detection: downgrade to bypassPermissions if Claude Code is too old
     local USE_AUTO_MODE=true
@@ -1637,29 +1717,9 @@ install_settings() {
             $INSTALL_LESSONS    || info "  - hooks.SessionStart: skipped (not selected)"
             $CO_AUTHOR          && info "  - includeCoAuthoredBy: true" || info "  - includeCoAuthoredBy: skipped (not selected)"
         else
-            if ! $INSTALL_STATUSLINE || ! $INSTALL_LESSONS; then
-                if command -v jq &>/dev/null; then
-                    local filter="."
-                    $INSTALL_STATUSLINE || filter="$filter | del(.statusLine)"
-                    $INSTALL_LESSONS    || filter="$filter | del(.hooks.SessionStart)"
-                    jq "$filter" "$SCRIPT_DIR/settings.json" > "$CLAUDE_DIR/settings.json"
-                else
-                    # Fallback: use sed to strip unwanted fields (jq unavailable)
-                    cp "$SCRIPT_DIR/settings.json" "$CLAUDE_DIR/settings.json"
-                    if ! $INSTALL_STATUSLINE && command -v sed &>/dev/null; then
-                        local _sedtmp="$CLAUDE_DIR/settings.json._sedtmp"
-                        sed '/"statusLine"/,/^    }$/d' "$CLAUDE_DIR/settings.json" > "$_sedtmp" && mv "$_sedtmp" "$CLAUDE_DIR/settings.json"
-                    fi
-                    if ! $INSTALL_LESSONS && command -v sed &>/dev/null; then
-                        local _sedtmp="$CLAUDE_DIR/settings.json._sedtmp"
-                        sed '/"SessionStart"/,/^        \]/d' "$CLAUDE_DIR/settings.json" > "$_sedtmp" && mv "$_sedtmp" "$CLAUDE_DIR/settings.json"
-                    fi
-                    warn "jq not available — used sed fallback for settings.json field removal"
-                    (( INSTALL_WARNINGS++ )) || true
-                fi
-            else
-                cp "$SCRIPT_DIR/settings.json" "$CLAUDE_DIR/settings.json"
-            fi
+            # statusLine / SessionStart are already absent from $incoming when
+            # their item is not selected (see compose_settings_template).
+            cp "$incoming" "$CLAUDE_DIR/settings.json"
             # Downgrade auto -> bypassPermissions if Claude Code too old
             if ! $USE_AUTO_MODE && [[ -f "$CLAUDE_DIR/settings.json" ]]; then
                 if command -v jq &>/dev/null; then
@@ -1701,7 +1761,7 @@ install_settings() {
     if ! command -v jq &>/dev/null; then
         warn "settings.json already exists and jq is not installed"
         warn "  Cannot perform smart merge. Please merge manually:"
-        warn "  Source: $SCRIPT_DIR/settings.json"
+        warn "  Source: $CLAUDE_TEMPLATES_DIR/{settings,permissions,plugins,statusline,lessons-hooks}.json"
         warn "  Target: $CLAUDE_DIR/settings.json"
         (( INSTALL_CRITICAL++ )) || true
         return
@@ -1747,7 +1807,6 @@ install_settings() {
     fi
 
     local existing="$CLAUDE_DIR/settings.json"
-    local incoming="$SCRIPT_DIR/settings.json"
     local merged
     merged="$(mktemp)"
 
@@ -1808,9 +1867,15 @@ install_settings() {
     # Strip tombstoned (removed) plugins so they do not linger enabled after upgrade.
     (reduce $removed[] as $r ($plugins_pre; del(.[$r]))) as $plugins |
 
-    # hooks.SessionStart: deduplicate by matcher (only merge incoming if lessons selected)
+    # hooks.SessionStart: deduplicate by matcher (only merge incoming if lessons selected).
+    # Existing entries that are the installer-managed lessons hook (their command
+    # sets LESSONS_FILE=) are dropped first so the current template replaces an
+    # older copy — e.g. one without the 9,000-byte guard against the Claude Code
+    # 10,000-character hook-output preview. Other existing entries still win.
     (if $inc_lh then
-      (($base.hooks.SessionStart // []) + ($over.hooks.SessionStart // []))
+      (($over.hooks.SessionStart // [])
+        | map(select(((.hooks // []) | map(.command? // "") | any(test("LESSONS_FILE="))) | not))) as $over_ss |
+      (($base.hooks.SessionStart // []) + $over_ss)
       | group_by(.matcher)
       | map(last)
     else
@@ -1849,7 +1914,7 @@ install_settings() {
     else
         rm -f "$merged"
         error "Merge produced invalid JSON — keeping existing file"
-        warn "Please merge manually: $incoming -> $existing"
+        warn "Please merge manually: $CLAUDE_TEMPLATES_DIR/*.json -> $existing"
         (( INSTALL_CRITICAL++ )) || true
     fi
 }

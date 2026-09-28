@@ -1,8 +1,14 @@
 {
   "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+    "FORCE_AUTOUPDATE_PLUGINS": "1",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "API_TIMEOUT_MS": "3000000",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION": "claude-fable-5",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "Fable 5 (1M)",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "Claude Fable 5 - most capable, 1M context"
   },
   "model": "opus",
   "effortLevel": "xhigh",
-  "tui": "fullscreen"
+  "tui": "fullscreen",
+  "includeCoAuthoredBy": false
 }

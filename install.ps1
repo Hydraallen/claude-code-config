@@ -853,6 +853,55 @@ function Get-EffectiveSelectedPlugins {
     return @($pkgs | Select-Object -Unique)
 }
 
+# Recursively merge two JSON objects (ConvertFrom-Json output); $Over wins on
+# conflict, nested objects are merged, arrays and scalars are replaced.
+function Merge-JsonDeep {
+    param($Base, $Over)
+    if ($null -eq $Base) { return $Over }
+    if ($null -eq $Over) { return $Base }
+    if (-not ($Base -is [System.Management.Automation.PSCustomObject]) -or
+        -not ($Over -is [System.Management.Automation.PSCustomObject])) {
+        return $Over
+    }
+    $result = [ordered]@{}
+    foreach ($prop in $Base.PSObject.Properties) { $result[$prop.Name] = $prop.Value }
+    foreach ($prop in $Over.PSObject.Properties) {
+        if ($result.Contains($prop.Name)) {
+            $result[$prop.Name] = Merge-JsonDeep -Base $result[$prop.Name] -Over $prop.Value
+        } else {
+            $result[$prop.Name] = $prop.Value
+        }
+    }
+    return [PSCustomObject]$result
+}
+
+# Compose the incoming settings from the shared templates under
+# platforms\claude\templates (the same fragments the agent-guided path merges
+# one by one) plus the fork's plugins.json. Returns a PSCustomObject.
+function Get-ComposedSettingsTemplate {
+    $t = Get-ClaudeTemplatesDir
+    $composed = [PSCustomObject]@{}
+    foreach ($name in @("settings.json", "permissions.json", "plugins.json", "statusline.json", "lessons-hooks.json")) {
+        $path = Join-Path $t $name
+        if (-not (Test-Path $path)) { throw "Settings template missing: $path" }
+        $part = Get-Content $path -Raw | ConvertFrom-Json
+        $composed = Merge-JsonDeep -Base $composed -Over $part
+    }
+    return $composed
+}
+
+# True when a SessionStart entry is the installer-managed lessons hook (its
+# command sets LESSONS_FILE=). Such entries are replaced by the current
+# template on merge, e.g. to pick up the 9,000-byte output guard.
+function Test-LessonsHookEntry {
+    param($Entry)
+    if ($null -eq $Entry -or $null -eq $Entry.hooks) { return $false }
+    foreach ($h in @($Entry.hooks)) {
+        if ($h.command -and ($h.command -match 'LESSONS_FILE=')) { return $true }
+    }
+    return $false
+}
+
 function Install-Settings {
     param(
         [bool]$InstallPlugins = $false,
@@ -861,7 +910,7 @@ function Install-Settings {
     )
     Write-Info "Installing settings.json..."
     $target = Join-Path $CLAUDE_DIR "settings.json"
-    $source = Join-Path $SCRIPT_DIR "settings.json"
+    $source = Join-Path (Get-ClaudeTemplatesDir) "*.json"
 
     $effectiveSelected = @()
     if ($InstallPlugins) {
@@ -874,7 +923,13 @@ function Install-Settings {
         if ($DryRun) {
             Write-Info "Would copy: settings.json -> $target"
         } else {
-            Copy-Item $source $target -Force
+            try {
+                Get-ComposedSettingsTemplate | ConvertTo-Json -Depth 20 | Set-Content $target -Encoding UTF8
+            } catch {
+                Write-Err "Could not compose settings.json: $_"
+                $script:InstallCritical++
+                return
+            }
             if ($InstallPlugins) {
                 try {
                     Set-StrictMode -Off
@@ -938,7 +993,7 @@ function Install-Settings {
         Set-StrictMode -Off
 
         $existing = Get-Content $target -Raw | ConvertFrom-Json
-        $incoming = Get-Content $source -Raw | ConvertFrom-Json
+        $incoming = Get-ComposedSettingsTemplate
 
         # Helper: convert PSCustomObject to ordered hashtable
         $toHt = {
@@ -1010,7 +1065,9 @@ function Install-Settings {
             foreach ($h in @($incoming.hooks.SessionStart)) { if ($h.matcher) { $sessionHooks[$h.matcher] = $h } }
         }
         if ($existing.hooks -and $existing.hooks.SessionStart) {
-            foreach ($h in @($existing.hooks.SessionStart)) { if ($h.matcher) { $sessionHooks[$h.matcher] = $h } }
+            foreach ($h in @($existing.hooks.SessionStart)) {
+                if ($h.matcher -and -not (Test-LessonsHookEntry -Entry $h)) { $sessionHooks[$h.matcher] = $h }
+            }
         }
         $mergedSessionHooks = @($sessionHooks.Values)
 
