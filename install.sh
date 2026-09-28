@@ -850,6 +850,18 @@ PLUGINS_AI_RESEARCH=(
     "optimization@ai-research-skills"
 )
 
+# Review plugins (Review group). Part of the installer-owned catalogue so an
+# interactive run that unchecks them uninstalls them (they used to be only
+# disabled in settings.json). Neither is installed by the essential group.
+PLUGINS_REVIEW=(
+    "code-review@claude-plugins-official"
+    "codex@openai-codex"
+)
+
+# Marketplaces reconciliation never removes, even when no selected plugin
+# needs them: claude-plugins-official is Claude Code's built-in catalog.
+PROTECTED_MARKETPLACES=("claude-plugins-official")
+
 # Plugins/marketplaces retired or renamed upstream. Re-running the installer
 # uninstalls these stale ids and removes their orphaned marketplaces so a
 # rename (e.g. everything-claude-code -> ecc) self-heals on the next run.
@@ -1928,8 +1940,10 @@ _install_settings_from() {
             fi
             # Apply enabledPlugins selection filter. Catalogue = source keys ∪ selection,
             # so plugins picked in the menu that aren't declared in the shipped
-            # settings.json (e.g. codex) still land as true.
-            if $INSTALL_PLUGINS && ! $ONLY_MODE && command -v jq &>/dev/null && [[ -f "$CLAUDE_DIR/settings.json" ]]; then
+            # settings.json (e.g. codex) still land as true. A fresh file has
+            # nothing to disable, so every mode gets it: template keys that were
+            # not selected (and so are not installed) are written as false.
+            if command -v jq &>/dev/null && [[ -f "$CLAUDE_DIR/settings.json" ]]; then
                 local sel_json; sel_json="$(_effective_selected_plugins_json)"
                 local tmp; tmp="$(jq --argjson selected "$sel_json" '
                     ($selected | reduce .[] as $p ({}; .[$p] = true)) as $sel |
@@ -1968,10 +1982,10 @@ _install_settings_from() {
         info "Would smart-merge settings.json (jq available)"
         info "  - env: incoming as defaults, existing overrides"
         info "  - permissions.allow: union of arrays"
-        if $INSTALL_PLUGINS && ! $ONLY_MODE; then
+        if plugin_reconcile_enabled; then
             info "  - enabledPlugins: selection-aware rebuild (unselected known plugins disabled, unknown plugins preserved)"
         else
-            info "  - enabledPlugins: union (existing preserved on conflict)"
+            info "  - enabledPlugins: additive (selected enabled, existing preserved, nothing disabled)"
         fi
         if $INSTALL_LESSONS; then
             info "  - hooks.SessionStart: deduplicated by matcher"
@@ -2004,8 +2018,9 @@ _install_settings_from() {
     local selected_json
     selected_json="$(_effective_selected_plugins_json)"
     local apply_sel=false
-    # --only is additive: never disable plugins that were simply not listed.
-    $INSTALL_PLUGINS && ! $ONLY_MODE && apply_sel=true
+    # Only a reconciling (interactive) run disables unselected plugins; --all,
+    # --only and the non-interactive default never disable anything.
+    plugin_reconcile_enabled && apply_sel=true
 
     # Tombstoned plugin keys to strip from a user's existing enabledPlugins on upgrade.
     local removed_json
@@ -2047,8 +2062,10 @@ _install_settings_from() {
          ($known_map + $over_only)
        )
      else
-       # Fallback union: existing ($over) wins on conflict per the documented promise.
-       (($base.enabledPlugins // {}) * ($over.enabledPlugins // {}))
+       # Additive: existing ($over) wins on conflict per the documented promise;
+       # template keys the user does not have yet are added as false (they are
+       # not installed by this run), and the selection of this run is enabled.
+       ((($base.enabledPlugins // {}) | map_values(false)) * ($over.enabledPlugins // {}) + $sel)
      end) as $plugins_pre |
     # Strip tombstoned (removed) plugins so they do not linger enabled after upgrade.
     (reduce $removed[] as $r ($plugins_pre; del(.[$r]))) as $plugins |
@@ -4308,6 +4325,7 @@ build_plugin_catalogue() {
         "${PLUGINS_ESSENTIAL[@]}"
         "${PLUGINS_OPTIONAL[@]}"
         "${PLUGINS_AI_RESEARCH[@]}"
+        "${PLUGINS_REVIEW[@]}"
     )
     local seen="" entry
     for entry in "${all[@]}"; do
@@ -4331,10 +4349,15 @@ build_plugin_catalogue() {
 # bash 3.2 compatible: pipe-delimited "set" strings, no assoc arrays.
 compute_plugins_to_prune() {
     local catalogue_set="" selected_set="" entry
-    # Empty selection means "prune nothing", never "prune everything" — the same
-    # safety valve prune_unlisted_plugins() enforces, repeated here so the
-    # invariant survives any future caller that forgets to guard.
-    [[ ${#RESOLVED_PLUGINS[@]} -gt 0 ]] || return 0
+    # Under scope=all an empty selection means "prune nothing", never "prune
+    # everything" — the same safety valve prune_unlisted_plugins() enforces,
+    # repeated here so the invariant survives any future caller that forgets to
+    # guard. Under the default catalogue scope an empty selection is a real
+    # answer (the user unchecked every plugin item) and is bounded by the
+    # catalogue, so it prunes the installer-owned plugins only.
+    if [[ ${#RESOLVED_PLUGINS[@]} -eq 0 && "$PLUGIN_PRUNE_SCOPE" == "all" ]]; then
+        return 0
+    fi
     if [[ ${#CATALOGUE_PLUGINS[@]} -gt 0 ]]; then
         for entry in "${CATALOGUE_PLUGINS[@]}"; do
             catalogue_set="$catalogue_set|$entry|"
@@ -4426,11 +4449,18 @@ read_local_marketplaces() {
 # bash 3.2 compatible: pipe-delimited "set" strings, no assoc arrays.
 compute_marketplaces_to_remove() {
     local needed="" entry name
-    # Empty survivor set means "remove nothing", never "remove every
-    # marketplace". Same safety valve as compute_plugins_to_prune().
-    [[ ${#SURVIVING_PLUGINS[@]} -gt 0 ]] || return 0
-    for entry in "${SURVIVING_PLUGINS[@]}"; do
+    # Under scope=all an empty survivor set means "remove nothing", never
+    # "remove every marketplace". Same safety valve as compute_plugins_to_prune().
+    # Under the catalogue scope only installer-owned marketplaces are candidates,
+    # so an empty survivor set is safe to act on.
+    if [[ ${#SURVIVING_PLUGINS[@]} -eq 0 && "$PLUGIN_PRUNE_SCOPE" == "all" ]]; then
+        return 0
+    fi
+    for entry in ${SURVIVING_PLUGINS[@]+"${SURVIVING_PLUGINS[@]}"}; do
         needed="$needed|${entry##*@}|"
+    done
+    for entry in "${PROTECTED_MARKETPLACES[@]}"; do
+        needed="$needed|$entry|"
     done
     [[ ${#LOCAL_MARKETPLACES[@]} -gt 0 ]] || return 0
     local owned=""
@@ -4449,11 +4479,48 @@ compute_marketplaces_to_remove() {
     done
 }
 
+# resolve_plugin_selection: set RESOLVED_PLUGINS to this run's deduplicated
+# plugin selection (SELECTED_PLUGINS plus PLUGIN_GROUPS expansion). Runs before
+# the plugin step and independently of it, so reconciliation always judges
+# against the real selection — even when install_plugins() bails out early
+# (no git) or was not needed (every plugin item unchecked).
+resolve_plugin_selection() {
+    local plugins=() group entry seen=""
+    if [[ ${#SELECTED_PLUGINS[@]} -gt 0 ]]; then
+        plugins+=("${SELECTED_PLUGINS[@]}")
+    fi
+    for group in ${PLUGIN_GROUPS[@]+"${PLUGIN_GROUPS[@]}"}; do
+        case "$group" in
+            essential|core) plugins+=("${PLUGINS_ESSENTIAL[@]}") ;;
+            ai-research)    plugins+=("${PLUGINS_AI_RESEARCH[@]}") ;;
+            all)            plugins+=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_AI_RESEARCH[@]}") ;;
+        esac
+    done
+    RESOLVED_PLUGINS=()
+    for entry in ${plugins[@]+"${plugins[@]}"}; do
+        [[ "$seen" == *"|$entry|"* ]] && continue
+        RESOLVED_PLUGINS+=("$entry")
+        seen="$seen|$entry|"
+    done
+}
+
+# 0 when this run reconciles installed plugins against its selection
+# (uninstalls unselected installer-owned plugins, drops their marketplaces and
+# enabledPlugins entries). Only a complete interactive selection does; --all,
+# --only and the non-interactive default run are additive. An explicit
+# --prune-foreign-plugins keeps its documented meaning on non --only runs.
+plugin_reconcile_enabled() {
+    $FULL_SELECTION && return 0
+    ! $ONLY_MODE && $INSTALL_PLUGINS && [[ "$PLUGIN_PRUNE_SCOPE" == "all" ]]
+}
+
 install_plugins() {
     if ! command -v claude &>/dev/null; then
         error "Claude Code CLI not found. Install it first: https://claude.com/claude-code"
         return 1
     fi
+
+    resolve_plugin_selection
 
     if ! command -v git &>/dev/null; then
         warn "git not found — skipping plugin installation (marketplaces are git clones)"
@@ -4503,12 +4570,8 @@ install_plugins() {
         warn "humanizer@humanizer needs Claude Code >= 2.1.142 ($(claude --version 2>/dev/null | head -1 || echo unknown) found) — update Claude Code if /humanizer:humanizer does not load"
     fi
 
-    # Expose the deduped selection globally so prune_unlisted_plugins() can
-    # reconcile installed plugins against what was selected this run.
-    RESOLVED_PLUGINS=()
-    if [[ ${#plugins[@]} -gt 0 ]]; then
-        RESOLVED_PLUGINS=("${plugins[@]}")
-    fi
+    # RESOLVED_PLUGINS (set by resolve_plugin_selection above) is the same
+    # deduped list; prune_unlisted_plugins() reconciles against it.
 
     # Collect required marketplaces from selected plugins
     local marketplace_list=(
@@ -4694,7 +4757,12 @@ prune_unlisted_plugins() {
     # the back of an empty set. Losing the ability to deselect-all-to-remove-all
     # is the cheaper failure; do not "fix" this by removing the guard. The
     # $INSTALL_PLUGINS gate in main() does not cover this case.
-    [[ ${#RESOLVED_PLUGINS[@]} -gt 0 ]] || return
+    # Under the default catalogue scope the prune set is bounded by the
+    # catalogue, so an empty selection (every plugin item unchecked in the
+    # interactive selector) does uninstall the installer-owned plugins.
+    if [[ ${#RESOLVED_PLUGINS[@]} -eq 0 && "$PLUGIN_PRUNE_SCOPE" == "all" ]]; then
+        return
+    fi
     local list_json="$HOME/.claude/plugins/installed_plugins.json"
 
     if ! command -v jq &>/dev/null || [[ ! -f "$list_json" ]]; then
@@ -4756,7 +4824,9 @@ prune_unlisted_plugins() {
 prune_unlisted_marketplaces() {
     command -v claude &>/dev/null || return
     # Same empty-selection safety valve as prune_unlisted_plugins().
-    [[ ${#RESOLVED_PLUGINS[@]} -gt 0 ]] || return
+    if [[ ${#RESOLVED_PLUGINS[@]} -eq 0 && "$PLUGIN_PRUNE_SCOPE" == "all" ]]; then
+        return
+    fi
 
     local list_json="$HOME/.claude/plugins/installed_plugins.json"
     if ! command -v jq &>/dev/null || [[ ! -f "$list_json" ]]; then
@@ -4826,7 +4896,9 @@ sync_enabled_plugins_settings() {
     [[ -f "$settings" ]] || return
     command -v jq &>/dev/null || return
     # Same empty-selection safety valve as prune_unlisted_plugins().
-    [[ ${#RESOLVED_PLUGINS[@]} -gt 0 ]] || return
+    if [[ ${#RESOLVED_PLUGINS[@]} -eq 0 && "$PLUGIN_PRUNE_SCOPE" == "all" ]]; then
+        return
+    fi
 
     local sel_json; sel_json="$(_effective_selected_plugins_json)"
     # Under the default catalogue scope, entries for plugins this installer
@@ -4878,17 +4950,20 @@ update_installed_plugins() {
 
     local list_json="$HOME/.claude/plugins/installed_plugins.json"
 
-    # Build the catalogue set so we SKIP installer-managed plugins here: the
-    # selected ones were just reinstalled fresh by install_plugins(), and the
-    # unselected ones were already removed by prune_unlisted_plugins(). We only
-    # `claude plugin update` the PRESERVED user-owned third-party plugins, and
-    # we never resurrect a pruned plugin. Under PLUGIN_PRUNE_SCOPE=all nothing
-    # survives outside the catalogue, so this loop simply idles; under the
-    # default catalogue scope it updates the user's own plugins.
+    # SKIP the plugins this run already handled: the selected ones were just
+    # reinstalled fresh by install_plugins(), and pruned ones were uninstalled
+    # by prune_unlisted_plugins() (never resurrect those). Everything else that
+    # is still installed — user-owned third-party plugins, and installer-owned
+    # ones an additive run (--all/--only/default) left alone — is updated.
     local catalogue_set="" centry
-    while IFS= read -r centry; do
-        [[ -n "$centry" ]] && catalogue_set="$catalogue_set|$centry|"
-    done < <(build_plugin_catalogue)
+    if $INSTALL_PLUGINS; then
+        for centry in ${RESOLVED_PLUGINS[@]+"${RESOLVED_PLUGINS[@]}"}; do
+            catalogue_set="$catalogue_set|$centry|"
+        done
+    fi
+    for centry in ${PRUNED_PLUGINS[@]+"${PRUNED_PLUGINS[@]}"}; do
+        catalogue_set="$catalogue_set|$centry|"
+    done
 
     if $DRY_RUN; then
         info "Would refresh each marketplace catalog separately (${NET_TIMEOUT}s cap each)"
@@ -4946,7 +5021,7 @@ update_installed_plugins() {
     local pkg
     while IFS= read -r pkg; do
         [[ -z "$pkg" ]] && continue
-        # Skip installer-managed plugins (already reinstalled or pruned above).
+        # Skip plugins already reinstalled or pruned above.
         [[ "$catalogue_set" == *"|$pkg|"* ]] && continue
         if retry 3 3 "Update plugin $pkg" with_timeout "$NET_TIMEOUT" claude plugin update "$pkg"; then
             ok "Plugin updated: ${pkg%@*}"
@@ -5456,7 +5531,7 @@ uninstall() {
     fi
 
     if command -v claude &>/dev/null; then
-        local all_plugins=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_AI_RESEARCH[@]}" "${PLUGINS_REMOVED[@]}")
+        local all_plugins=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_AI_RESEARCH[@]}" "${PLUGINS_REVIEW[@]}" "${PLUGINS_REMOVED[@]}")
         for entry in "${all_plugins[@]}"; do
             local plugin_name="${entry%%@*}"
             claude plugin uninstall "$entry" 2>/dev/null && \
@@ -6338,21 +6413,23 @@ main() {
     $INSTALL_STATUSLINE && install_statusline
     { $INSTALL_MCP || $INSTALL_LARK; } && install_mcp
     prune_retired_plugins || true
-    if $INSTALL_PLUGINS && ! $ONLY_MODE && [[ "$PLUGIN_PRUNE_SCOPE" == "all" ]] && ! $DRY_RUN; then
+    resolve_plugin_selection
+    if plugin_reconcile_enabled && [[ "$PLUGIN_PRUNE_SCOPE" == "all" ]] && ! $DRY_RUN; then
         info "This run aligns your installed plugins to this run's selection — anything not selected is uninstalled. Preview it any time with: $(basename "$0") --dry-run"
     fi
     $INSTALL_PLUGINS && install_plugins
     # Reconcile what is installed against what was selected this run: uninstall
     # unselected plugins, then drop the marketplaces and enabledPlugins entries
-    # they leave behind. All three are gated on $INSTALL_PLUGINS so a run that
-    # skips the plugin step never reconciles. Order matters: plugins first (a
+    # they leave behind. Only an interactive (full-selection) run reconciles —
+    # including one where every plugin item was unchecked, so the plugin step
+    # itself was skipped. --all, --only and the non-interactive default run are
+    # additive (see plugin_reconcile_enabled). Order matters: plugins first (a
     # marketplace is only orphaned once its plugins are gone), and all of it
     # before update_installed_plugins() so we never spend NET_TIMEOUT refreshing
     # a catalog we are about to delete.
-    # --only is additive and skips reconciliation entirely.
     # (`|| true` keeps the old `a && f` semantics: these helpers return
     # non-zero on their early-exit paths, which must not trip errexit.)
-    if $INSTALL_PLUGINS && ! $ONLY_MODE; then
+    if plugin_reconcile_enabled; then
         prune_unlisted_plugins || true
         prune_unlisted_marketplaces || true
         sync_enabled_plugins_settings || true
