@@ -25,6 +25,10 @@ if [[ ! "$REPO_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
 fi
 REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}"
 VERSION_STAMP_FILE="$CLAUDE_DIR/.awesome-claude-code-config-version"
+# Deployable Claude templates live under platforms/claude/templates/ since the
+# upstream v4 layout (shared with the agent-guided install path). Set by
+# detect_script_dir once SCRIPT_DIR is known.
+CLAUDE_TEMPLATES_DIR=""
 
 # Colors
 RED='\033[0;31m'
@@ -305,7 +309,7 @@ install_nerd_font() {
     mkdir -p "$font_dir"
 
     # Copy bundled fonts from repository
-    local src_dir="$SCRIPT_DIR/fonts"
+    local src_dir="$CLAUDE_TEMPLATES_DIR/fonts"
     if [ ! -d "$src_dir" ] || ! ls "$src_dir"/*.ttf &>/dev/null 2>&1; then
         warn "Bundled fonts not found in $src_dir — statusline will use text fallback"
         return 1
@@ -332,7 +336,7 @@ detect_script_dir() {
     local candidate
     candidate="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-    if [[ -f "$candidate/CLAUDE.md" ]]; then
+    if [[ -f "$candidate/platforms/claude/templates/CLAUDE.md" ]]; then
         # Running from a local clone
         SCRIPT_DIR="$candidate"
         REMOTE_MODE=false
@@ -374,6 +378,20 @@ detect_script_dir() {
 
         SCRIPT_DIR="$tmpdir"
         ok "Source downloaded to temporary directory"
+    fi
+    CLAUDE_TEMPLATES_DIR="$SCRIPT_DIR/platforms/claude/templates"
+}
+
+# Source directory of a repository skill. Claude-specific skills (currently
+# adversarial-review) live under platforms/claude/skills/; shared skills under
+# skills/. Echoes the first existing candidate, or the skills/ path when neither
+# exists so callers report a clear "not found".
+skill_source_dir() {
+    local name="$1"
+    if [[ -d "$SCRIPT_DIR/platforms/claude/skills/$name" ]]; then
+        echo "$SCRIPT_DIR/platforms/claude/skills/$name"
+    else
+        echo "$SCRIPT_DIR/skills/$name"
     fi
 }
 
@@ -1493,7 +1511,7 @@ install_claude_md() {
     else
         # Prepare new content in a temp file
         local new_claude_md; new_claude_md="$(mktemp)"
-        cp "$SCRIPT_DIR/CLAUDE.md" "$new_claude_md"
+        cp "$CLAUDE_TEMPLATES_DIR/CLAUDE.md" "$new_claude_md"
         # Rewrite the Code Review line to match the selected review backend.
         # awk, not `sed …c\…`: BSD sed (macOS) rejects text on the same line as
         # the `c` command ("extra characters after \ at the end of c command"),
@@ -1855,7 +1873,7 @@ install_rules() {
         langs=("${RULE_LANGS[@]}")
     elif ! $RULE_LANGS_EXPLICIT; then
         # Auto-detect: install all available languages (--all mode or legacy)
-        for lang_dir in "$SCRIPT_DIR"/rules/*/; do
+        for lang_dir in "$CLAUDE_TEMPLATES_DIR"/rules/*/; do
             local lang
             lang=$(basename "$lang_dir")
             [[ "$lang" == "common" || "$lang" == "README.md" ]] && continue
@@ -1868,12 +1886,12 @@ install_rules() {
     # plain form aborts under `set -u` when the array is empty (selective install
     # picking rules-common with no language rules).
     for lang in "${langs[@]+"${langs[@]}"}"; do
-        if [[ -d "$SCRIPT_DIR/rules/$lang" ]]; then
+        if [[ -d "$CLAUDE_TEMPLATES_DIR/rules/$lang" ]]; then
             if $DRY_RUN; then
                 info "Would copy: rules/$lang/ -> $CLAUDE_DIR/rules/$lang/"
             else
                 rm -rf "$CLAUDE_DIR/rules/$lang"
-                cp -r "$SCRIPT_DIR/rules/$lang" "$CLAUDE_DIR/rules/$lang"
+                cp -r "$CLAUDE_TEMPLATES_DIR/rules/$lang" "$CLAUDE_DIR/rules/$lang"
                 ok "$lang rules installed"
             fi
         else
@@ -1931,7 +1949,7 @@ install_skills() {
     # If specific skills were selected (interactive mode), install only those
     if [[ ${#SELECTED_SKILLS[@]} -gt 0 ]]; then
         for skill in "${SELECTED_SKILLS[@]}"; do
-            local skill_dir="$SCRIPT_DIR/skills/$skill"
+            local skill_dir; skill_dir="$(skill_source_dir "$skill")"
             if [[ -d "$skill_dir" ]]; then
                 if $DRY_RUN; then
                     info "Would copy: skills/$skill/ -> $CLAUDE_DIR/skills/$skill/"
@@ -3553,7 +3571,7 @@ install_lessons() {
         if $DRY_RUN; then
             info "Would copy: lessons.md -> $target"
         else
-            cp "$SCRIPT_DIR/lessons.md" "$target"
+            cp "$CLAUDE_TEMPLATES_DIR/lessons.md" "$target"
             ok "lessons.md template installed to $target"
         fi
     fi
@@ -3563,7 +3581,7 @@ install_statusline() {
     info "Installing StatusLine..."
     $DRY_RUN || mkdir -p "$CLAUDE_DIR/hooks"
 
-    local hook_file="$SCRIPT_DIR/hooks/statusline.sh"
+    local hook_file="$CLAUDE_TEMPLATES_DIR/hooks/statusline.sh"
     if [[ -f "$hook_file" ]]; then
         if $DRY_RUN; then
             info "Would copy: hooks/statusline.sh -> $CLAUDE_DIR/hooks/statusline.sh"
@@ -4389,8 +4407,8 @@ uninstall() {
     rm -f "$CLAUDE_DIR/lessons.md" && ok "Removed lessons.md"
 
     # Only remove hooks that ship with this repo
-    if [[ -d "$SCRIPT_DIR/hooks" ]]; then
-        for hook_file in "$SCRIPT_DIR"/hooks/*; do
+    if [[ -d "$CLAUDE_TEMPLATES_DIR/hooks" ]]; then
+        for hook_file in "$CLAUDE_TEMPLATES_DIR"/hooks/*; do
             [[ -f "$hook_file" ]] || continue
             local fname
             fname=$(basename "$hook_file")

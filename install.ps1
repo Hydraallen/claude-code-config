@@ -83,10 +83,27 @@ $script:REMOTE_DRY_RUN = $false
 $script:InstallWarnings = 0
 $script:InstallCritical = 0
 
+# Deployable Claude templates live under platforms\claude\templates since the
+# upstream v4 layout (shared with the agent-guided install path).
+function Get-ClaudeTemplatesDir {
+    return (Join-Path $script:SCRIPT_DIR "platforms\claude\templates")
+}
+
+# Source directory of a repository skill. Claude-specific skills (currently
+# adversarial-review) live under platforms\claude\skills; shared skills under
+# skills. Returns the skills\ path when neither exists so callers report a
+# clear "not found".
+function Get-SkillSourceDir {
+    param([string]$Name)
+    $claudeSkill = Join-Path $script:SCRIPT_DIR "platforms\claude\skills\$Name"
+    if (Test-Path $claudeSkill) { return $claudeSkill }
+    return (Join-Path (Join-Path $script:SCRIPT_DIR "skills") $Name)
+}
+
 function Initialize-ScriptDir {
     $script:SCRIPT_DIR = $PSScriptRoot
 
-    if ($script:SCRIPT_DIR -and (Test-Path (Join-Path $script:SCRIPT_DIR "CLAUDE.md"))) {
+    if ($script:SCRIPT_DIR -and (Test-Path (Join-Path $script:SCRIPT_DIR "platforms\claude\templates\CLAUDE.md"))) {
         $script:REMOTE_MODE = $false
         return
     }
@@ -795,7 +812,7 @@ function Install-ClaudeMd {
 
         # Build the target content in a temp file (with the review line replaced)
         $tmpFile = Join-Path ([System.IO.Path]::GetTempPath()) "CLAUDE_md_$(Get-Random)"
-        Copy-Item (Join-Path $SCRIPT_DIR "CLAUDE.md") $tmpFile -Force
+        Copy-Item (Join-Path (Get-ClaudeTemplatesDir) "CLAUDE.md") $tmpFile -Force
         $content = Get-Content $tmpFile -Raw
         $content = $content -replace '(?m)^Whenever a code review is needed.*$', $reviewLine
         Set-Content $tmpFile $content -NoNewline
@@ -1050,14 +1067,14 @@ function Install-Rules {
         $installLangs = $Langs
     } elseif (-not $LangsExplicit) {
         # Auto-detect: install all available languages (--all mode)
-        Get-ChildItem (Join-Path $SCRIPT_DIR "rules") -Directory | ForEach-Object {
+        Get-ChildItem (Join-Path (Get-ClaudeTemplatesDir) "rules") -Directory | ForEach-Object {
             if ($_.Name -ne "common") { $installLangs += $_.Name }
         }
     }
     # If LangsExplicit=true and Langs is empty, skip language rules
 
     foreach ($lang in $installLangs) {
-        $langSrc = Join-Path $SCRIPT_DIR "rules\$lang"
+        $langSrc = Join-Path (Get-ClaudeTemplatesDir) "rules\$lang"
         if (Test-Path $langSrc) {
             $langDst = Join-Path $rulesDir $lang
             if ($DryRun) {
@@ -1123,7 +1140,7 @@ function Install-Skills {
     if ($SelectedSkills.Count -gt 0) {
         # Install only selected skills
         foreach ($skill in $SelectedSkills) {
-            $src = Join-Path (Join-Path $SCRIPT_DIR "skills") $skill
+            $src = Get-SkillSourceDir -Name $skill
             $dst = Join-Path $skillsDir $skill
             if (Test-Path $src) {
                 if ($DryRun) {
@@ -2106,7 +2123,7 @@ function Install-Lessons {
         if ($DryRun) {
             Write-Info "Would copy: lessons.md -> $target"
         } else {
-            Copy-Item (Join-Path $SCRIPT_DIR "lessons.md") $target -Force
+            Copy-Item (Join-Path (Get-ClaudeTemplatesDir) "lessons.md") $target -Force
             Write-Ok "lessons.md template installed to $target"
         }
     }
@@ -2117,7 +2134,7 @@ function Install-Hooks {
     $hooksDir = Join-Path $CLAUDE_DIR "hooks"
     if (-not $DryRun) { New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null }
 
-    Get-ChildItem (Join-Path $SCRIPT_DIR "hooks") -File | ForEach-Object {
+    Get-ChildItem (Join-Path (Get-ClaudeTemplatesDir) "hooks") -File | ForEach-Object {
         $fname = $_.Name
         $dst = Join-Path $hooksDir $fname
         if ($DryRun) {
@@ -2194,7 +2211,7 @@ function Install-NerdFont {
     Write-Info "Installing MesloLGS NF font for statusline icons..."
 
     # Copy bundled fonts from repository
-    $srcDir = Join-Path $SCRIPT_DIR "fonts"
+    $srcDir = Join-Path (Get-ClaudeTemplatesDir) "fonts"
     $ttfFiles = Get-ChildItem $srcDir -Filter "*.ttf" -ErrorAction SilentlyContinue
     if (-not $ttfFiles) {
         Write-Warn "Bundled fonts not found in $srcDir - statusline will use text fallback"
@@ -2765,7 +2782,7 @@ function Invoke-Uninstall {
     if (Test-Path $p) { Remove-Item $p -Force; Write-Ok "Removed lessons.md" }
 
     # Only remove hooks that ship with this repo
-    $hooksSrc = Join-Path $SCRIPT_DIR "hooks"
+    $hooksSrc = Join-Path (Get-ClaudeTemplatesDir) "hooks"
     if (Test-Path $hooksSrc) {
         Get-ChildItem $hooksSrc -File | ForEach-Object {
             $hp = Join-Path $CLAUDE_DIR "hooks\$($_.Name)"
