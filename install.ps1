@@ -2256,7 +2256,8 @@ function Test-ScriptManagedCopy {
     $r = Get-AgentFilesRecord -Target $Target
     if (-not $r) { return $false }
     $origin = if ($r.PSObject.Properties['origin']) { [string]$r.origin } else { "" }
-    return ($r.kind -eq "copy" -and $origin.StartsWith($SCRIPT_ORIGIN_PREFIX))
+    $kind = if ($r.PSObject.Properties['kind']) { [string]$r.kind } else { "" }
+    return ($kind -eq "copy" -and $origin.StartsWith($SCRIPT_ORIGIN_PREFIX))
 }
 
 # True when agent-config\files.json records $Target but not as written by this
@@ -3332,6 +3333,7 @@ function Write-SelectionRecord {
         name = "install.ps1"; version = (Get-SourceVersion); mode = $Mode; updated = $now
         script_only = @(($prevOnly + $scriptOnly) | Select-Object -Unique)
     }
+    $tmp = $null
     try {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
         $tmp = Join-Path $dir (".selection.json." + [Guid]::NewGuid().ToString("N"))
