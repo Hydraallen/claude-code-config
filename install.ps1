@@ -1190,6 +1190,12 @@ function Install-Rules {
     }
 }
 
+# Repository skills this script installer owns. -All installs exactly these,
+# and unselected-cleanup / -Uninstall only ever remove these. skills\ also
+# holds skills that only the agent-guided path manages (edit-config,
+# storage-analyzer), which the script must never copy or delete implicitly.
+$SCRIPT_OWNED_SKILLS = @("paper-reading", "cheatsheet-creator", "update-config", "humanizer", "humanizer-zh", "adversarial-review")
+
 function Install-Skills {
     param([string[]]$SelectedSkills = @())
     Write-Info "Installing custom skills..."
@@ -1227,15 +1233,16 @@ function Install-Skills {
             }
         }
     } else {
-        # --All mode: install everything
-        Get-ChildItem (Join-Path $SCRIPT_DIR "skills") -Directory | ForEach-Object {
-            $skill = $_.Name
+        # --All mode: install every script-owned skill
+        foreach ($skill in $SCRIPT_OWNED_SKILLS) {
+            $src = Get-SkillSourceDir -Name $skill
+            if (-not (Test-Path $src)) { Write-Warn "Skill not found: $skill"; continue }
             $dst = Join-Path $skillsDir $skill
             if ($DryRun) {
                 Write-Info "Would copy: skills\$skill\ -> $dst"
             } else {
                 if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
-                Copy-Item $_.FullName $dst -Recurse -Force
+                Copy-Item $src $dst -Recurse -Force
                 Write-Ok "Skill installed: $skill"
             }
         }
@@ -1244,24 +1251,15 @@ function Install-Skills {
     # Clean up installer-managed skills that were NOT selected (from previous installs)
     # Only runs in interactive mode where specific skills were selected
     if ($SelectedSkills.Count -gt 0) {
-        $repoSkillsDir = Join-Path $SCRIPT_DIR "skills"
-        if (Test-Path $repoSkillsDir) {
-            Get-ChildItem $repoSkillsDir -Directory | ForEach-Object {
-                $known = $_.Name
-                $keep = $false
-                foreach ($skill in $SelectedSkills) {
-                    if ($skill -eq $known) { $keep = $true; break }
-                }
-                if (-not $keep) {
-                    $removePath = Join-Path $skillsDir $known
-                    if (Test-Path $removePath) {
-                        if ($DryRun) {
-                            Write-Info "Would remove unselected skill: $known"
-                        } else {
-                            Remove-Item $removePath -Recurse -Force
-                            Write-Ok "Removed unselected skill: $known"
-                        }
-                    }
+        foreach ($known in $SCRIPT_OWNED_SKILLS) {
+            if ($SelectedSkills -contains $known) { continue }
+            $removePath = Join-Path $skillsDir $known
+            if (Test-Path $removePath) {
+                if ($DryRun) {
+                    Write-Info "Would remove unselected skill: $known"
+                } else {
+                    Remove-Item $removePath -Recurse -Force
+                    Write-Ok "Removed unselected skill: $known"
                 }
             }
         }
@@ -2790,14 +2788,11 @@ function Invoke-Uninstall {
     # user-authored and installer-managed skills we cannot enumerate. The
     # image-gen ownership manifest is the sole authority for image-gen (handled
     # below); everything else is preserved when no inventory exists.
-    $skillsSrc = Join-Path $SCRIPT_DIR "skills"
-    if (Test-Path $skillsSrc) {
-        Get-ChildItem $skillsSrc -Directory | ForEach-Object {
-            $sp = Join-Path $CLAUDE_DIR "skills\$($_.Name)"
-            if (Test-Path $sp) { Remove-Item $sp -Recurse -Force; Write-Ok "Removed skill: $($_.Name)" }
-        }
-    } else {
-        Write-Warn "No source skills inventory ($skillsSrc missing) - leaving $CLAUDE_DIR\skills untouched (installer-managed + user skills preserved; the image-gen manifest governs image-gen only)"
+    # Only the skills this script installer owns; agent-path skills
+    # (edit-config, storage-analyzer, ...) and user skills are left alone.
+    foreach ($skill in $SCRIPT_OWNED_SKILLS) {
+        $sp = Join-Path $CLAUDE_DIR "skills\$skill"
+        if (Test-Path $sp) { Remove-Item $sp -Recurse -Force; Write-Ok "Removed skill: $skill" }
     }
 
     # Only remove agents that ship with this repo

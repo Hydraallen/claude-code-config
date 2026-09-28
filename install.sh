@@ -539,6 +539,11 @@ PLUGIN_GROUPS=()
 REVIEW_ADVERSARIAL=false
 REVIEW_CODEX=false
 SELECTED_SKILLS=()
+# Repository skills this script installer owns. --all installs exactly these,
+# and unselected-cleanup / --uninstall only ever remove these. skills/ also
+# holds skills that only the agent-guided path manages (edit-config,
+# storage-analyzer), which the script must never copy or delete implicitly.
+SCRIPT_OWNED_SKILLS=("paper-reading" "cheatsheet-creator" "update-config" "humanizer" "humanizer-zh" "adversarial-review")
 SELECTED_PLUGINS=()
 SELECTED_DEEPXIV_SKILLS=()
 SELECTED_PROFILES=()
@@ -2051,11 +2056,14 @@ install_skills() {
             fi
         done
     else
-        # --all mode: install everything
-        for skill_dir in "$SCRIPT_DIR"/skills/*/; do
-            [[ -d "$skill_dir" ]] || continue
-            local skill
-            skill=$(basename "$skill_dir")
+        # --all mode: install every script-owned skill
+        local skill
+        for skill in "${SCRIPT_OWNED_SKILLS[@]}"; do
+            local skill_dir; skill_dir="$(skill_source_dir "$skill")"
+            if [[ ! -d "$skill_dir" ]]; then
+                warn "Skill not found: $skill"
+                continue
+            fi
 
             if $DRY_RUN; then
                 info "Would copy: skills/$skill/ -> $CLAUDE_DIR/skills/$skill/"
@@ -2070,12 +2078,7 @@ install_skills() {
     # Clean up installer-managed skills that were NOT selected (from previous installs)
     # Only runs in interactive mode where specific skills were selected
     if [[ ${#SELECTED_SKILLS[@]} -gt 0 ]]; then
-        local known_skills=()
-        for skill_dir in "$SCRIPT_DIR"/skills/*/; do
-            [[ -d "$skill_dir" ]] || continue
-            known_skills+=("$(basename "$skill_dir")")
-        done
-        for known in "${known_skills[@]}"; do
+        for known in "${SCRIPT_OWNED_SKILLS[@]}"; do
             local keep=false
             for skill in "${SELECTED_SKILLS[@]}"; do
                 if [[ "$skill" == "$known" ]]; then
@@ -4418,23 +4421,15 @@ uninstall() {
 
     rm -rf "$CLAUDE_DIR/rules" && ok "Removed rules/"
 
-    # Only remove skills that ship with this repo
-    if [[ -d "$SCRIPT_DIR/skills" ]]; then
-        for skill_dir in "$SCRIPT_DIR"/skills/*/; do
-            [[ -d "$skill_dir" ]] || continue
-            local skill
-            skill=$(basename "$skill_dir")
+    # Only remove the skills this script installer owns. Skills managed by the
+    # agent-guided path (edit-config, storage-analyzer, ...) and user-authored
+    # skills are left alone; image-gen is governed by its manifest below.
+    local skill
+    for skill in "${SCRIPT_OWNED_SKILLS[@]}"; do
+        if [[ -d "$CLAUDE_DIR/skills/$skill" ]]; then
             rm -rf "$CLAUDE_DIR/skills/$skill" && ok "Removed skill: $skill"
-        done
-    else
-        # No trustworthy source inventory: cannot distinguish installer-managed
-        # skills from user-authored ones. The image-gen ownership manifest is
-        # the sole authority for image-gen (handled below); everything else is
-        # preserved rather than blanket-deleted.
-        if [[ -d "$CLAUDE_DIR/skills" ]]; then
-            warn "No source skills inventory ($SCRIPT_DIR/skills missing) — leaving $CLAUDE_DIR/skills untouched (installer-managed + user skills preserved; the image-gen manifest governs image-gen only)"
         fi
-    fi
+    done
 
     # Only remove agents that ship with this repo
     if [[ -d "$SCRIPT_DIR/agents" ]]; then
