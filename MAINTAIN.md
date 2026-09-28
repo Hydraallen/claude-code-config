@@ -36,7 +36,7 @@
 
 - `catalog.md` 是稳定 ID、分类、支持范围、作者推荐和安装渠道的权威目录。
 - **每次修改 catalog 都要同步两个脚本安装器**：`install.sh` 的菜单（`load_menu_groups`）、`catalog_id_for_menu_id` 与相关安装函数，以及 `install.ps1` 的 `Get-MenuGroups` 与 `$CATALOG_ID_FOR_MENU_ID`。只能由脚本安装的条目在 Claude 列写明 `install.sh --only <菜单 ID>`；install.ps1 暂缺的菜单项登记在 `scripts/check-catalog-sync.sh` 的 `PS1_MISSING_MENU_IDS`。
-- `README.md` 与 `README.zh-CN.md` 是面向用户的同一份完整介绍：保留 Core、Model Backends（fork）、Language Rules、Review、Workflow、Integrations、Design & Content、Slides、Memory & Lifestyle、Storage、Academic Research、MCP Servers 的分类顺序，更新用途、来源、平台支持及推荐标记。
+- `README.md` 与 `README.zh-CN.md` 是面向用户的同一份完整介绍：保留 Core、Model Backends（fork）、Language Rules、Review、Workflow、Integrations、Design & Content、Slides、Storage、Academic Research、MCP Servers 的分类顺序，更新用途、来源、平台支持及推荐标记。Memory & Lifestyle 仅保留在 `catalog.md`：该分类在 README 中没有可安装条目（本 fork 不提供 claude-health），为空时省略；重新有条目后放回 Slides 与 Storage 之间。
 - 平台说明 / `sources.md` 集中保存具体安装配方；README 与 catalog 链接到它们，避免再复制命令。涉及通用安装行为时同步 INSTALL；版本级变化同步 VERSION 与双语 CHANGELOG。
 - 移除或替换活动 ID 时，在 [迁移说明](docs/migration.md) 新增旧 ID → 新 ID / 退役原因与处理方式。安装记录中的旧 ID 需被识别、解释并保留；只有用户要求移除才卸载已有副本。
 
