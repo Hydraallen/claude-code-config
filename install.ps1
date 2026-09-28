@@ -3059,6 +3059,273 @@ function Remove-RetiredGithubMcp {
     else { Write-Warn "Could not remove retired MCP server: github (remove it with: claude mcp remove github --scope user)" }
 }
 
+# --- Retired-item leftovers --------------------------------------------------
+# `claude plugin uninstall` / `marketplace remove` leave data behind: the plugin
+# cache of the retired marketplace (claude-mem kept every old version, ~1.4 GB),
+# the plugin's data dir, usage records in ~/.claude.json, and claude-mem's own
+# ~/.claude-mem store. Remove-RetiredLeftovers removes those on every run (after
+# Remove-RetiredPlugins) and on -Uninstall. It needs no claude CLI. Every
+# deletion is gated on "retired AND no installed plugin still uses it"; when the
+# installed-plugin state cannot be read, nothing is deleted.
+# Mirrors prune_retired_leftovers() in install.sh.
+
+# Claude Code's temp clones (plugins/cache/temp_git_*) are removed only when
+# nothing inside them changed for this many minutes (an install may be running).
+$RETIRED_TEMP_GIT_MIN_AGE_MIN = 60
+# Top-level ~/.claude.json maps whose keys name plugins/skills. Nothing else in
+# ~/.claude.json (projects, history, auth, mcpServers, ...) is ever edited here.
+$RETIRED_CLAUDE_JSON_MAPS = @("skillUsage", "pluginUsage")
+# claude-mem's local store: removed once claude-mem@* is no longer installed and
+# no claude-mem process runs. Opt out: $env:ACCC_KEEP_CLAUDE_MEM_DATA = "1"
+$RETIRED_CLAUDE_MEM_PLUGIN = "claude-mem"
+
+# Installed plugin keys as this run will leave them, or $null when
+# installed_plugins.json exists but cannot be parsed (callers then delete
+# nothing). In DryRun, retired plugins Remove-RetiredPlugins would uninstall
+# (claude CLI present) are dropped so the preview matches a real run.
+function Get-LeftoverEffectiveKeys {
+    $state = Join-Path $CLAUDE_DIR "plugins\installed_plugins.json"
+    $keys = @()
+    if (Test-Path -LiteralPath $state -PathType Leaf) {
+        try {
+            $parsed = Get-Content -LiteralPath $state -Raw | ConvertFrom-Json
+            if ($null -eq $parsed) { return $null }
+            if ($parsed.PSObject.Properties['plugins'] -and $null -ne $parsed.plugins) {
+                $keys = @($parsed.plugins.PSObject.Properties | ForEach-Object { $_.Name })
+            }
+        } catch { return $null }
+    }
+    if ($DryRun -and (Get-Command claude -ErrorAction SilentlyContinue)) {
+        $keys = @($keys | Where-Object { $RETIRED_PLUGINS -notcontains $_ })
+    }
+    return ,$keys
+}
+
+function Get-LeftoverSize {
+    param([string]$Path)
+    try {
+        $item = Get-Item -LiteralPath $Path -Force
+        if (-not $item.PSIsContainer) { return [int64]$item.Length }
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return [int64]0 }
+        $sum = (Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        if ($null -eq $sum) { return [int64]0 }
+        return [int64]$sum
+    } catch { return [int64]0 }
+}
+
+function Format-LeftoverSize {
+    param([int64]$Bytes)
+    if ($Bytes -ge 1GB) { return ("{0:N1} GB" -f ($Bytes / 1GB)) }
+    if ($Bytes -ge 1MB) { return ("{0:N1} MB" -f ($Bytes / 1MB)) }
+    return ("{0} KB" -f [int64][math]::Floor($Bytes / 1KB))
+}
+
+$script:LeftoverCount = 0
+$script:LeftoverBytes = [int64]0
+
+# Preview or delete one path, with its size. A symlink/junction is removed as
+# a link: .NET's recursive delete never follows reparse points, unlike
+# Remove-Item -Recurse on Windows PowerShell 5.1.
+function Remove-LeftoverPath {
+    param([string]$Path, [string]$Label)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $bytes = Get-LeftoverSize -Path $Path
+    $size = Format-LeftoverSize $bytes
+    if ($DryRun) {
+        Write-Info "Would remove ${Label}: $Path ($size)"
+    } else {
+        try {
+            $item = Get-Item -LiteralPath $Path -Force
+            if ($item.PSIsContainer) {
+                if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { [System.IO.Directory]::Delete($item.FullName, $false) }
+                else { [System.IO.Directory]::Delete($item.FullName, $true) }
+            } else {
+                [System.IO.File]::Delete($item.FullName)
+            }
+            Write-Ok "Removed ${Label}: $Path ($size)"
+        } catch {
+            Write-Warn "Could not remove ${Label}: $Path"
+            return
+        }
+    }
+    $script:LeftoverCount++
+    $script:LeftoverBytes += $bytes
+}
+
+# Is <marketplace> still registered in known_marketplaces.json? Unknown counts
+# as registered.
+function Test-LeftoverMarketplaceRegistered {
+    param([string]$Name)
+    $known = Join-Path $CLAUDE_DIR "plugins\known_marketplaces.json"
+    if (-not (Test-Path -LiteralPath $known -PathType Leaf)) { return $false }
+    try {
+        $obj = Get-Content -LiteralPath $known -Raw | ConvertFrom-Json
+        if ($null -eq $obj) { return $true }
+        return [bool]$obj.PSObject.Properties[$Name]
+    } catch { return $true }
+}
+
+function Remove-LeftoverPluginDirs {
+    param([string[]]$Keys)
+    foreach ($mkt in $RETIRED_MARKETPLACES) {
+        if (@($Keys | Where-Object { $_.EndsWith("@$mkt") }).Count -gt 0) {
+            Write-Info "Keeping plugin cache of retired marketplace ${mkt}: an installed plugin still uses it"
+            continue
+        }
+        Remove-LeftoverPath -Path (Join-Path $CLAUDE_DIR "plugins\cache\$mkt") -Label "retired marketplace plugin cache"
+        # A registered marketplace is Remove-RetiredPlugins' job (via the CLI);
+        # only an unregistered, stale clone is removed here.
+        $dir = Join-Path $CLAUDE_DIR "plugins\marketplaces\$mkt"
+        if ((Test-Path -LiteralPath $dir -PathType Container) -and -not (Test-LeftoverMarketplaceRegistered -Name $mkt)) {
+            Remove-LeftoverPath -Path $dir -Label "stale retired marketplace clone"
+        }
+    }
+    foreach ($pkg in $RETIRED_PLUGINS) {
+        if ($Keys -contains $pkg) { continue }
+        $name, $mkt = $pkg -split '@', 2
+        Remove-LeftoverPath -Path (Join-Path $CLAUDE_DIR "plugins\data\$name-$mkt") -Label "retired plugin data dir"
+    }
+}
+
+# Claude Code's leftover temp clones. Kept while anything inside changed in the
+# last $RETIRED_TEMP_GIT_MIN_AGE_MIN minutes.
+function Remove-LeftoverTempGit {
+    $cache = Join-Path $CLAUDE_DIR "plugins\cache"
+    if (-not (Test-Path -LiteralPath $cache -PathType Container)) { return }
+    $cutoff = (Get-Date).AddMinutes(-$RETIRED_TEMP_GIT_MIN_AGE_MIN)
+    foreach ($d in @(Get-ChildItem -LiteralPath $cache -Directory -Force -Filter "temp_git_*" -ErrorAction SilentlyContinue)) {
+        if (-not $d.Name.StartsWith("temp_git_")) { continue }
+        if ($d.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+        $young = ($d.LastWriteTime -gt $cutoff) -or (@(Get-ChildItem -LiteralPath $d.FullName -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt $cutoff } | Select-Object -First 1).Count -gt 0)
+        if ($young) { Write-Info "Keeping recent plugin temp clone (may be in use): $($d.FullName)"; continue }
+        Remove-LeftoverPath -Path $d.FullName -Label "stale plugin temp clone"
+    }
+}
+
+# Is a claude-mem worker / chroma process running? Unknown counts as running.
+function Test-ClaudeMemRunning {
+    try {
+        $onWindows = ($PSVersionTable.PSEdition -eq "Desktop") -or ((Get-Variable IsWindows -ValueOnly -ErrorAction SilentlyContinue) -eq $true)
+        if ($onWindows) {
+            $procs = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.CommandLine -and $_.CommandLine -match 'claude-mem' })
+            return ($procs.Count -gt 0)
+        }
+        $out = & ps -A -o command= 2>$null
+        if ($LASTEXITCODE -ne 0) { return $true }
+        return (@($out | Where-Object { $_ -match 'claude-mem' }).Count -gt 0)
+    } catch { return $true }
+}
+
+function Remove-LeftoverClaudeMemData {
+    param([string[]]$Keys)
+    $data = Join-Path $env:USERPROFILE ".claude-mem"
+    if (-not (Test-Path -LiteralPath $data)) { return }
+    if ($env:ACCC_KEEP_CLAUDE_MEM_DATA) { Write-Info "Keeping $data (ACCC_KEEP_CLAUDE_MEM_DATA is set)"; return }
+    if (@($Keys | Where-Object { $_.StartsWith("$RETIRED_CLAUDE_MEM_PLUGIN@") }).Count -gt 0) {
+        Write-Info "Keeping ${data}: the claude-mem plugin is still installed"; return
+    }
+    if (Test-ClaudeMemRunning) {
+        Write-Warn "Keeping ${data}: claude-mem processes are still running. Quit Claude Code (or stop them), then re-run: .\install.ps1"
+        return
+    }
+    Remove-LeftoverPath -Path $data -Label "retired claude-mem data"
+}
+
+# Is a ~/.claude.json usage key owned by a retired plugin? Exact retired
+# plugin@mkt, "<retired plugin>:" skill prefix, or "@<retired mkt>" suffix; a
+# retired name is left alone while any installed plugin shares it.
+function Test-LeftoverUsageKeyRetired {
+    param([string]$Key, [string[]]$Keys)
+    foreach ($pkg in $RETIRED_PLUGINS) {
+        if ($Keys -contains $pkg) { continue }
+        if ($Key -ceq $pkg) { return $true }
+        $name = ($pkg -split '@', 2)[0]
+        if (@($Keys | Where-Object { $_.StartsWith("$name@") }).Count -gt 0) { continue }
+        if ($Key.StartsWith("${name}:", [StringComparison]::Ordinal)) { return $true }
+    }
+    foreach ($mkt in $RETIRED_MARKETPLACES) {
+        if (@($Keys | Where-Object { $_.EndsWith("@$mkt") }).Count -gt 0) { continue }
+        if ($Key.EndsWith("@$mkt", [StringComparison]::Ordinal)) { return $true }
+    }
+    return $false
+}
+
+# Remove ~/.claude.json usage records (skillUsage / pluginUsage) owned by retired
+# plugins. Edited as a JSON DOM (System.Text.Json, PowerShell 7) so every other
+# value round-trips unchanged; ConvertFrom-Json is avoided because it rewrites
+# date-like strings. Atomic temp + validate + File.Replace, timestamped backup
+# only on change, and aborts if the file changes mid-edit.
+function Remove-LeftoverClaudeJsonUsage {
+    param([string[]]$Keys)
+    $cfg = Join-Path $env:USERPROFILE ".claude.json"
+    if (-not (Test-Path -LiteralPath $cfg -PathType Leaf)) { return }
+    $nodeType = "System.Text.Json.Nodes.JsonNode" -as [type]
+    if (-not $nodeType) {
+        Write-Info "Skipping retired usage records in ~/.claude.json (needs PowerShell 7)"
+        return
+    }
+    try {
+        $hashBefore = (Get-FileHash -LiteralPath $cfg -Algorithm SHA256).Hash
+        $root = [System.Text.Json.Nodes.JsonNode]::Parse([System.IO.File]::ReadAllText($cfg))
+        if ($root -isnot [System.Text.Json.Nodes.JsonObject]) { throw "not an object" }
+    } catch { Write-Warn "~/.claude.json is not valid JSON - skipping retired usage records"; return }
+    $removals = @()
+    foreach ($m in $RETIRED_CLAUDE_JSON_MAPS) {
+        $section = $root[$m]
+        if ($section -isnot [System.Text.Json.Nodes.JsonObject]) { continue }
+        $names = @(); foreach ($kv in $section) { $names += $kv.Key }
+        foreach ($k in ($names | Sort-Object)) {
+            if (Test-LeftoverUsageKeyRetired -Key $k -Keys $Keys) { $removals += ,@($m, $k) }
+        }
+    }
+    if ($removals.Count -eq 0) { return }
+    if ($DryRun) {
+        foreach ($r in $removals) { Write-Info "Would remove retired usage record from ~/.claude.json: $($r[0])[$($r[1])]" }
+        return
+    }
+    foreach ($r in $removals) { [void]$root[$r[0]].AsObject().Remove($r[1]) }
+    $tmp = Join-Path (Split-Path $cfg -Parent) (".claude.json.tmp." + [Guid]::NewGuid().ToString("N"))
+    try {
+        $opts = New-Object System.Text.Json.JsonSerializerOptions
+        $opts.WriteIndented = $true
+        $opts.Encoder = [System.Text.Encodings.Web.JavaScriptEncoder]::UnsafeRelaxedJsonEscaping
+        [System.IO.File]::WriteAllText($tmp, $root.ToJsonString($opts) + "`n", (New-Object System.Text.UTF8Encoding $false))
+        [void][System.Text.Json.Nodes.JsonNode]::Parse([System.IO.File]::ReadAllText($tmp))
+        if ((Get-FileHash -LiteralPath $cfg -Algorithm SHA256).Hash -ne $hashBefore) {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            Write-Warn "~/.claude.json changed while editing (Claude Code running?) - left unchanged; re-run the installer later"
+            return
+        }
+        $bak = "$cfg.$(Get-Date -Format 'yyyyMMdd-HHmmss').bak"
+        Copy-Item -LiteralPath $cfg -Destination $bak -Force
+        [System.IO.File]::Replace($tmp, $cfg, [NullString]::Value)
+        Write-Ok "Removed $($removals.Count) retired usage record(s) from ~/.claude.json (backup: $bak)"
+    } catch {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        Write-Warn "Could not rewrite ~/.claude.json safely - left unchanged: $_"
+    }
+}
+
+function Remove-RetiredLeftovers {
+    $script:LeftoverCount = 0
+    $script:LeftoverBytes = [int64]0
+    $keys = Get-LeftoverEffectiveKeys
+    if ($null -eq $keys) {
+        Write-Warn "Cannot read installed_plugins.json - skipping retired-item leftover cleanup"
+        return
+    }
+    $keys = [string[]]@($keys)
+    Remove-LeftoverPluginDirs -Keys $keys
+    Remove-LeftoverTempGit
+    Remove-LeftoverClaudeMemData -Keys $keys
+    Remove-LeftoverClaudeJsonUsage -Keys $keys
+    if ($script:LeftoverCount -gt 0) {
+        $size = Format-LeftoverSize $script:LeftoverBytes
+        if ($DryRun) { Write-Info "Retired leftovers: would remove $($script:LeftoverCount) path(s), ~$size" }
+        else { Write-Ok "Retired leftovers: removed $($script:LeftoverCount) path(s), freed ~$size" }
+    }
+}
+
 # Reconcile installed plugins against this run's selection: uninstall every
 # installed plugin that was NOT selected (rule 1). Under the default
 # PluginPruneScope=catalogue only installer-managed plugins are considered;
@@ -3938,6 +4205,8 @@ function Invoke-Uninstall {
     Write-Host "  - $CLAUDE_DIR\hooks\ (installer-managed only)"
     Write-Host "  - Installed plugins (requires claude CLI)"
     Write-Host "  - MCP servers: playwright, lark-mcp (if present; requires claude CLI)"
+    Write-Host "  - Retired-plugin leftovers: plugin caches/data of retired marketplaces, stale plugins\cache\temp_git_*,"
+    Write-Host "    ~\.claude-mem (claude-mem data), retired usage records in ~\.claude.json (backed up first)"
     if (Test-Path $VERSION_STAMP_FILE) {
         Write-Host "  - $VERSION_STAMP_FILE"
     }
@@ -4079,6 +4348,9 @@ function Invoke-Uninstall {
     } else {
         Write-Warn "Claude CLI not found - cannot uninstall plugins or MCP servers"
     }
+    # After the plugin uninstalls, so leftovers of a just-removed retired
+    # plugin are swept too. Same "retired and no longer installed" gates.
+    Remove-RetiredLeftovers
 
     Clear-ScriptSelectionRecords
     if (Test-Path $VERSION_STAMP_FILE) { Remove-Item $VERSION_STAMP_FILE -Force }
@@ -4396,6 +4668,7 @@ function Main {
     if ($doHooks) { Install-Hooks }
     if ($doMcp -or $doLark) { Install-Mcp -InstallPlaywright $doMcp -InstallLark $doLark }
     Remove-RetiredPlugins
+    Remove-RetiredLeftovers
     # This run's plugin selection, resolved up front so reconciliation never
     # depends on Install-Plugins having run (mirrors resolve_plugin_selection).
     $script:ResolvedPlugins = @()
