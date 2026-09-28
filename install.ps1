@@ -445,7 +445,7 @@ function Show-InteractiveMenu {
         @{ Label = "Core"; Hint = ""; Items = @(
             @{ Label = "CLAUDE.md";       Desc = "Global instructions template";      Default = $true;  Id = "claude-md" }
             @{ Label = "settings.json";   Desc = "Smart-merged Claude Code settings"; Default = $true;  Id = "settings" }
-            @{ Label = "Common rules";    Desc = "Coding style, git, security, testing"; Default = $true; Id = "rules-common" }
+            @{ Label = "Writing style rule"; Desc = "Complete English writing rule (rules/writing-style.md)"; Default = $true; Id = "rules-writing-style" }
             @{ Label = "StatusLine";      Desc = "Gradient bars + Anthropic/GLM 5h quota"; Default = $true; Id = "hooks" }
             @{ Label = "Lessons";         Desc = "lessons.md template + SessionStart hook"; Default = $true; Id = "lessons" }
             @{ Label = "Search agent";    Desc = "Jeff read-only web search agent"; Default = $true; Id = "agents" }
@@ -733,6 +733,7 @@ function Show-InteractiveMenu {
         ClaudeMd           = $false
         Settings           = $false
         Rules              = $false
+        WritingStyle       = $false
         RuleLangs          = @()
         RuleLangsExplicit  = $true
         Hooks              = $false
@@ -759,7 +760,7 @@ function Show-InteractiveMenu {
         switch -Wildcard ($id) {
             "claude-md"          { $result.ClaudeMd = $true }
             "settings"           { $result.Settings = $true }
-            "rules-common"       { $result.Rules = $true }
+            "rules-writing-style" { $result.Rules = $true; $result.WritingStyle = $true }
             "hooks"              { $result.Hooks = $true }
             "lessons"            { $result.Lessons = $true }
             "agents"             { $result.Agents = $true }
@@ -1100,22 +1101,45 @@ function Install-Settings {
 function Install-Rules {
     param(
         [string[]]$Langs = @(),
-        [bool]$LangsExplicit = $false
+        [bool]$LangsExplicit = $false,
+        [bool]$WritingStyle = $true
     )
 
     Write-Info "Installing rules..."
     $rulesDir = Join-Path $CLAUDE_DIR "rules"
     if (-not $DryRun) { New-Item -ItemType Directory -Path $rulesDir -Force | Out-Null }
 
-    # Always install common rules
-    $commonSrc = Join-Path $SCRIPT_DIR "rules\common"
-    $commonDst = Join-Path $rulesDir "common"
-    if ($DryRun) {
-        Write-Info "Would copy: rules\common\ -> $commonDst"
-    } else {
-        if (Test-Path $commonDst) { Remove-Item $commonDst -Recurse -Force }
-        Copy-Item $commonSrc $commonDst -Recurse -Force
-        Write-Ok "Common rules installed"
+    # Writing style rule: a single file that replaces the retired Common rules.
+    $wsSrc = Join-Path (Get-ClaudeTemplatesDir) "rules\writing-style.md"
+    $wsDst = Join-Path $rulesDir "writing-style.md"
+    if ($WritingStyle) {
+        if ($DryRun) {
+            Write-Info "Would copy: rules\writing-style.md -> $wsDst"
+        } elseif (Test-Path $wsSrc) {
+            Copy-Item $wsSrc $wsDst -Force
+            Write-Ok "Writing style rule installed"
+        } else {
+            Write-Err "Writing style rule not found: $wsSrc"
+        }
+    } elseif ($LangsExplicit -and (Test-Path $wsDst) -and (Test-Path $wsSrc) -and
+              ((Get-FileHash $wsSrc).Hash -eq (Get-FileHash $wsDst).Hash)) {
+        # Deselected in the menu: remove only an unmodified copy of our file.
+        if ($DryRun) {
+            Write-Info "Would remove unselected: $wsDst"
+        } else {
+            Remove-Item $wsDst -Force
+            Write-Ok "Removed unselected rule: writing-style.md"
+        }
+    }
+
+    # Retired files from earlier installs are reported, not deleted: they may
+    # carry user edits (see docs/migration.md#common-rules), and both would
+    # otherwise keep loading as rules next to the new ones.
+    if (Test-Path (Join-Path $rulesDir "common")) {
+        Write-Warn "Retired Common rules still present: $rulesDir\common\ - review and remove it manually (writing-style.md replaces it)"
+    }
+    if (Test-Path (Join-Path $rulesDir "README.md")) {
+        Write-Warn "Legacy $rulesDir\README.md loads as a rule - remove it manually unless you added it yourself"
     }
 
     # Determine languages
@@ -1162,15 +1186,6 @@ function Install-Rules {
                     }
                 }
             }
-        }
-    }
-
-    $readmeSrc = Join-Path $SCRIPT_DIR "rules\README.md"
-    if (Test-Path $readmeSrc) {
-        if ($DryRun) {
-            Write-Info "Would copy: rules\README.md -> $rulesDir\README.md"
-        } else {
-            Copy-Item $readmeSrc (Join-Path $rulesDir "README.md") -Force
         }
     }
 }
@@ -2958,6 +2973,9 @@ function Main {
     $doClaudeMd = $false
     $doSettings = $false
     $doRules = $false
+    # rules/writing-style.md (replaces the retired Common rules); on for every
+    # non-interactive path, taken from the menu otherwise.
+    $doWritingStyle = $true
     $doSkills = $false
     $doAgents = $false
     $doLessons = $false
@@ -3015,6 +3033,7 @@ function Main {
             $doClaudeMd = $menuResult.ClaudeMd
             $doSettings = $menuResult.Settings
             $doRules = $menuResult.Rules
+            $doWritingStyle = $menuResult.WritingStyle
             $doSkills = $menuResult.Skills
             $doAgents = $menuResult.Agents
             $doLessons = $menuResult.Lessons
@@ -3101,7 +3120,7 @@ function Main {
 
     if ($doClaudeMd) { Install-ClaudeMd -ReviewAdversarial $reviewAdversarial -ReviewCodex $reviewCodex }
     if ($doSettings) { Install-Settings -InstallPlugins $doPlugins -SelectedPluginsList $selectedPlugins -PluginGroups $pluginGroups }
-    if ($doRules) { Install-Rules -Langs $ruleLangs -LangsExplicit $ruleLangsExplicit }
+    if ($doRules) { Install-Rules -Langs $ruleLangs -LangsExplicit $ruleLangsExplicit -WritingStyle $doWritingStyle }
     Remove-RetiredSkills
     Remove-RetiredEnabledPlugins
     if ($doSkills) { Install-Skills -SelectedSkills $selectedSkills }

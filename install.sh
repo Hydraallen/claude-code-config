@@ -501,6 +501,10 @@ EXPLICIT_ALL=false
 INSTALL_WARNINGS=0
 INSTALL_CRITICAL=0
 INSTALL_RULES=false
+# rules/writing-style.md (replaces the retired Common rules). True by default so
+# non-interactive and --all runs install it; the interactive menu sets it from
+# the "Writing style rule" item.
+INSTALL_WRITING_STYLE=true
 INSTALL_SKILLS=false
 INSTALL_AGENTS=false
 INSTALL_MATTPOCOCK=false
@@ -936,7 +940,7 @@ interactive_menu() {
     GROUP_HINTS+=("")
     GROUP_ITEMS+=("CLAUDE.md|Global instructions template|1|claude-md
 settings.json|Smart-merged Claude Code settings|1|settings
-Common rules|Coding style, git, security, testing|1|rules-common
+Writing style rule|Complete English writing rule (rules/writing-style.md)|1|rules-writing-style
 StatusLine|Gradient bars + Anthropic/GLM 5h quota|1|statusline
 Lessons|lessons.md template + SessionStart hook|1|lessons
 Search agent|Jeff read-only web search agent|1|agents
@@ -1379,6 +1383,7 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
     # Map selections to install flags
     INSTALL_ALL=false
     RULE_LANGS_EXPLICIT=true
+    INSTALL_WRITING_STYLE=false
 
     # Helper: map plug-* ID to package name (bash 3.2 compatible, no associative arrays)
     _plug_id_to_pkg() {
@@ -1418,7 +1423,7 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
             # Core
             claude-md)              INSTALL_CLAUDE_MD=true ;;
             settings)               INSTALL_SETTINGS=true ;;
-            rules-common)           INSTALL_RULES=true ;;
+            rules-writing-style)    INSTALL_RULES=true; INSTALL_WRITING_STYLE=true ;;
             statusline)             INSTALL_STATUSLINE=true ;;
             lessons)                INSTALL_LESSONS=true ;;
             agents)                 INSTALL_AGENTS=true ;;
@@ -1923,13 +1928,36 @@ install_rules() {
     info "Installing rules..."
     $DRY_RUN || mkdir -p "$CLAUDE_DIR/rules"
 
-    # Always install common rules when any rules are selected
-    if $DRY_RUN; then
-        info "Would copy: rules/common/ -> $CLAUDE_DIR/rules/common/"
-    else
-        rm -rf "$CLAUDE_DIR/rules/common"
-        cp -r "$SCRIPT_DIR/rules/common" "$CLAUDE_DIR/rules/common"
-        ok "Common rules installed"
+    # Writing style rule: a single file that replaces the retired Common rules.
+    local ws_src="$CLAUDE_TEMPLATES_DIR/rules/writing-style.md"
+    local ws_dst="$CLAUDE_DIR/rules/writing-style.md"
+    if $INSTALL_WRITING_STYLE; then
+        if $DRY_RUN; then
+            info "Would copy: rules/writing-style.md -> $ws_dst"
+        elif [[ -f "$ws_src" ]]; then
+            cp "$ws_src" "$ws_dst"
+            ok "Writing style rule installed"
+        else
+            error "Writing style rule not found: $ws_src"
+        fi
+    elif $RULE_LANGS_EXPLICIT && [[ -f "$ws_dst" && -f "$ws_src" ]] && cmp -s "$ws_src" "$ws_dst"; then
+        # Deselected in the menu: remove only an unmodified copy of our file.
+        if $DRY_RUN; then
+            info "Would remove unselected: $ws_dst"
+        else
+            rm -f "$ws_dst"
+            ok "Removed unselected rule: writing-style.md"
+        fi
+    fi
+
+    # Retired files from earlier installs are reported, not deleted: they may
+    # carry user edits (see docs/migration.md#common-rules), and both would
+    # otherwise keep loading as rules next to the new ones.
+    if [[ -d "$CLAUDE_DIR/rules/common" ]]; then
+        warn "Retired Common rules still present: $CLAUDE_DIR/rules/common/ — review and remove it manually (writing-style.md replaces it)"
+    fi
+    if [[ -f "$CLAUDE_DIR/rules/README.md" ]]; then
+        warn "Legacy $CLAUDE_DIR/rules/README.md loads as a rule — remove it manually unless you added it yourself"
     fi
 
     # Determine which language rules to install
@@ -1949,7 +1977,7 @@ install_rules() {
 
     # Use `"${arr[@]+"${arr[@]}"}"` for langs: macOS ships bash 3.2 where the
     # plain form aborts under `set -u` when the array is empty (selective install
-    # picking rules-common with no language rules).
+    # picking rules-writing-style with no language rules).
     for lang in "${langs[@]+"${langs[@]}"}"; do
         if [[ -d "$CLAUDE_TEMPLATES_DIR/rules/$lang" ]]; then
             if $DRY_RUN; then
@@ -1988,11 +2016,6 @@ install_rules() {
         done
     fi
 
-    if $DRY_RUN; then
-        info "Would copy: rules/README.md -> $CLAUDE_DIR/rules/README.md"
-    else
-        cp "$SCRIPT_DIR/rules/README.md" "$CLAUDE_DIR/rules/README.md"
-    fi
 }
 
 install_skills() {
@@ -5259,6 +5282,7 @@ main() {
         INSTALL_CLAUDE_MD=true
         INSTALL_SETTINGS=true
         INSTALL_RULES=true
+        INSTALL_WRITING_STYLE=true
         INSTALL_SKILLS=true
         INSTALL_AGENTS=true
         INSTALL_LESSONS=true
