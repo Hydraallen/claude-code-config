@@ -3,14 +3,14 @@
 .SYNOPSIS
     Awesome Claude Code Configuration Installer (Windows)
 .DESCRIPTION
-    https://github.com/Mizoreww/awesome-claude-code-config
+    https://github.com/Hydraallen/claude-code-config (fork of Mizoreww/awesome-agent-config)
 .EXAMPLE
     .\install.ps1                  # Interactive selector
     .\install.ps1 -All             # Install everything (non-interactive)
     .\install.ps1 -Uninstall       # Uninstall everything
     .\install.ps1 -DryRun          # Preview changes
     # Remote install:
-    irm https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex
 #>
 
 # Wrap in & { param() ... } to isolate parameter scope.

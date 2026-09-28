@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ============================================================
 # Awesome Claude Code Configuration Installer
-# https://github.com/Mizoreww/awesome-claude-code-config
+# https://github.com/Hydraallen/claude-code-config (fork of Mizoreww/awesome-agent-config)
 # ============================================================
 
 CLAUDE_DIR="$HOME/.claude"

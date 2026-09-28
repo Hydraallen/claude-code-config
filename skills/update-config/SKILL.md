@@ -1,13 +1,17 @@
 ---
 name: update-config
-description: Update awesome-claude-code-config to the latest version. Checks remote for new releases, then re-runs the installer with the interactive selector. Use when user types /update-config or asks to update their Claude Code configuration.
+description: Update Hydraallen/claude-code-config (script-installer setup) to the latest version. Checks the remote VERSION on main, then re-runs install.sh with the interactive selector. Use when user types /update-config or asks to update their Claude Code configuration.
 ---
 
-# Update — awesome-claude-code-config
+# Update — Hydraallen/claude-code-config
 
 ## Overview
 
-Check for updates and upgrade the installed configuration to the latest version.
+Check for updates and upgrade the configuration installed by this fork's script installer
+(`install.sh`; `install.ps1` on Windows) to the latest version of
+`https://github.com/Hydraallen/claude-code-config` on `main`. To inspect, add, remove or
+repair individual catalog items, use the `edit-config` skill; both share
+`~/.claude/agent-config/selection.json`.
 
 ## Workflow
 
@@ -21,7 +25,7 @@ confirmation between steps — just execute.
 INSTALLED="$(cat ~/.claude/.awesome-claude-code-config-version 2>/dev/null || echo 'not installed')"
 
 # Remote version
-REMOTE="$(curl -fsSL https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/VERSION 2>/dev/null | tr -d '[:space:]')"
+REMOTE="$(curl -fsSL https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/VERSION 2>/dev/null | tr -d '[:space:]')"
 
 echo "Installed: $INSTALLED"
 echo "Remote:    $REMOTE"
@@ -36,14 +40,22 @@ If the remote fetch fails, warn the user and stop.
 Download and execute the latest installer interactively:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Mizoreww/awesome-claude-code-config/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.sh)
 ```
 
-This launches the interactive component selector. The installer handles:
+On Windows (PowerShell) the equivalent is:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1)))
+```
+
+This launches the interactive component selector (without a terminal it falls back to the
+default selection). The installer handles:
 - Smart merging of `settings.json` (preserves user customizations)
 - Version stamping
 - Font and dependency installation
-- Plugin updates
+- Plugin updates, and removal of retired plugins (GitHub, claude-mem, PUA)
+- The `agent-config/selection.json` record edit-config reads
 
 ### Step 3: Report result
 
