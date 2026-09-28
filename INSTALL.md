@@ -4,6 +4,8 @@
 
 **安装选型直接在当前对话中完成。** 检测后就在对话中展示目标 agent 的用途说明、完整选项与作者推荐，并按[选型交互](#choose-options)发起问答。只有用户明确要求导出时才生成选型文档；不要用新建 Markdown 文件、报告或文件链接替代对话中的选项和提问。安装记录仍按第 4 步保存。
 
+**Fork 说明：脚本安装器。** 本仓库（Hydraallen/claude-code-config）另外提供 `install.sh`（macOS / Linux）与 `install.ps1`（Windows）作为受支持的替代路径，仅配置 Claude Code：交互菜单、`--all`、`--only <ids>`、`--list-ids`、`--dry-run`、`--uninstall`。用户选择脚本路径时直接运行它们，不必走本流程；两条路径读取同一批 `platforms/claude/templates` 并共用 `agent-config/selection.json`。catalog 中 Claude 列写着“脚本安装”的条目只能用 `install.sh --only <菜单 ID>` 安装，见 [Claude 操作说明](platforms/claude/README.md#script-only)。
+
 后续配置查询、增删改、修复与更新统一由 [edit-config](skills/edit-config/SKILL.md) 发起。该 skill 明确跟踪本仓库的 main 分支，并先区分只读查询与修改。首次安装可以直接执行本流程；查询不执行下面的安装和记录步骤。
 
 ## 1. 读取与检测
@@ -72,7 +74,7 @@ App 与 CLI 共用目录时只处理一次；内置能力按实际 client、scop
 
 先按已记录的仓库来源获取本次 revision 的 INSTALL 与 catalog，再读取已选 ID，更新对应来源；源码固定 revision 不自动解锁。作者新增推荐不扩大用户选择。用户要求改选时，按[第 2 步](#choose-options)在对话中重新列完整目录并收集选择，保留已安装标记。
 
-通过 edit-config 发起时，先执行该 skill 的分支与来源冲突检查，再使用解析后的同一 revision。它的目标为 `Mizoreww/awesome-agent-config` 的 `main` 分支；仓库改名和已有更新策略按[主线迁移](docs/migration.md#repository-identity)处理。匹配 main 的 branch / default-branch 策略可续用；其他 fork、分支、固定 commit 或本地来源须按明确选择迁移。
+通过 edit-config 发起时，先执行该 skill 的分支与来源冲突检查，再使用解析后的同一 revision。它的目标为 `Hydraallen/claude-code-config` 的 `main` 分支；上游 `Mizoreww/awesome-agent-config`（及旧名 awesome-claude-code-config）是不同来源，已有更新策略按[仓库来源](docs/migration.md#repository-identity)处理。匹配 main 的 branch / default-branch 策略可续用；上游、其他 fork、分支、固定 commit 或本地来源须按明确选择迁移。
 
 旧记录中的 ID 在当前目录消失或改名时，查阅当前仓库[迁移说明](docs/migration.md)；保留已安装对象和原记录，标记退役或待迁移并说明选择。只有用户要求迁移/移除才执行，不把未知 ID 忽略成“更新成功”。
 
@@ -102,7 +104,7 @@ App 与 CLI 共用目录时只处理一次；内置能力按实际 client、scop
 
 明确给出的策略优先。分支 checkout 的仓库与远端跟踪分支应核实后记录；不清楚其发布来源时使用 local。README 页面 URL 带有 ref 时沿用该 ref；不能丢掉它后落回另一个默认分支。旧开发分支、tag 和 fork 的明确策略同样保留。
 
-获取后的版本必须包含 INSTALL.md、catalog.md 和目标平台说明，才能继续本流程。若没有，说明来源不兼容并请求正确来源，不能运行旧安装器或切到历史分支。
+获取后的版本必须包含 INSTALL.md、catalog.md 和目标平台说明，才能继续本流程。若没有，说明来源不兼容并请求正确来源，不能切到历史分支，也不能运行来源不明的旧版安装器。本 fork 当前 revision 自带的 `install.sh` / `install.ps1` 是受支持的替代路径，不属于这里所说的旧安装器。
 
 已有记录缺少这些字段时，从记录中的仓库来源或用户此次明确给出的 URL / checkout 补齐；没有可靠来源才补问。目录内容使用完整相同 revision；来源策略改变只更新来源记录，不重置选择和文件归属。Claude 与 Codex 各自在自己的 home 保存记录与 lessons。
 

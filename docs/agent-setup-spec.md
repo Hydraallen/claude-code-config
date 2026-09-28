@@ -14,6 +14,8 @@
 
 2026-09-17 正式发布：v4.0.0 采用当前 39 个活动 ID 和 Claude 20 / Codex 18 项作者推荐。正式仓库为 Mizoreww/awesome-agent-config，main 作为统一主线；旧 main 保存到 archive/legacy-claude，其他分支统一改为 archive/legacy-<原名称>（原名称中的 / 改为 -），历史 tags/releases 保留。edit-config 及模板更新来源同步至新仓库 main；旧名称按明确别名识别，已有分支、固定或本地策略仍按用户选择迁移。本条取代此前仅在开发分支工作、不执行主线发布的限制。
 
+2026-09-28 fork 合并（Hydraallen/claude-code-config 4.2.0）：本 fork 合并上游 4.1.0，同时保留脚本安装器 `install.sh` / `install.ps1` 作为受支持的替代路径（仅 Claude Code），因此上文“终端菜单提案已撤回”只适用于上游。两条路径共用 platforms/claude/templates 与 `agent-config/selection.json`；catalog 增加 fork 条目，其中只能由脚本安装的条目在 Claude 列写明 `install.sh --only <菜单 ID>`，由 `scripts/check-catalog-sync.sh` 校验与安装器一致。edit-config 与模板的更新来源为本 fork 的 main，上游仓库视为不同来源。Lark / 飞书 MCP 在本 fork 保留；claude-mem、PUA、GitHub MCP 退役，脚本安装器会主动卸载。本 fork 活动目录为 55 个 ID，其中 50 个提供 Claude 渠道；本段取代下文与之冲突的上游描述。
+
 ## 用户入口
 
 README 提供一段可以直接交给 agent 的请求：
@@ -38,6 +40,7 @@ platforms/claude/           Claude 操作说明与待部署的配置模板
 platforms/codex/            Codex 操作说明与待部署的配置模板
 skills/                    自有或定制的完整 skill 源码
 scripts/                   确有需要的备份、受控复制、配置合并与校验
+install.sh / install.ps1   fork：Claude Code 脚本安装器（替代路径）
 ```
 
 先用 Markdown 维护目录即可。每项写清用途、适用场景、Claude/Codex 渠道、重要限制、来源和固定版本要求；Claude 与 Codex 的作者推荐标记分别维护。具体命令集中在平台说明里。特殊能力的安装细节按需链接，不让 agent 每次读取所有插件文档。
@@ -91,7 +94,7 @@ Agent 负责理解需求、选型解释、查阅平台说明和处理异常。�
 
 每个 agent home 下留一份简短安装记录，保存选择、来源/revision、受管文件及部署 hash、备份位置、待完成项。原生插件版本以原生查询为准；这份记录用于后续对话和文件保护，不实现另一套插件数据库。操作中断后先核对原生状态，归属不明的内容保留；卸载也只针对归属明确且用户要求移除的内容。
 
-仓库来源记录包含 URL、解析后的 revision 和 branch / default-branch / pinned / local 更新策略；具体字段定义在 INSTALL。共享 edit-config 明确使用 Mizoreww/awesome-agent-config 的 main 分支，替代旧 update-config / update_config。仓库改名别名及策略处理遵循 docs/migration.md 的主线迁移；匹配 main 的 branch / default-branch 策略可续用，default-branch 仍保留该策略。缺失来源时使用 skill 的明确目标；其他 fork、分支（含旧开发分支）、固定或本地策略按明确迁移选择处理，不能静默覆盖。已有选择、文件归属和来源历史保持可追溯。新版本中已消失的 ID 需提示退役或迁移，不能被当作更新成功或自动删除。
+仓库来源记录包含 URL、解析后的 revision 和 branch / default-branch / pinned / local 更新策略；具体字段定义在 INSTALL。共享 edit-config 明确使用本 fork Hydraallen/claude-code-config 的 main 分支（上游为 Mizoreww/awesome-agent-config），替代 Codex 旧 update_config；本 fork 的 Claude update-config 作为脚本路径的更新入口保留。仓库改名别名及策略处理遵循 docs/migration.md 的主线迁移；匹配 main 的 branch / default-branch 策略可续用，default-branch 仍保留该策略。缺失来源时使用 skill 的明确目标；其他 fork、分支（含旧开发分支）、固定或本地策略按明确迁移选择处理，不能静默覆盖。已有选择、文件归属和来源历史保持可追溯。新版本中已消失的 ID 需提示退役或迁移，不能被当作更新成功或自动删除。
 
 Codex 的 Matt 包继续固定现有 commit，包含其上游 handoff，原生迁移经过入口、资源和所选成员验证后再采用。Playwright 保留固定版本、旧 Node 的兼容路径和 MCP initialize 检查。ResearchStudio Idea/Reel 与 PPT Master 按已有约定仅安装必要源码，依赖由首次调用准备。
 

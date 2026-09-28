@@ -1,6 +1,6 @@
 # 让 Agent 维护仓库
 
-用户要求在本仓库新增、更新、修改、删除 skills / 插件 / 配置，或调整作者推荐时，按本文件执行。给用户机器安装或更新已选内容走 [INSTALL.md](INSTALL.md)。仓库改动与用户已安装内容分别处理；修改目录不会直接修改任何 agent home。
+用户要求在本仓库新增、更新、修改、删除 skills / 插件 / 配置，或调整作者推荐时，按本文件执行。本仓库是 Hydraallen/claude-code-config（Mizoreww/awesome-agent-config 的 fork），同时维护 agent 引导安装与脚本安装器 `install.sh` / `install.ps1` 两条安装路径，二者都必须随目录变化保持可用。给用户机器安装或更新已选内容走 [INSTALL.md](INSTALL.md)。仓库改动与用户已安装内容分别处理；修改目录不会直接修改任何 agent home。
 
 配置查询与增删改的统一入口是 [edit-config](skills/edit-config/SKILL.md)。它将仓库修改路由到本文件，将安装修改路由到 INSTALL；只读查询不进入写入流程。
 
@@ -10,7 +10,7 @@
 
 当前 checkout 的文件是维护依据。旧分支和 [历史映射](docs/migration.md) 只用于追溯，安装和维护均无需获取它们。外部上游 revision 是当前仓库的版本约束；可以在用户要求升级时核实并更新，不能只因为有 latest 就解锁。
 
-当前开发与发布主线是 main；按用户指定在 main 或新的工作分支上修改。archive/legacy-* 保存旧分支历史，具体映射见[主线迁移](docs/migration.md#repository-identity)。
+当前开发与发布主线是 main；按用户指定在 main 或新的工作分支上修改。上游以 `upstream` remote 跟踪，合并上游时保留 fork 条目与脚本安装器；上游的 archive/legacy-* 分支只存在于上游仓库，来源关系见[仓库来源](docs/migration.md#repository-identity)。
 
 先确认源码归属：第三方原版只维护上游安装方式，不复制进本仓库；作者自有 skill 留在这里。作者明确维护的定制衍生版也可保留完整源码，附上游署名和本地修改说明。handoff 仅属于 Matt 工作流包，使用该包的上游版本。
 
@@ -35,17 +35,18 @@
 ## 3. 同步用户与 Agent 的入口
 
 - `catalog.md` 是稳定 ID、分类、支持范围、作者推荐和安装渠道的权威目录。
-- `README.md` 与 `README.zh-CN.md` 是面向用户的同一份完整介绍：保留 Core、Language Rules、Review、Workflow、Integrations、Design & Content、Slides、Memory & Lifestyle、Storage、Academic Research、MCP Servers 的分类顺序，更新用途、来源、平台支持及推荐标记。
+- **每次修改 catalog 都要同步两个脚本安装器**：`install.sh` 的菜单（`load_menu_groups`）、`catalog_id_for_menu_id` 与相关安装函数，以及 `install.ps1` 的 `Get-MenuGroups` 与 `$CATALOG_ID_FOR_MENU_ID`。只能由脚本安装的条目在 Claude 列写明 `install.sh --only <菜单 ID>`；install.ps1 暂缺的菜单项登记在 `scripts/check-catalog-sync.sh` 的 `PS1_MISSING_MENU_IDS`。
+- `README.md` 与 `README.zh-CN.md` 是面向用户的同一份完整介绍：保留 Core、Model Backends（fork）、Language Rules、Review、Workflow、Integrations、Design & Content、Slides、Memory & Lifestyle、Storage、Academic Research、MCP Servers 的分类顺序，更新用途、来源、平台支持及推荐标记。
 - 平台说明 / `sources.md` 集中保存具体安装配方；README 与 catalog 链接到它们，避免再复制命令。涉及通用安装行为时同步 INSTALL；版本级变化同步 VERSION 与双语 CHANGELOG。
 - 移除或替换活动 ID 时，在 [迁移说明](docs/migration.md) 新增旧 ID → 新 ID / 退役原因与处理方式。安装记录中的旧 ID 需被识别、解释并保留；只有用户要求移除才卸载已有副本。
 
 历史 changelog、项目 lessons 和首次合并的 provenance 保留原始事实；它们不要求当前 skill 永远与旧 blob 相同。
 
-完成条件：两份 README、catalog、源码与配方描述同一套能力，没有失效链接或隐式新增安装范围。
+完成条件：两份 README、catalog、两个脚本安装器、源码与配方描述同一套能力，没有失效链接或隐式新增安装范围。
 
 ## 4. 验证并交接
 
-运行 `bash scripts/check-readme-sync.sh`，检查所改条目的链接、完整资源和必要适配。涉及文件操作或安装行为时在临时 agent home 验证，包括保留已有修改；只运行受影响的既有测试。新的临时测试与验收记录放仓库之外。
+运行 `bash scripts/check-catalog-sync.sh` 与 `bash scripts/check-readme-sync.sh`，两者都必须通过；修改安装器时再运行 `bash -n install.sh` 和 `python3 -m pytest -q`。检查所改条目的链接、完整资源和必要适配。涉及文件操作或安装行为时在临时 agent home 验证，包括保留已有修改；只运行受影响的既有测试。新的临时测试与验收记录放仓库之外。
 
 验证当前 checkout 或其导出目录可独立使用；需要网络时只访问所选来源，不取旧 Claude/Codex 分支。按本仓库约定完成代码审查。
 

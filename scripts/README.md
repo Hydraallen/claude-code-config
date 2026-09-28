@@ -2,6 +2,13 @@
 
 These helpers have no catalogue, menu or plugin installer. The agent decides the selected item and final directory according to [INSTALL.md](../INSTALL.md).
 
+This fork's script installers, `install.sh` and `install.ps1` at the repository root, are a separate, supported installation path with their own menu (see the [README](../README.md#quick-start)); they do not call these helpers. Other scripts in this directory:
+
+- `check-catalog-sync.sh`: checks that catalog.md, `install.sh` and `install.ps1` describe the same Claude items (menu IDs, the menu -> catalog mapping, script-installed rows). Run it after every catalogue or installer change.
+- `check-readme-sync.sh`: checks that README.md and README.zh-CN.md have the same structure and link targets.
+- `cleanup-claude-data.sh`: prunes aged Claude Code data that `cleanupPeriodDays` does not cover (telemetry, debug logs, file history, marketplace temp dirs); dry-run unless `--apply`. The script installers deploy it and run it at the end. `--include-mem` is accepted and ignored.
+- `image-gen-openrouter.py`: the OpenRouter wrapper the script installers deploy with the image-gen skill ([docs/BACKENDS.md](../docs/BACKENDS.md)).
+
 Use an available Python 3.10+ interpreter (including a verified app-provided runtime). TOML merge alone also needs `tomlkit==0.13.3`; with uv available, prefix that operation with `uv run --with tomlkit==0.13.3 python`. Reuse an existing environment or prepare a temporary one; do not install Python packages globally. If no suitable runtime exists, explain this prerequisite before preparing one.
 
 ## Protected copy
