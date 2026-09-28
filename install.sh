@@ -478,10 +478,13 @@ Usage: $(basename "$0") [OPTIONS]
 Install Claude Code configuration files.
 
 Running without options launches an interactive component selector.
-Works with both local and piped installs (curl | bash).
+Works with both local and piped installs (curl | bash). The selector starts
+from what is already installed (defaults for anything that is not); items you
+uncheck there are removed on submit — only what this installer put there, with
+modified files backed up to ~/.claude/agent-config/backups/ first.
 
 Options:
-    --all               Install everything (non-interactive)
+    --all               Install everything (non-interactive, additive)
     --only <ids>        Install just these menu items (comma- or space-separated
                         IDs, see --list-ids), non-interactively. Additive:
                         nothing else is removed, plugins are not reconciled
@@ -489,19 +492,22 @@ Options:
     --list-ids          Print every menu item ID with its default and group
     --version           Show version info
     --dry-run           Show what would be installed without doing it,
-                        including which plugins/marketplaces would be REMOVED
+                        including everything an interactive run would REMOVE
     --force             Skip confirmation prompts
     --prune-foreign-plugins
                         Also uninstall plugins this installer does not manage
                         when they are not selected this run (hand-installed
                         third-party ones included). By default only
-                        installer-managed plugins are reconciled.
+                        installer-managed plugins are reconciled. Plugins are
+                        only ever reconciled on interactive runs.
     --keep-foreign-plugins
                         Accepted for compatibility; this is now the default.
     -h, --help          Show this help
 
-Every run also removes retired items (github plugin + GitHub MCP, claude-mem,
-PUA). --all installs every item except the opt-in storage-analyzer skill.
+Only an interactive run removes unchecked items. --all, --only and the
+non-interactive default (no tty) are additive and remove nothing, except that
+every run removes retired items (github plugin + GitHub MCP, claude-mem, PUA).
+--all installs every item except the opt-in storage-analyzer skill.
 
 Examples:
     $(basename "$0")                                 # Interactive selector
@@ -581,6 +587,11 @@ SELECTED_UPSTREAM_SKILLS=()
 # selector): only then are previously installed, now-deselected items removed.
 FULL_SELECTION=false
 SELECTED_PLUGINS=()
+# Menu IDs left unchecked in this run's interactive selector (recorded in
+# selection.json as script_installer.deselected) and the list the previous run
+# recorded (read by load_previous_deselected for the initial menu state).
+MENU_DESELECTED_IDS=()
+PREV_DESELECTED_IDS=""
 SELECTED_DEEPXIV_SKILLS=()
 SELECTED_PROFILES=()
 DEEPXIV_KNOWN_SKILLS=("deepxiv-cli" "deepxiv-trending-digest" "deepxiv-baseline-table")
@@ -717,7 +728,7 @@ cleanup_retired_mattpocock_skills() {
             continue
         fi
         if ! $purge_all && is_kept_mattpocock_skill "$skill_name"; then
-            survivors+=("$skill_name")
+            survivors+=("$(printf '%s\t%s' "$skill_name" "$skill_hash")")
             continue
         fi
         skill_path="$CLAUDE_DIR/skills/$skill_name"
@@ -738,21 +749,25 @@ cleanup_retired_mattpocock_skills() {
     done < "$manifest"
 
     if ((${#survivors[@]} > 0)); then
-        # Keep-list entries remain owned; rewrite the manifest to just those,
-        # re-deriving each digest from what is on disk right now so a skill the
-        # user has since replaced is recorded as theirs, not ours.
+        # Keep-list entries remain owned; rewrite the manifest to just those.
+        # A v2 record keeps the digest recorded at install time, so a later
+        # local edit still reads as modified (and is backed up before an
+        # unchecked item removes it). Only a legacy v1 record, which has no
+        # digest, takes it from what is on disk now.
         if $DRY_RUN; then
             info "Would rewrite mattpocock skill manifest (${#survivors[@]} kept)"
             return 0
         fi
         local -a records=()
-        for skill_name in "${survivors[@]}"; do
-            # No readable SKILL.md means we cannot prove we own it — drop the
-            # record rather than keep a bare name that would later authorise a
+        local survivor
+        for survivor in "${survivors[@]}"; do
+            skill_name="${survivor%%$'\t'*}"
+            skill_hash="${survivor#*$'\t'}"
+            # No SKILL.md means we cannot prove we own it — drop the record
+            # rather than keep a bare name that would later authorise a
             # deletion we cannot justify.
-            if current_hash="$(mattpocock_skill_digest "$skill_name")"; then
-                records+=("$(printf '%s\t%s' "$skill_name" "$current_hash")")
-            fi
+            current_hash="$(mattpocock_skill_digest "$skill_name" 2>/dev/null)" || continue
+            records+=("$(printf '%s\t%s' "$skill_name" "${skill_hash:-$current_hash}")")
         done
         if ((${#records[@]} > 0)); then
             printf '%s\n' "${records[@]}" | write_mattpocock_manifest || \
@@ -914,8 +929,9 @@ can_interact() {
 parse_args() {
     if [[ $# -eq 0 ]]; then
         # No args: interactive mode if terminal available (including piped installs
-        # like "curl | bash" where /dev/tty is still accessible), else install all
-        if can_interact; then
+        # like "curl | bash" where /dev/tty is still accessible), else install all.
+        # ACCC_TEST_MENU_IDS is the internal test hook of interactive_menu().
+        if can_interact || [[ -n "${ACCC_TEST_MENU_IDS+x}" ]]; then
             INTERACTIVE=true
         else
             INSTALL_ALL=true
@@ -1000,7 +1016,7 @@ parse_args() {
 
     # Only modifier flags (--dry-run, --force) with no action
     if ! $has_action; then
-        if can_interact; then
+        if can_interact || [[ -n "${ACCC_TEST_MENU_IDS+x}" ]]; then
             INTERACTIVE=true
         else
             INSTALL_ALL=true
@@ -1275,7 +1291,11 @@ apply_menu_id() {
 
 # --- Interactive menu ---------------------------------------------------
 
-interactive_menu() {
+# Keyboard-driven two-level selector. Called by interactive_menu() and relies
+# on bash dynamic scoping: it reads and updates that function's locals
+# (selected, ALL_IDS, GROUP_* ...). Returns 1 when no terminal can be opened
+# (INSTALL_ALL is then set and the caller falls back to the default install).
+_interactive_menu_tui() {
     # Open a file descriptor for keyboard input.
     # Prefer stdin when it's a real tty (normal execution); fall back to /dev/tty
     # for piped installs (curl | bash) where stdin carries the script.
@@ -1284,51 +1304,8 @@ interactive_menu() {
     elif ! exec 3</dev/tty 2>/dev/null; then
         warn "Cannot open terminal for interactive input, falling back to default install"
         INSTALL_ALL=true
-        return
+        return 1
     fi
-
-    # Menu data comes from load_menu_groups (shared with --only).
-    load_menu_groups
-    local -a GROUP_LABELS=("${MENU_GROUP_LABELS[@]}")
-    local -a GROUP_HINTS=("${MENU_GROUP_HINTS[@]}")
-    local -a GROUP_ITEMS=("${MENU_GROUP_ITEMS[@]}")
-
-    local num_groups=${#GROUP_LABELS[@]}
-    # Index of the Review group (its adversarial/codex items are mutually
-    # exclusive). Looked up by label so inserting a group cannot shift it.
-    local review_g=-1 _g
-    for (( _g=0; _g<num_groups; _g++ )); do
-        [[ "${GROUP_LABELS[$_g]}" == "Review" ]] && review_g=$_g
-    done
-
-    # Flatten all items into parallel arrays for indexing
-    local -a ALL_LABELS=() ALL_DESCS=() ALL_DEFAULTS=() ALL_IDS=()
-    local -a GROUP_START=() GROUP_END=()
-    local flat_idx=0
-    for (( g=0; g<num_groups; g++ )); do
-        GROUP_START[$g]=$flat_idx
-        while IFS= read -r line; do
-            [[ -z "$line" ]] && continue
-            local _l _d _df _id
-            IFS='|' read -r _l _d _df _id <<< "$line"
-            ALL_LABELS+=("$_l")
-            ALL_DESCS+=("$_d")
-            ALL_DEFAULTS+=("$_df")
-            ALL_IDS+=("$_id")
-            (( ++flat_idx ))
-        done <<< "${GROUP_ITEMS[$g]}"
-        GROUP_END[$g]=$(( flat_idx - 1 ))
-    done
-
-    local n=$flat_idx
-    local selected=()
-    local cursor=0
-
-    # Initialize selections from defaults
-    local i
-    for (( i=0; i<n; i++ )); do
-        selected[$i]="${ALL_DEFAULTS[$i]}"
-    done
 
     # Save terminal state (operate on fd 3 which points to the actual tty)
     local saved_stty
@@ -1639,6 +1616,87 @@ interactive_menu() {
     trap - INT TERM EXIT
     # Restore tmpdir cleanup for remote mode
     $REMOTE_MODE && [[ -n "${tmpdir:-}" ]] && trap 'rm -rf "$tmpdir"' EXIT || true
+}
+
+# Test-hook replacement for _interactive_menu_tui (see interactive_menu).
+# ACCC_TEST_MENU_STATE_OUT, when set, receives the initial state as "id=0|1"
+# lines; ACCC_TEST_MENU_IDS is "@initial" (submit the initial state unchanged)
+# or a comma/space-separated list of the menu IDs to leave checked.
+_menu_test_hook() {
+    local i want="${ACCC_TEST_MENU_IDS}" id
+    if [[ -n "${ACCC_TEST_MENU_STATE_OUT:-}" ]]; then
+        : > "$ACCC_TEST_MENU_STATE_OUT" || return 1
+        for (( i=0; i<n; i++ )); do
+            printf '%s=%s\n' "${ALL_IDS[$i]}" "${selected[$i]}" >> "$ACCC_TEST_MENU_STATE_OUT"
+        done
+    fi
+    [[ "$want" == "@initial" ]] && return 0
+    want=" ${want//,/ } "
+    for id in $want; do
+        is_menu_item_id "$id" || { error "ACCC_TEST_MENU_IDS: unknown menu ID: $id"; exit 1; }
+    done
+    for (( i=0; i<n; i++ )); do
+        if [[ "$want" == *" ${ALL_IDS[$i]} "* ]]; then selected[$i]=1; else selected[$i]=0; fi
+    done
+}
+
+interactive_menu() {
+    # Menu data comes from load_menu_groups (shared with --only).
+    load_menu_groups
+    local -a GROUP_LABELS=("${MENU_GROUP_LABELS[@]}")
+    local -a GROUP_HINTS=("${MENU_GROUP_HINTS[@]}")
+    local -a GROUP_ITEMS=("${MENU_GROUP_ITEMS[@]}")
+
+    local num_groups=${#GROUP_LABELS[@]}
+    # Index of the Review group (its adversarial/codex items are mutually
+    # exclusive). Looked up by label so inserting a group cannot shift it.
+    local review_g=-1 _g
+    for (( _g=0; _g<num_groups; _g++ )); do
+        [[ "${GROUP_LABELS[$_g]}" == "Review" ]] && review_g=$_g
+    done
+
+    # Flatten all items into parallel arrays for indexing
+    local -a ALL_LABELS=() ALL_DESCS=() ALL_DEFAULTS=() ALL_IDS=()
+    local -a GROUP_START=() GROUP_END=()
+    local flat_idx=0
+    for (( g=0; g<num_groups; g++ )); do
+        GROUP_START[$g]=$flat_idx
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local _l _d _df _id
+            IFS='|' read -r _l _d _df _id <<< "$line"
+            ALL_LABELS+=("$_l")
+            ALL_DESCS+=("$_d")
+            ALL_DEFAULTS+=("$_df")
+            ALL_IDS+=("$_id")
+            (( ++flat_idx ))
+        done <<< "${GROUP_ITEMS[$g]}"
+        GROUP_END[$g]=$(( flat_idx - 1 ))
+    done
+
+    local n=$flat_idx
+    local selected=()
+    local cursor=0
+
+    # Initial checked state: what is installed now (detect_menu_item_state),
+    # falling back to the item default for anything not installed — unless a
+    # previous interactive run recorded the item as deliberately unchecked.
+    # A first install therefore starts from the defaults exactly as before.
+    local i
+    load_previous_deselected
+    for (( i=0; i<n; i++ )); do
+        selected[$i]="$(menu_initial_state "${ALL_IDS[$i]}" "${ALL_DEFAULTS[$i]}")"
+    done
+
+    if [[ -n "${ACCC_TEST_MENU_IDS+x}" ]]; then
+        # Internal test hook (undocumented): replaces the keyboard-driven selector
+        # so the harness can drive an interactive run without a tty. It only
+        # chooses which menu items end up checked — exactly what a user could do
+        # with the keyboard — and never widens what the installer may touch.
+        _menu_test_hook || return 0
+    else
+        _interactive_menu_tui || return 0
+    fi
 
     # Map selections to install flags
     INSTALL_ALL=false
@@ -1646,8 +1704,12 @@ interactive_menu() {
     RULE_LANGS_EXPLICIT=true
     INSTALL_WRITING_STYLE=false
 
+    MENU_DESELECTED_IDS=()
     for (( i=0; i<n; i++ )); do
-        [[ ${selected[$i]} -eq 0 ]] && continue
+        if [[ ${selected[$i]} -eq 0 ]]; then
+            MENU_DESELECTED_IDS+=("${ALL_IDS[$i]}")
+            continue
+        fi
         apply_menu_id "${ALL_IDS[$i]}"
     done
 
@@ -2134,19 +2196,13 @@ install_rules() {
             info "Would copy: rules/writing-style.md -> $ws_dst"
         elif [[ -f "$ws_src" ]]; then
             cp "$ws_src" "$ws_dst"
+            record_owned_path "rules/writing-style.md"
             ok "Writing style rule installed"
         else
             error "Writing style rule not found: $ws_src"
         fi
-    elif $RULE_LANGS_EXPLICIT && [[ -f "$ws_dst" && -f "$ws_src" ]] && cmp -s "$ws_src" "$ws_dst"; then
-        # Deselected in the menu: remove only an unmodified copy of our file.
-        if $DRY_RUN; then
-            info "Would remove unselected: $ws_dst"
-        else
-            rm -f "$ws_dst"
-            ok "Removed unselected rule: writing-style.md"
-        fi
     fi
+    # An unchecked writing-style rule is removed by reconcile_deselected().
 
     # Retired files from earlier installs are reported, not deleted: they may
     # carry user edits (see docs/migration.md#common-rules), and both would
@@ -2183,6 +2239,7 @@ install_rules() {
             else
                 rm -rf "$CLAUDE_DIR/rules/$lang"
                 cp -r "$CLAUDE_TEMPLATES_DIR/rules/$lang" "$CLAUDE_DIR/rules/$lang"
+                record_owned_path "rules/$lang"
                 ok "$lang rules installed"
             fi
         else
@@ -2190,30 +2247,8 @@ install_rules() {
         fi
     done
 
-    # Clean up known language rule dirs that were NOT selected (from previous installs)
-    # Only removes languages this installer knows about; preserves user-created dirs
-    if $RULE_LANGS_EXPLICIT; then
-        local known_langs=("python" "typescript" "golang")
-        for known in "${known_langs[@]}"; do
-            local keep=false
-            for lang in "${langs[@]+"${langs[@]}"}"; do
-                if [[ "$lang" == "$known" ]]; then
-                    keep=true
-                    break
-                fi
-            done
-
-            if ! $keep && [[ -d "$CLAUDE_DIR/rules/$known" ]]; then
-                if $DRY_RUN; then
-                    info "Would remove unselected: $CLAUDE_DIR/rules/$known/"
-                else
-                    rm -rf "$CLAUDE_DIR/rules/$known"
-                    ok "Removed unselected rules: $known"
-                fi
-            fi
-        done
-    fi
-
+    # Unchecked language rules are removed by reconcile_deselected() (interactive
+    # runs only; modified copies are backed up first).
 }
 
 install_skills() {
@@ -2244,6 +2279,7 @@ install_skills() {
                 else
                     rm -rf "$CLAUDE_DIR/skills/$skill"
                     cp -r "$skill_dir" "$CLAUDE_DIR/skills/$skill"
+                    record_owned_path "skills/$skill"
                     ok "Skill installed: $skill"
                 fi
             else
@@ -2274,33 +2310,13 @@ install_skills() {
             else
                 rm -rf "$CLAUDE_DIR/skills/$skill"
                 cp -r "$skill_dir" "$CLAUDE_DIR/skills/$skill"
+                record_owned_path "skills/$skill"
                 ok "Skill installed: $skill"
             fi
         done
     fi
-
-    # Clean up installer-managed skills that were NOT selected (from previous installs)
-    # Only runs for a full (interactive) selection; --only is additive.
-    if $FULL_SELECTION && [[ ${#SELECTED_SKILLS[@]} -gt 0 ]]; then
-        for known in "${SCRIPT_OWNED_SKILLS[@]}"; do
-            local keep=false
-            for skill in "${SELECTED_SKILLS[@]}"; do
-                if [[ "$skill" == "$known" ]]; then
-                    keep=true
-                    break
-                fi
-            done
-            if ! $keep && [[ -d "$CLAUDE_DIR/skills/$known" ]] \
-               && ! is_agent_managed_elsewhere "skills/$known"; then
-                if $DRY_RUN; then
-                    info "Would remove unselected skill: $known"
-                else
-                    rm -rf "$CLAUDE_DIR/skills/$known"
-                    ok "Removed unselected skill: $known"
-                fi
-            fi
-        done
-    fi
+    # Unchecked script-owned skills are removed by reconcile_deselected()
+    # (interactive runs only, also when every skill item is unchecked).
 }
 
 install_agents() {
@@ -2314,6 +2330,7 @@ install_agents() {
             info "Would copy: agents/$agent -> $CLAUDE_DIR/agents/$agent"
         else
             cp "$agent_file" "$CLAUDE_DIR/agents/$agent"
+            record_owned_path "agents/$agent"
             ok "Agent installed: $agent"
         fi
     done
@@ -2392,6 +2409,7 @@ install_shell_wrapper() {
         info "Would prompt for the default backend among the installed profiles"
     else
         cp "$SCRIPT_DIR/claude.zsh" "$target"
+        record_owned_path "claude.zsh"
         ok "Shell wrapper installed to $target"
         if [[ -f "$SCRIPT_DIR/system-prompt.txt" ]]; then
             # Compare with existing — skip if identical
@@ -2404,6 +2422,7 @@ install_shell_wrapper() {
                     warn "Existing system-prompt.txt backed up to system-prompt.txt.bak — merge your customizations manually"
                 fi
                 cp "$SCRIPT_DIR/system-prompt.txt" "$CLAUDE_DIR/system-prompt.txt"
+                record_owned_path "system-prompt.txt"
                 ok "system-prompt.txt installed"
             fi
         fi
@@ -3985,16 +4004,37 @@ publish_managed_skill() {
 }
 
 # Remove skills/$1 through managed_files.py when this script recorded it.
+# The helper moves the copy to agent-config/backups/<id>/ (the backup). With
+# $2 = --backup-modified (interactive deselect) a locally modified copy is
+# removed the same way instead of being preserved; --uninstall keeps it.
 remove_script_managed_skill() {
-    local name="$1" py out
+    local name="$1" mode="${2-}" py out
+    local -a extra=()
+    [[ "$mode" == "--backup-modified" ]] && extra=(--backup-modified)
     is_script_managed_copy "skills/$name" || return 0
+    py="$(managed_python)" || {
+        if $DRY_RUN; then info "Would remove unchecked skill: $name (installer-managed copy)"
+        else warn "$name: python3 unavailable — cannot verify ownership; kept"; fi
+        return 0
+    }
     if $DRY_RUN; then
-        info "Would remove unselected skill: $name (installer-managed copy)"
+        if out="$("$py" "$SCRIPT_DIR/scripts/managed_files.py" --root "$CLAUDE_DIR" --dry-run remove "skills/$name" ${extra[@]+"${extra[@]}"} 2>&1)"; then
+            if [[ "$out" == *'"modified": true'* ]]; then
+                info "Would back up (differs from the installed copy) and remove unchecked skill: $name"
+            else
+                info "Would remove unchecked skill: $name (installer-managed copy)"
+            fi
+        else
+            info "Would keep $name: ${out##*Preserved existing files: }"
+        fi
         return 0
     fi
-    py="$(managed_python)" || { warn "$name: python3 unavailable — cannot verify ownership; kept"; return 0; }
-    if out="$("$py" "$SCRIPT_DIR/scripts/managed_files.py" --root "$CLAUDE_DIR" remove "skills/$name" 2>&1)"; then
-        ok "Removed skill: $name (backup kept under $CLAUDE_DIR/agent-config/backups/)"
+    if out="$("$py" "$SCRIPT_DIR/scripts/managed_files.py" --root "$CLAUDE_DIR" remove "skills/$name" ${extra[@]+"${extra[@]}"} 2>&1)"; then
+        if [[ "$out" == *'"modified": true'* ]]; then
+            warn "Unchecked skill $name differed from the installed copy — backed up under $CLAUDE_DIR/agent-config/backups/, then removed"
+        else
+            ok "Removed skill: $name (backup kept under $CLAUDE_DIR/agent-config/backups/)"
+        fi
     else
         warn "$name: ${out##*Preserved existing files: }"
     fi
@@ -4129,7 +4169,7 @@ install_upstream_skills() {
         elif $FULL_SELECTION; then
             [[ "$item" == "humanizer-zh" ]] && cleanup_legacy_vendored_skill humanizer-zh "$LEGACY_HUMANIZER_ZH_SHA256"
             for name in $(upstream_skill_field "$item" targets); do
-                remove_script_managed_skill "$name"
+                remove_script_managed_skill "$name" --backup-modified
             done
         fi
     done < <(upstream_skill_items)
@@ -4191,6 +4231,7 @@ install_deepxiv() {
             if [[ -d "$skill_src" ]]; then
                 rm -rf "$CLAUDE_DIR/skills/$skill"
                 cp -r "$skill_src" "$CLAUDE_DIR/skills/$skill"
+                record_owned_path "skills/$skill"
                 ok "DeepXiv skill installed: $skill"
             else
                 warn "DeepXiv skill not found in repo: $skill"
@@ -4234,6 +4275,7 @@ install_statusline() {
         else
             cp "$hook_file" "$CLAUDE_DIR/hooks/statusline.sh"
             chmod +x "$CLAUDE_DIR/hooks/statusline.sh"
+            record_owned_path "hooks/statusline.sh"
             ok "Hook installed: statusline.sh"
         fi
     fi
@@ -4507,11 +4549,11 @@ resolve_plugin_selection() {
 # 0 when this run reconciles installed plugins against its selection
 # (uninstalls unselected installer-owned plugins, drops their marketplaces and
 # enabledPlugins entries). Only a complete interactive selection does; --all,
-# --only and the non-interactive default run are additive. An explicit
-# --prune-foreign-plugins keeps its documented meaning on non --only runs.
+# --only and the non-interactive default run are additive.
+# --prune-foreign-plugins only widens the scope of that interactive
+# reconciliation; it never makes an additive run remove plugins.
 plugin_reconcile_enabled() {
-    $FULL_SELECTION && return 0
-    ! $ONLY_MODE && $INSTALL_PLUGINS && [[ "$PLUGIN_PRUNE_SCOPE" == "all" ]]
+    $FULL_SELECTION
 }
 
 install_plugins() {
@@ -5300,8 +5342,11 @@ write_selection_record() {
     local plugins skills entry id _df _group cid
     plugins="$(_effective_plugin_set)"
     skills="$(_effective_skill_set)"
-    local items="{}" known="[]" script_only="[]"
+    local items="{}" known="[]" script_only="[]" sel_ids="[]"
     while IFS='|' read -r id _df _group; do
+        if menu_id_selected_this_run "$id" "$plugins" "$skills"; then
+            sel_ids="$(jq -c --arg i "$id" '. + [$i]' <<< "$sel_ids")"
+        fi
         local cids; cids="$(catalog_id_for_menu_id "$id")"
         local in_catalog=false
         for cid in $cids; do [[ "$catalog_set" == *"|$cid|"* ]] && in_catalog=true; done
@@ -5332,19 +5377,28 @@ write_selection_record() {
 
     local mode="default"
     if $ONLY_MODE; then mode="only"; elif $FULL_SELECTION; then mode="interactive"; elif $EXPLICIT_ALL; then mode="all"; fi
+    # Menu IDs left unchecked in the interactive selector; read back by the next
+    # interactive run so a deliberately unchecked default item stays unchecked.
+    local deselected="[]"
+    if [[ ${#MENU_DESELECTED_IDS[@]} -gt 0 ]]; then
+        deselected="$(printf '%s\n' "${MENU_DESELECTED_IDS[@]}" | jq -R 'select(length > 0)' | jq -cs .)"
+    fi
 
     mkdir -p "$dest_dir" && chmod 700 "$dest_dir" 2>/dev/null || true
     local tmp
     tmp="$(mktemp "$dest_dir/.selection.json.XXXXXX")" || { warn "Could not write $dest"; return 0; }
     if jq --argjson items "$items" --argjson known "$known" --argjson scriptOnly "$script_only" \
+          --argjson selIds "$sel_ids" --argjson deselected "$deselected" \
           --arg mode "$mode" --arg url "$SOURCE_REPO_URL" --arg rev "$SOURCE_REVISION" \
           --argjson update "${SOURCE_UPDATE_JSON:-null}" \
           --arg version "$(get_source_version)" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
         . as $old
         | ($old.items // {}) as $prev
-        # A full selection drops script-written records for known items that
-        # were not selected; agent-written records and --only runs keep them.
-        | (if $mode == "only" then $prev
+        # An interactive run (the only one that removes unchecked items) drops
+        # script-written records for known items that were not selected;
+        # agent-written records are kept, and additive runs (--all, --only,
+        # the non-interactive default) keep every earlier record.
+        | (if $mode != "interactive" then $prev
            else ($prev | with_entries(select(
                     (.key as $k | ($known | index($k)) == null)
                     or ((.value.source // "") != "script"))))
@@ -5367,9 +5421,11 @@ write_selection_record() {
                 version: $version,
                 mode: $mode,
                 updated: $now,
-                script_only: (if $mode == "only"
+                script_only: (if $mode != "interactive"
                               then ((($old.script_installer.script_only // []) + $scriptOnly) | unique)
-                              else $scriptOnly end)
+                              else $scriptOnly end),
+                deselected: (if $mode == "interactive" then $deselected
+                             else (($old.script_installer.deselected // []) - $selIds) end)
             }
           }' <<< "$existing" > "$tmp" && jq empty "$tmp" 2>/dev/null; then
         chmod 600 "$tmp" 2>/dev/null || true
@@ -5393,6 +5449,520 @@ clear_script_selection_records() {
         mv -f "$tmp" "$dest" && ok "Removed script-installer entries from $dest"
     else
         rm -f "$tmp"
+    fi
+}
+
+# ============================================================
+# Re-run semantics: detected initial state + "unchecked => removed"
+#
+# The interactive selector starts from what is installed now, so submitting
+# it unchanged is a no-op. On an interactive run (FULL_SELECTION) every item
+# that is left unchecked is removed again — but only what this installer put
+# there (ownership-scoped). --all, --only and the non-interactive default run
+# are additive and never call reconcile_deselected().
+#
+# Detection heuristic (detect_menu_item_state), per item:
+#   plugins               key present in plugins/installed_plugins.json
+#   script-owned skills,  directory/file present under ~/.claude (skills not
+#   rules, agents,        recorded as edit-config-managed in agent-config/
+#   DeepXiv, launcher     files.json)
+#   pinned upstream       every target recorded as a script-installer copy in
+#   skills                agent-config/files.json
+#   mattpocock/skills     a kept skill recorded in ~/.claude/.mattpocock-skills
+#   MCP servers           user-scope ~/.claude.json entry whose command/args
+#                         match what this installer registers (npx + package)
+#   statusline            settings.json statusLine runs ~/.claude/hooks/statusline.sh
+#   lessons               settings.json SessionStart carries the lessons hook
+#   co-author             settings.json includeCoAuthoredBy == true
+#   CLAUDE.md, settings,  file present (these are kept when unchecked, so a
+#   model backends        previous "unchecked" record wins over the file)
+# Items not detected fall back to their menu default, except those the previous
+# interactive run recorded as unchecked (selection.json
+# script_installer.deselected), which stay unchecked.
+#
+# Removal of a file this installer would delete but that differs from what it
+# installed (recorded digest in agent-config/script-owned.tsv, else the copy the
+# current source ships) is moved to agent-config/backups/<timestamp>-deselect/
+# first, and a notice is printed. Unmodified copies are deleted directly.
+# ============================================================
+
+OWNED_MANIFEST_REL="agent-config/script-owned.tsv"
+DESELECT_BACKUP_DIR=""
+# Lines this installer tells the user to add to ~/.zshrc (the installer never
+# adds one itself). Only an exact match is removed when the launcher is unchecked.
+SHELL_WRAPPER_RC_LINE='source ~/.claude/claude.zsh'
+# Menu items whose files are kept when unchecked; for these a previous
+# "unchecked" record overrides the on-disk signal.
+KEPT_ON_DESELECT_IDS=" claude-md settings backend-glm backend-or backend-gpt backend-ccr "
+
+sha256_stdin() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | cut -d " " -f 1
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | cut -d " " -f 1
+    else
+        return 1
+    fi
+}
+
+# Content digest of a file or a directory tree (paths + file digests; symlinks
+# by their target). Empty output when it cannot be computed.
+tree_digest() {
+    local path="$1"
+    if [[ -f "$path" && ! -L "$path" ]]; then
+        sha256_file "$path"
+        return
+    fi
+    [[ -d "$path" && ! -L "$path" ]] || return 1
+    (
+        cd "$path" || exit 1
+        find . \( -type f -o -type l \) -print 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
+            if [[ -L "$f" ]]; then
+                printf 'L %s %s\n' "$f" "$(readlink "$f")"
+            else
+                printf 'F %s %s\n' "$f" "$(sha256_file "$f")"
+            fi
+        done
+    ) | sha256_stdin
+}
+
+# Digest recorded for $1 (path relative to ~/.claude) when this installer wrote it.
+owned_recorded_digest() {
+    local m="$CLAUDE_DIR/$OWNED_MANIFEST_REL"
+    [[ -f "$m" && ! -L "$m" ]] || return 0
+    awk -F '\t' -v k="$1" '$1 == k { d = $2 } END { if (d != "") print d }' "$m"
+}
+
+# Rewrite the ownership manifest without $1, then (when $2 is set) with "$1<TAB>$2".
+_owned_manifest_put() {
+    local rel="$1" digest="${2-}" m="$CLAUDE_DIR/$OWNED_MANIFEST_REL" tmp
+    $DRY_RUN && return 0
+    [[ -L "$m" ]] && { warn "Refusing to write ownership record through a symlink: $m"; return 0; }
+    mkdir -p "$(dirname "$m")" && chmod 700 "$(dirname "$m")" 2>/dev/null || true
+    tmp="$(mktemp "$m.XXXXXX")" || return 0
+    {
+        if [[ -f "$m" ]]; then awk -F '\t' -v k="$rel" '$1 != k' "$m"; fi
+        [[ -n "$digest" ]] && printf '%s\t%s\n' "$rel" "$digest"
+        true
+    } > "$tmp"
+    chmod 600 "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$m" || rm -f "$tmp"
+}
+
+# Record the digest of what this installer just wrote at $1 (relative path).
+record_owned_path() {
+    local rel="$1" digest
+    $DRY_RUN && return 0
+    digest="$(tree_digest "$CLAUDE_DIR/$rel" 2>/dev/null)" || return 0
+    [[ -n "$digest" ]] || return 0
+    _owned_manifest_put "$rel" "$digest"
+}
+
+forget_owned_path() { _owned_manifest_put "$1" ""; }
+
+# Create this run's backup directory once (not in a subshell: the path is kept
+# in DESELECT_BACKUP_DIR so every removal of one run lands in the same place).
+_ensure_deselect_backup_dir() {
+    [[ -n "$DESELECT_BACKUP_DIR" ]] && return 0
+    DESELECT_BACKUP_DIR="$CLAUDE_DIR/agent-config/backups/$(date +%Y%m%d-%H%M%S)-deselect"
+    mkdir -p "$DESELECT_BACKUP_DIR" && chmod 700 "$CLAUDE_DIR/agent-config/backups" 2>/dev/null || true
+}
+
+# remove_owned_path <relative path> <source path or ""> <label>
+# Remove ~/.claude/<path> that this installer installed for an item the user
+# unchecked. Unmodified (matches the recorded digest or the shipped source):
+# deleted. Modified: moved to the run's backup directory, with a notice.
+# Symbolic links are never followed or removed.
+remove_owned_path() {
+    local rel="$1" src="${2-}" label="$3" target="$CLAUDE_DIR/$1" cur rec modified=true dest
+    [[ -e "$target" || -L "$target" ]] || return 0
+    if [[ -L "$target" ]]; then
+        warn "$label: $target is a symbolic link — left in place"
+        return 0
+    fi
+    cur="$(tree_digest "$target" 2>/dev/null)" || cur=""
+    rec="$(owned_recorded_digest "$rel")"
+    if [[ -n "$cur" && -n "$rec" && "$cur" == "$rec" ]]; then
+        modified=false
+    elif [[ -n "$cur" && -n "$src" && -e "$src" ]] && [[ "$(tree_digest "$src" 2>/dev/null)" == "$cur" ]]; then
+        modified=false
+    fi
+    if $DRY_RUN; then
+        if $modified; then
+            info "Would back up (differs from the installed copy) and remove unchecked $label: $target"
+        else
+            info "Would remove unchecked $label: $target"
+        fi
+        return 0
+    fi
+    if $modified; then
+        _ensure_deselect_backup_dir
+        dest="$DESELECT_BACKUP_DIR/$rel"
+        mkdir -p "$(dirname "$dest")"
+        if mv -- "$target" "$dest"; then
+            warn "Unchecked $label differed from the installed copy — backed up to $dest, then removed"
+        else
+            warn "Could not back up $target — left in place"
+            (( INSTALL_WARNINGS++ )) || true
+            return 0
+        fi
+    elif rm -rf -- "$target"; then
+        ok "Removed unchecked $label: ${target/#$HOME/~}"
+    else
+        warn "Could not remove $target"
+        (( INSTALL_WARNINGS++ )) || true
+        return 0
+    fi
+    forget_owned_path "$rel"
+}
+
+# --- settings.json / ~/.claude.json probes (jq; false when unavailable) ----
+
+_settings_jq_test() {
+    local settings="$CLAUDE_DIR/settings.json"
+    [[ -f "$settings" ]] && command -v jq &>/dev/null || return 1
+    jq -e "$1" "$settings" >/dev/null 2>&1
+}
+
+STATUSLINE_OURS_JQ='((.statusLine.command? // "") | tostring | test("\\.claude\\}?/hooks/statusline\\.sh"))'
+LESSONS_HOOK_JQ='[(.hooks.SessionStart? // [])[]? | (.hooks? // [])[]? | (.command? // "") | tostring | select(test("LESSONS_FILE="))] | length > 0'
+
+statusline_setting_is_ours() { _settings_jq_test "$STATUSLINE_OURS_JQ"; }
+lessons_hook_present()       { _settings_jq_test "$LESSONS_HOOK_JQ"; }
+co_author_enabled()          { _settings_jq_test '.includeCoAuthoredBy == true'; }
+
+# MCP servers this installer registers: name -> npm package in its args.
+mcp_package_for() {
+    case "$1" in
+        playwright) echo "@playwright/mcp" ;;
+        lark-mcp)   echo "@larksuiteoapi/lark-mcp" ;;
+    esac
+}
+
+# 0 when user-scope MCP server $1 exists at all / was registered by us
+# (command npx, an argument naming our package).
+mcp_registered() {
+    local cfg="$HOME/.claude.json"
+    [[ -f "$cfg" ]] && command -v jq &>/dev/null || return 1
+    jq -e --arg n "$1" '(.mcpServers // {}) | has($n)' "$cfg" >/dev/null 2>&1
+}
+mcp_is_ours() {
+    local cfg="$HOME/.claude.json" pkg
+    pkg="$(mcp_package_for "$1")"
+    [[ -n "$pkg" && -f "$cfg" ]] && command -v jq &>/dev/null || return 1
+    jq -e --arg n "$1" --arg p "$pkg" '
+        (.mcpServers[$n]? // null) as $s
+        | $s != null
+          and ((($s.command? // "") | tostring | test("(^|[/\\\\])npx(\\.cmd|\\.exe)?$")))
+          and ((($s.args? // []) | map(tostring) | any(. == $p or startswith($p + "@"))))
+    ' "$cfg" >/dev/null 2>&1
+}
+
+# --- Detection for the initial menu state ---------------------------------
+
+# Read script_installer.deselected from the previous selection record.
+load_previous_deselected() {
+    PREV_DESELECTED_IDS=" "
+    local f="$CLAUDE_DIR/agent-config/selection.json" id
+    [[ -f "$f" && ! -L "$f" ]] && command -v jq &>/dev/null || return 0
+    while IFS= read -r id; do
+        [[ -n "$id" ]] && PREV_DESELECTED_IDS+="$id "
+    done < <(jq -r '(.script_installer.deselected // [])[]? | strings' "$f" 2>/dev/null)
+    return 0
+}
+
+_script_skill_present() {
+    [[ -d "$CLAUDE_DIR/skills/$1" ]] && ! is_agent_managed_elsewhere "skills/$1"
+}
+
+# 0 when menu item $1 is detectably installed right now (see the table above).
+detect_menu_item_state() {
+    local id="$1" pkg name
+    case "$id" in
+        claude-md)           [[ -f "$CLAUDE_DIR/CLAUDE.md" ]] ;;
+        settings)            [[ -f "$CLAUDE_DIR/settings.json" ]] ;;
+        rules-writing-style) [[ -f "$CLAUDE_DIR/rules/writing-style.md" ]] ;;
+        statusline)          statusline_setting_is_ours ;;
+        lessons)             lessons_hook_present ;;
+        agents)
+            local f
+            for f in "$SCRIPT_DIR"/agents/*.md; do
+                [[ -f "$f" && -f "$CLAUDE_DIR/agents/${f##*/}" ]] && return 0
+            done
+            return 1 ;;
+        shell-wrapper)       [[ -f "$CLAUDE_DIR/claude.zsh" ]] ;;
+        co-author)           co_author_enabled ;;
+        backend-*)           [[ -f "$CLAUDE_DIR/profiles/${id#backend-}.json" ]] ;;
+        rules-python)        [[ -d "$CLAUDE_DIR/rules/python" ]] ;;
+        rules-ts)            [[ -d "$CLAUDE_DIR/rules/typescript" ]] ;;
+        rules-go)            [[ -d "$CLAUDE_DIR/rules/golang" ]] ;;
+        review-code-review)  plugin_is_installed "code-review@claude-plugins-official" ;;
+        review-codex)        plugin_is_installed "codex@openai-codex" ;;
+        review-adversarial)  _script_skill_present adversarial-review ;;
+        skill-humanizer)     plugin_is_installed "humanizer@humanizer" ;;
+        skill-mattpocock)
+            local manifest="$CLAUDE_DIR/$MATTPOCOCK_MANIFEST_NAME" _h
+            [[ -f "$manifest" && ! -L "$manifest" ]] || return 1
+            while IFS=$'\t' read -r name _h || [[ -n "$name" ]]; do
+                is_kept_mattpocock_skill "$name" && [[ -d "$CLAUDE_DIR/skills/$name" ]] && return 0
+            done < "$manifest"
+            return 1 ;;
+        skill-humanizer-zh|skill-neat-freak|lieflat-charts|researchstudio-idea)
+            local targets
+            targets="$(upstream_skill_field "${id#skill-}" targets)" || return 1
+            for name in $targets; do
+                [[ -d "$CLAUDE_DIR/skills/$name" ]] && is_script_managed_copy "skills/$name" || return 1
+            done
+            return 0 ;;
+        skill-*)             _script_skill_present "${id#skill-}" ;;
+        ai-research)
+            for pkg in "${PLUGINS_AI_RESEARCH[@]}"; do plugin_is_installed "$pkg" && return 0; done
+            return 1 ;;
+        deepxiv-*)           [[ -d "$CLAUDE_DIR/skills/$id" ]] ;;
+        mcp)                 mcp_is_ours playwright ;;
+        mcp-lark)            mcp_is_ours lark-mcp ;;
+        plug-*)
+            pkg="$(plug_id_to_pkg "$id")"
+            [[ -n "$pkg" ]] && plugin_is_installed "$pkg" ;;
+        *) return 1 ;;
+    esac
+}
+
+# Echo the initial checked state (1/0) of menu item $1 whose default is $2.
+menu_initial_state() {
+    local id="$1" default="$2" prev_off=false
+    [[ "${PREV_DESELECTED_IDS:- }" == *" $id "* ]] && prev_off=true
+    if $prev_off && [[ "$KEPT_ON_DESELECT_IDS" == *" $id "* ]]; then
+        echo 0
+    elif detect_menu_item_state "$id"; then
+        echo 1
+    elif $prev_off; then
+        echo 0
+    else
+        echo "$default"
+    fi
+}
+
+# --- Removal of unchecked items (interactive runs only) --------------------
+
+# Apply jq filter $1 to settings.json atomically (mode preserved). $2 describes
+# the change for the log / dry-run preview.
+_settings_jq_edit() {
+    local filter="$1" what="$2" settings="$CLAUDE_DIR/settings.json" tmp
+    [[ -f "$settings" ]] || return 0
+    if ! command -v jq &>/dev/null || ! jq empty "$settings" 2>/dev/null; then
+        warn "settings.json unreadable (or jq missing) — could not $what"
+        (( INSTALL_WARNINGS++ )) || true
+        return 0
+    fi
+    if $DRY_RUN; then
+        info "Would $what in settings.json"
+        return 0
+    fi
+    tmp="$(mktemp "${settings}.tmp.XXXXXX")" || return 0
+    if jq "$filter" "$settings" > "$tmp" && jq empty "$tmp" 2>/dev/null; then
+        chmod --reference="$settings" "$tmp" 2>/dev/null || chmod 600 "$tmp" 2>/dev/null || true
+        mv -f "$tmp" "$settings"
+        ok "settings.json: ${what}"
+    else
+        rm -f "$tmp"
+        warn "Could not $what in settings.json — left unchanged"
+        (( INSTALL_WARNINGS++ )) || true
+    fi
+}
+
+remove_deselected_statusline() {
+    if statusline_setting_is_ours; then
+        _settings_jq_edit 'del(.statusLine)' "remove the statusLine that runs hooks/statusline.sh"
+    elif _settings_jq_test '.statusLine != null'; then
+        info "statusLine in settings.json is not the one this installer set — left unchanged"
+    fi
+    remove_owned_path "hooks/statusline.sh" "$CLAUDE_TEMPLATES_DIR/hooks/statusline.sh" "StatusLine hook"
+}
+
+remove_deselected_lessons_hook() {
+    lessons_hook_present || return 0
+    _settings_jq_edit '
+        .hooks.SessionStart = ((.hooks.SessionStart // [])
+            | map(.hooks = ((.hooks // []) | map(select(((.command? // "") | tostring | test("LESSONS_FILE=")) | not))))
+            | map(select((.hooks | length) > 0)))
+        | if (.hooks.SessionStart | length) == 0 then del(.hooks.SessionStart) else . end
+        | if ((.hooks // {}) | length) == 0 then del(.hooks) else . end' \
+        "remove the lessons SessionStart hook (lessons.md itself is kept)"
+}
+
+remove_deselected_co_author() {
+    [[ -f "$CLAUDE_DIR/settings.json" ]] || return 0
+    _settings_jq_test '.includeCoAuthoredBy == false' && return 0
+    _settings_jq_edit '.includeCoAuthoredBy = false' "set includeCoAuthoredBy to false (Co-authored-by unchecked)"
+}
+
+# Remove user-scope MCP server $1 only when it is the one this installer
+# registered; a same-name server with another command is the user's.
+remove_deselected_mcp() {
+    local name="$1"
+    mcp_registered "$name" || return 0
+    if ! mcp_is_ours "$name"; then
+        warn "MCP server '$name' was not registered by this installer (different command) — left in place"
+        return 0
+    fi
+    if $DRY_RUN; then
+        info "Would remove unchecked MCP server: $name"
+    elif ! command -v claude &>/dev/null; then
+        warn "claude CLI not found — cannot remove MCP server $name (run: claude mcp remove $name --scope user)"
+    elif claude mcp remove "$name" --scope user >/dev/null 2>&1; then
+        ok "Removed unchecked MCP server: $name"
+    else
+        warn "Could not remove MCP server $name (run: claude mcp remove $name --scope user)"
+        (( INSTALL_WARNINGS++ )) || true
+    fi
+}
+
+# Remove the manifest-owned mattpocock skills when the item is unchecked.
+# Same ownership proof as the retired-skill sweep (a v2 manifest record); a
+# SKILL.md that no longer matches its recorded digest is backed up first.
+remove_deselected_mattpocock() {
+    local manifest="$CLAUDE_DIR/$MATTPOCOCK_MANIFEST_NAME" name hash cur dest
+    if [[ -L "$manifest" ]]; then
+        warn "mattpocock ownership manifest is a symlink; refusing to act on it: $manifest"
+        return 0
+    fi
+    [[ -f "$manifest" ]] || return 0
+    while IFS=$'\t' read -r name hash || [[ -n "$name" ]]; do
+        [[ -n "$name" ]] || continue
+        is_safe_retired_skill_name "$name" || { warn "Skipping unsafe mattpocock manifest entry"; continue; }
+        local path="$CLAUDE_DIR/skills/$name"
+        [[ -e "$path" || -L "$path" ]] || continue
+        if [[ -L "$path" || ! -d "$path" ]]; then
+            warn "mattpocock skill '$name' is not a plain directory — left in place"
+            continue
+        fi
+        cur="$(mattpocock_skill_digest "$name" 2>/dev/null)" || cur=""
+        if [[ -n "$hash" && "$cur" == "$hash" ]]; then
+            if $DRY_RUN; then info "Would remove unchecked mattpocock skill: $name"
+            elif rm -rf -- "$path"; then ok "Removed unchecked mattpocock skill: $name"; fi
+        elif $DRY_RUN; then
+            info "Would back up (differs from the installed copy) and remove unchecked mattpocock skill: $name"
+        else
+            _ensure_deselect_backup_dir
+            dest="$DESELECT_BACKUP_DIR/skills/$name"
+            mkdir -p "$(dirname "$dest")"
+            if mv -- "$path" "$dest"; then
+                warn "Unchecked mattpocock skill '$name' differed from the installed copy — backed up to $dest, then removed"
+            else
+                warn "Could not back up $path — left in place"
+            fi
+        fi
+    done < "$manifest"
+    if $DRY_RUN; then info "Would remove mattpocock ownership manifest: $manifest"
+    else rm -f -- "$manifest"; fi
+}
+
+# Launcher unchecked: remove claude.zsh / system-prompt.txt, and the exact
+# `source ~/.claude/claude.zsh` line this installer tells users to add to
+# ~/.zshrc (backed up first). profiles/ and default-profile hold API keys and
+# are never touched.
+remove_deselected_shell_wrapper() {
+    remove_owned_path "claude.zsh" "$SCRIPT_DIR/claude.zsh" "launcher (claude.zsh)"
+    remove_owned_path "system-prompt.txt" "$SCRIPT_DIR/system-prompt.txt" "launcher system prompt (system-prompt.txt)"
+    if [[ -d "$CLAUDE_DIR/profiles" ]]; then
+        info "Kept $CLAUDE_DIR/profiles and default-profile (they hold your API keys) — delete them yourself if unwanted"
+    fi
+    local rc="$HOME/.zshrc" tmp
+    [[ -f "$rc" ]] || return 0
+    if [[ -L "$rc" ]]; then
+        grep -qF "claude.zsh" "$rc" 2>/dev/null && \
+            warn "~/.zshrc is a symlink — remove the '$SHELL_WRAPPER_RC_LINE' line from it yourself"
+        return 0
+    fi
+    local exact
+    exact="$(awk -v l="$SHELL_WRAPPER_RC_LINE" '{ sub(/[ \t\r]+$/, "") } $0 == l { c++ } END { print c + 0 }' "$rc")"
+    if [[ "$exact" -gt 0 ]]; then
+        if $DRY_RUN; then
+            info "Would back up ~/.zshrc and remove the line: $SHELL_WRAPPER_RC_LINE"
+        else
+            _ensure_deselect_backup_dir
+            cp -p "$rc" "$DESELECT_BACKUP_DIR/.zshrc"
+            tmp="$(mktemp "$rc.XXXXXX")" || return 0
+            if awk -v l="$SHELL_WRAPPER_RC_LINE" '{ t = $0; sub(/[ \t\r]+$/, "", t) } t != l { print }' "$rc" > "$tmp"; then
+                chmod --reference="$rc" "$tmp" 2>/dev/null || chmod "$(stat -f '%Lp' "$rc" 2>/dev/null || echo 644)" "$tmp" 2>/dev/null || true
+                mv -f "$tmp" "$rc"
+                ok "Removed '$SHELL_WRAPPER_RC_LINE' from ~/.zshrc (backup: $DESELECT_BACKUP_DIR/.zshrc)"
+            else
+                rm -f "$tmp"
+                warn "Could not edit ~/.zshrc — remove the '$SHELL_WRAPPER_RC_LINE' line yourself"
+            fi
+        fi
+    fi
+    if grep -E '^[[:space:]]*(source|\.)[[:space:]]+[^#]*claude\.zsh' "$rc" 2>/dev/null \
+        | awk -v l="$SHELL_WRAPPER_RC_LINE" '{ sub(/[ \t\r]+$/, "") } $0 != l { found = 1 } END { exit !found }'; then
+        warn "~/.zshrc still sources claude.zsh in a form this installer did not suggest — remove it yourself"
+    fi
+}
+
+# A kept launcher whose default-profile names a backend that was unchecked:
+# the profile file is kept (credentials), so `cl` keeps working; just say so.
+warn_default_profile_deselected() {
+    local f="$CLAUDE_DIR/default-profile" cur
+    [[ -f "$f" ]] || return 0
+    cur="$(tr -d '[:space:]' < "$f")"
+    case "$cur" in glm|or|gpt|ccr) ;; *) return 0 ;; esac
+    _in_list "$cur" ${SELECTED_PROFILES[@]+"${SELECTED_PROFILES[@]}"} && return 0
+    warn "default-profile is '$cur', whose backend you unchecked. Its profile file is kept, so 'cl' still works;"
+    warn "  switch with: cl_switch claude   (or another installed profile)"
+}
+
+# Remove everything that is installed but was left unchecked in this run's
+# interactive selector. Ownership-scoped throughout; see the section header.
+reconcile_deselected() {
+    $FULL_SELECTION || return 0
+    info "Removing items left unchecked in the selector (installer-owned only)..."
+    local lang known skills id
+    # Writing style + language rules
+    if ! { $INSTALL_RULES && $INSTALL_WRITING_STYLE; }; then
+        remove_owned_path "rules/writing-style.md" "$CLAUDE_TEMPLATES_DIR/rules/writing-style.md" "rule writing-style.md"
+    fi
+    for known in python typescript golang; do
+        if ! $INSTALL_RULES || ! _in_list "$known" ${RULE_LANGS[@]+"${RULE_LANGS[@]}"}; then
+            remove_owned_path "rules/$known" "$CLAUDE_TEMPLATES_DIR/rules/$known" "$known rules"
+        fi
+    done
+    # Script-owned repository skills (adversarial-review included)
+    skills="$(_effective_skill_set)"
+    for known in "${SCRIPT_OWNED_SKILLS[@]}"; do
+        [[ "$skills" == *"|$known|"* ]] && continue
+        is_agent_managed_elsewhere "skills/$known" && continue
+        is_script_managed_copy "skills/$known" && continue
+        remove_owned_path "skills/$known" "$(skill_source_dir "$known")" "skill $known"
+    done
+    # DeepXiv skills
+    for id in "${DEEPXIV_KNOWN_SKILLS[@]}"; do
+        if $INSTALL_DEEPXIV && _in_list "$id" ${SELECTED_DEEPXIV_SKILLS[@]+"${SELECTED_DEEPXIV_SKILLS[@]}"}; then
+            continue
+        fi
+        remove_owned_path "skills/$id" "" "DeepXiv skill $id"
+    done
+    # Search agent
+    if ! $INSTALL_AGENTS; then
+        local f
+        for f in "$SCRIPT_DIR"/agents/*.md; do
+            [[ -f "$f" ]] || continue
+            remove_owned_path "agents/${f##*/}" "$f" "agent ${f##*/}"
+        done
+    fi
+    $INSTALL_MATTPOCOCK || remove_deselected_mattpocock
+    $INSTALL_MCP || remove_deselected_mcp playwright
+    $INSTALL_LARK || remove_deselected_mcp lark-mcp
+    $INSTALL_STATUSLINE || remove_deselected_statusline
+    $INSTALL_LESSONS || remove_deselected_lessons_hook
+    $CO_AUTHOR || remove_deselected_co_author
+    if $INSTALL_SHELL_WRAPPER; then
+        warn_default_profile_deselected
+    else
+        remove_deselected_shell_wrapper
+    fi
+    if [[ -n "$DESELECT_BACKUP_DIR" ]]; then
+        warn "Modified files removed on deselect were backed up under: $DESELECT_BACKUP_DIR"
     fi
 }
 
@@ -6414,6 +6984,9 @@ main() {
     { $INSTALL_MCP || $INSTALL_LARK; } && install_mcp
     prune_retired_plugins || true
     resolve_plugin_selection
+    if ! $FULL_SELECTION && [[ "$PLUGIN_PRUNE_SCOPE" == "all" ]]; then
+        info "--prune-foreign-plugins has no effect here: only interactive runs remove plugins"
+    fi
     if plugin_reconcile_enabled && [[ "$PLUGIN_PRUNE_SCOPE" == "all" ]] && ! $DRY_RUN; then
         info "This run aligns your installed plugins to this run's selection — anything not selected is uninstalled. Preview it any time with: $(basename "$0") --dry-run"
     fi
@@ -6439,6 +7012,8 @@ main() {
     update_installed_plugins
     $INSTALL_SHELL_WRAPPER && install_shell_wrapper
     $INSTALL_DEEPXIV && install_deepxiv
+    # Interactive runs only: remove what is installed but was left unchecked.
+    reconcile_deselected
     write_selection_record || warn "Could not update agent-config/selection.json"
 
     # Stamp version (skip only on critical warnings — non-critical like plugin failures are OK).
@@ -6485,8 +7060,12 @@ main() {
         echo "       5. check / 验证:  claude mcp list      # expect 'Connected' / 期待显示已连接"
         echo "       Full guide / 完整指引: docs/LARK-MCP.md  (中文: docs/LARK-MCP.zh-CN.md)"
     fi
-    backend_setup_hints "$step" && step=$((step + 1))
-    cl_commands_hint "$step"
+    # Launcher hints only while the launcher is installed (an interactive run
+    # that unchecked it has just removed claude.zsh).
+    if $INSTALL_SHELL_WRAPPER || [[ -f "$CLAUDE_DIR/claude.zsh" ]]; then
+        backend_setup_hints "$step" && step=$((step + 1))
+        cl_commands_hint "$step"
+    fi
     echo ""
 }
 
