@@ -92,6 +92,8 @@ function Invoke-Retry {
 $script:SCRIPT_DIR = ""
 $script:REMOTE_MODE = $false
 $script:REMOTE_DRY_RUN = $false
+# Commit of the downloaded source (remote mode), recorded in selection.json.
+$script:SOURCE_REVISION = $null
 $script:InstallWarnings = 0
 $script:InstallCritical = 0
 
@@ -155,6 +157,13 @@ function Initialize-ScriptDir {
         exit 1
     }
 
+    # GitHub archives store the commit SHA as the zip comment (the last bytes of
+    # the file); recorded in agent-config\selection.json as the revision.
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($zipPath)
+        $tail = [System.Text.Encoding]::ASCII.GetString($bytes, [Math]::Max(0, $bytes.Length - 64), [Math]::Min(64, $bytes.Length))
+        if ($tail -match '([0-9a-f]{40})\s*$') { $script:SOURCE_REVISION = $Matches[1] }
+    } catch { }
     Expand-Archive -Path $zipPath -DestinationPath $tmpdir -Force
     $extracted = Get-ChildItem -Path $tmpdir -Directory | Where-Object { $_.Name -ne "source.zip" } | Select-Object -First 1
     $script:SCRIPT_DIR = $extracted.FullName
@@ -3135,6 +3144,265 @@ function Update-InstalledPlugins {
 
 # --- Uninstall -------------------------------------------------------------
 
+# --- Selection record: agent-config\selection.json --------------------------
+# Same record install.sh writes (see write_selection_record there): repository
+# url/revision/update policy (INSTALL.md#repository-source), selected catalog
+# IDs and one item per selection with its verified status, so edit-config can
+# take over. Agent-written records (no "source": "script") are never removed.
+
+# Menu ID -> catalog.md ID(s). Mirrors catalog_id_for_menu_id in install.sh;
+# scripts/check-catalog-sync.sh verifies both against catalog.md.
+$CATALOG_ID_FOR_MENU_ID = @{
+    "claude-md" = @("instructions"); "settings" = @("settings", "permissions")
+    "rules-writing-style" = @("rules-writing-style"); "statusline" = @("statusline"); "lessons" = @("lessons")
+    "rules-python" = @("rules-python"); "rules-ts" = @("rules-typescript"); "rules-go" = @("rules-golang")
+    "review-code-review" = @("claude-pr-review"); "review-adversarial" = @("adversarial-review"); "review-codex" = @("codex-in-claude")
+    "plug-andrej-karpathy-skills" = @("karpathy"); "plug-superpowers" = @("superpowers"); "skill-mattpocock" = @("matt-workflow")
+    "plug-feature-dev" = @("feature-dev"); "plug-ralph-loop" = @("ralph-loop"); "plug-commit-commands" = @("commit-commands")
+    "plug-code-simplifier" = @("code-simplifier"); "plug-everything-claude-code" = @("ecc"); "skill-update-config" = @("update-config")
+    "skill-neat-freak" = @("neat-freak"); "plug-context7" = @("context7"); "plug-playwright" = @("playwright")
+    "plug-document-skills" = @("documents"); "plug-example-skills" = @("examples"); "skill-humanizer" = @("humanizer")
+    "skill-humanizer-zh" = @("humanizer-zh"); "lieflat-charts" = @("lieflat-charts"); "plug-frontend-slides" = @("frontend-slides")
+    "plug-ppt-master" = @("ppt-master"); "skill-storage-analyzer" = @("storage-analyzer"); "skill-paper-reading" = @("paper-reading")
+    "skill-cheatsheet-creator" = @("cheatsheet-creator"); "ai-research" = @("ai-research"); "researchstudio-idea" = @("researchstudio-idea")
+    "deepxiv-cli" = @("deepxiv-cli"); "deepxiv-trending-digest" = @("deepxiv-trending-digest"); "deepxiv-baseline-table" = @("deepxiv-baseline-table")
+    "mcp" = @("playwright-mcp"); "mcp-lark" = @("lark")
+}
+
+# Repository identity of this run's source (url, revision, update policy).
+function Get-SourceIdentity {
+    $canonical = "$($script:REPO_URL).git"
+    if ($script:REMOTE_MODE) {
+        $ver = if ($env:VERSION) { $env:VERSION } else { $script:REPO_BRANCH }
+        $update = if ($ver -match '^v\d' -and $script:SOURCE_REVISION) { [ordered]@{ kind = "pinned"; ref = $script:SOURCE_REVISION } } else { [ordered]@{ kind = "branch"; ref = $ver } }
+        return @{ Url = $canonical; Revision = $script:SOURCE_REVISION; Update = $update }
+    }
+    $head = ""; $branch = ""; $origin = ""; $dirty = ""
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        $r = Invoke-NativeCapture -Exe "git" -Arguments @("-C", $script:SCRIPT_DIR, "rev-parse", "HEAD")
+        if ($r.Code -eq 0) {
+            $head = $r.Output.Trim()
+            $b = Invoke-NativeCapture -Exe "git" -Arguments @("-C", $script:SCRIPT_DIR, "symbolic-ref", "--short", "-q", "HEAD")
+            if ($b.Code -eq 0) { $branch = $b.Output.Trim() }
+            $o = Invoke-NativeCapture -Exe "git" -Arguments @("-C", $script:SCRIPT_DIR, "remote", "get-url", "origin")
+            if ($o.Code -eq 0) { $origin = ($o.Output.Trim() -replace '^(https?://)[^/@]+@', '$1') }
+            $d = Invoke-NativeCapture -Exe "git" -Arguments @("-C", $script:SCRIPT_DIR, "status", "--porcelain")
+            if ($d.Code -eq 0) { $dirty = $d.Output.Trim() }
+        }
+    }
+    if (-not $head -or $dirty -or -not $origin) { $update = [ordered]@{ kind = "local"; path = $script:SCRIPT_DIR } }
+    elseif (-not $branch) { $update = [ordered]@{ kind = "pinned"; ref = $head } }
+    else { $update = [ordered]@{ kind = "branch"; ref = $branch } }
+    return @{ Url = $(if ($origin) { $origin } else { $null }); Revision = $(if ($head) { $head } else { $null }); Update = $update }
+}
+
+# Catalog IDs with a row in this source's catalog.md.
+function Get-SourceCatalogIds {
+    $catalog = Join-Path $script:SCRIPT_DIR "catalog.md"
+    if (-not (Test-Path -LiteralPath $catalog)) { return @() }
+    $ids = @()
+    foreach ($line in (Get-Content -LiteralPath $catalog -Encoding UTF8)) {
+        if ($line -match '^\| ([a-z0-9][a-z0-9-]*) \|') { $ids += $Matches[1] }
+    }
+    return $ids
+}
+
+function Test-PluginInstalledKey {
+    param([string]$Key)
+    return ((Get-InstalledPluginKeys) -contains $Key)
+}
+
+# Verified status + selectors/paths for one menu item after the run.
+function Get-SelectionItemRecord {
+    param([string]$Id, [string]$Now)
+    $status = "installed"; $selectors = @(); $paths = @(); $rev = ""
+    $skillsRoot = Join-Path $CLAUDE_DIR "skills"
+    switch -Wildcard ($Id) {
+        "claude-md" { $paths = @("CLAUDE.md") }
+        "settings" { $paths = @("settings.json") }
+        "rules-writing-style" { $paths = @("rules/writing-style.md") }
+        "statusline" { $paths = @("hooks/statusline.sh") }
+        "lessons" { $paths = @("lessons.md") }
+        "rules-python" { $paths = @("rules/python") }
+        "rules-ts" { $paths = @("rules/typescript") }
+        "rules-go" { $paths = @("rules/golang") }
+        "review-adversarial" { $paths = @("skills/adversarial-review") }
+        "review-code-review" { $selectors = @("code-review@claude-plugins-official") }
+        "review-codex" { $selectors = @("codex@openai-codex") }
+        "skill-humanizer" { $selectors = @("humanizer@humanizer") }
+        "ai-research" { $selectors = $PLUGINS_AI_RESEARCH }
+        "plug-*" { }
+        "mcp" { $status = "pending" }
+        "mcp-lark" { $status = "pending" }
+        default { }
+    }
+    if ($Id -like "plug-*") {
+        $pm = (ConvertTo-MenuSelection -Ids @($Id) -FullSelection $false).SelectedPlugins
+        $selectors = @($pm)
+    }
+    $upItem = switch ($Id) { "skill-humanizer-zh" { "humanizer-zh" } "skill-neat-freak" { "neat-freak" } "lieflat-charts" { "lieflat-charts" } "researchstudio-idea" { "researchstudio-idea" } default { "" } }
+    if ($upItem) {
+        $entry = Get-UpstreamSkillItem -Item $upItem
+        $paths = @($entry.Targets | ForEach-Object { "skills/$_" })
+        $rev = $entry.Rev
+    } elseif ($Id -like "skill-*" -and $Id -ne "skill-humanizer" -and $Id -ne "skill-mattpocock") {
+        $paths = @("skills/$($Id.Substring(6))")
+    } elseif ($Id -like "deepxiv-*") {
+        $paths = @("skills/$Id")
+    }
+    if ($Id -in @("mcp", "mcp-lark")) {
+        $name = if ($Id -eq "mcp") { "playwright" } else { "lark-mcp" }
+        try {
+            $cfg = Get-Content -LiteralPath (Join-Path $env:USERPROFILE ".claude.json") -Raw | ConvertFrom-Json
+            if ($cfg.mcpServers.PSObject.Properties[$name]) { $status = "installed" }
+        } catch { }
+    }
+    foreach ($p in $paths) {
+        if (-not (Test-Path -LiteralPath (Join-Path $CLAUDE_DIR ($p -replace '/', '\')))) { $status = "failed" }
+    }
+    if ($selectors.Count -gt 0) {
+        $okCount = @($selectors | Where-Object { Test-PluginInstalledKey -Key $_ }).Count
+        if ($okCount -eq 0) { $status = "failed" } elseif ($okCount -lt $selectors.Count) { $status = "partial" }
+    }
+    $rec = [ordered]@{ source = "script"; menu_id = $Id; status = $status; updated = $Now }
+    if ($selectors.Count -gt 0) { $rec["selectors"] = @($selectors) }
+    if ($paths.Count -gt 0) { $rec["paths"] = @($paths) }
+    if ($rev) { $rec["upstream_revision"] = $rev }
+    return $rec
+}
+
+# Write agent-config\selection.json. $EffectiveIds: menu IDs this run installed.
+function Write-SelectionRecord {
+    param([string[]]$EffectiveIds = @(), [string]$Mode = "default")
+    $dir = Join-Path $CLAUDE_DIR "agent-config"
+    $dest = Join-Path $dir "selection.json"
+    if ($DryRun) { Write-Info "Would record this selection in $dest (for edit-config)"; return }
+    $now = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $catalogIds = Get-SourceCatalogIds
+    $identity = Get-SourceIdentity
+
+    $known = @(); $items = [ordered]@{}; $scriptOnly = @()
+    foreach ($id in (Get-MenuItemIds)) {
+        $cids = @(); if ($CATALOG_ID_FOR_MENU_ID.ContainsKey($id)) { $cids = @($CATALOG_ID_FOR_MENU_ID[$id] | Where-Object { $catalogIds -contains $_ }) }
+        $selected = $EffectiveIds -contains $id
+        if ($cids.Count -eq 0) { if ($selected) { $scriptOnly += $id }; continue }
+        $known += $cids
+        if ($selected) {
+            $rec = Get-SelectionItemRecord -Id $id -Now $now
+            foreach ($c in $cids) { $items[$c] = $rec }
+        }
+    }
+
+    $old = [ordered]@{}
+    if (Test-Path -LiteralPath $dest -PathType Leaf) {
+        try {
+            $parsed = Get-Content -LiteralPath $dest -Raw | ConvertFrom-Json
+            foreach ($p in $parsed.PSObject.Properties) { $old[$p.Name] = $p.Value }
+        } catch {
+            Write-Warn "Existing $dest is not valid JSON; keeping it as $dest.invalid"
+            Copy-Item -LiteralPath $dest -Destination "$dest.invalid" -Force -ErrorAction SilentlyContinue
+            $old = [ordered]@{}
+        }
+    }
+    $merged = [ordered]@{}
+    if ($old.Contains("items") -and $old["items"]) {
+        foreach ($p in $old["items"].PSObject.Properties) {
+            $isScript = ($p.Value.PSObject.Properties['source'] -and $p.Value.source -eq "script")
+            # A full selection drops script-written records for known items that
+            # were not selected; agent-written records and -Only runs keep them.
+            if ($Mode -ne "only" -and $isScript -and ($known -contains $p.Name)) { continue }
+            $merged[$p.Name] = $p.Value
+        }
+    }
+    foreach ($k in $items.Keys) { $merged[$k] = $items[$k] }
+
+    $out = $old
+    if ($old.Contains("repository") -and $old["repository"] -and $old["repository"].PSObject.Properties['url'] -and
+        $old["repository"].url -and $old["repository"].url -ne $identity.Url) {
+        $out["repository_previous"] = $old["repository"]
+    }
+    $out["agent"] = "claude"
+    $out["client"] = "claude-code"
+    $out["repository"] = [ordered]@{ url = $identity.Url; revision = $identity.Revision; update = $identity.Update }
+    $out["selected"] = @($merged.Keys | Sort-Object)
+    $out["items"] = $merged
+    $prevOnly = @()
+    if ($Mode -eq "only" -and $old.Contains("script_installer") -and $old["script_installer"].PSObject.Properties['script_only']) { $prevOnly = @($old["script_installer"].script_only) }
+    $out["script_installer"] = [ordered]@{
+        name = "install.ps1"; version = (Get-SourceVersion); mode = $Mode; updated = $now
+        script_only = @(($prevOnly + $scriptOnly) | Select-Object -Unique)
+    }
+    try {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $tmp = Join-Path $dir (".selection.json." + [Guid]::NewGuid().ToString("N"))
+        $out | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $tmp -Encoding UTF8
+        Get-Content -LiteralPath $tmp -Raw | ConvertFrom-Json | Out-Null
+        Move-Item -LiteralPath $tmp -Destination $dest -Force
+        Write-Ok "Selection recorded for edit-config: $dest"
+    } catch {
+        if ($tmp -and (Test-Path -LiteralPath $tmp)) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        Write-Warn "Could not update the selection record $($dest): $_"
+    }
+}
+
+# -Uninstall: drop the records this script wrote; agent-written ones stay.
+function Clear-ScriptSelectionRecords {
+    $dest = Join-Path $CLAUDE_DIR "agent-config\selection.json"
+    if (-not (Test-Path -LiteralPath $dest -PathType Leaf)) { return }
+    try {
+        $obj = Get-Content -LiteralPath $dest -Raw | ConvertFrom-Json
+        $kept = [ordered]@{}
+        if ($obj.PSObject.Properties['items'] -and $obj.items) {
+            foreach ($p in $obj.items.PSObject.Properties) {
+                if (-not ($p.Value.PSObject.Properties['source'] -and $p.Value.source -eq "script")) { $kept[$p.Name] = $p.Value }
+            }
+        }
+        $obj | Add-Member -NotePropertyName items -NotePropertyValue ([PSCustomObject]$kept) -Force
+        $obj | Add-Member -NotePropertyName selected -NotePropertyValue @($kept.Keys | Sort-Object) -Force
+        if ($obj.PSObject.Properties['script_installer']) { $obj.PSObject.Properties.Remove('script_installer') }
+        $obj | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $dest -Encoding UTF8
+        Write-Ok "Removed script-installer entries from $dest"
+    } catch { Write-Warn "Could not update $($dest): $_" }
+}
+
+# True when menu item $Id was part of this run's effective selection. $Ctx
+# carries Main's flags. Mirrors menu_id_selected_this_run in install.sh.
+function Test-MenuIdEffective {
+    param([string]$Id, [hashtable]$Ctx)
+    $skillName = if ($Id -like "skill-*") { $Id.Substring(6) } else { "" }
+    $upstream = @{ "skill-humanizer-zh" = "humanizer-zh"; "skill-neat-freak" = "neat-freak"; "lieflat-charts" = "lieflat-charts"; "researchstudio-idea" = "researchstudio-idea" }
+    $langs = @{ "rules-python" = "python"; "rules-ts" = "typescript"; "rules-go" = "golang" }
+    if ($Id -eq "claude-md") { return $Ctx.ClaudeMd }
+    if ($Id -eq "settings") { return $Ctx.Settings }
+    if ($Id -eq "rules-writing-style") { return ($Ctx.Rules -and $Ctx.WritingStyle) }
+    if ($Id -eq "statusline") { return $Ctx.Hooks }
+    if ($Id -eq "lessons") { return $Ctx.Lessons }
+    if ($Id -eq "agents") { return $Ctx.Agents }
+    if ($langs.ContainsKey($Id)) {
+        if (-not $Ctx.Rules) { return $false }
+        if ($Ctx.RuleLangs.Count -gt 0) { return ($Ctx.RuleLangs -contains $langs[$Id]) }
+        return (-not $Ctx.RuleLangsExplicit -and -not $Ctx.Only)
+    }
+    if ($upstream.ContainsKey($Id)) { return ($Ctx.UpstreamSkills -contains $upstream[$Id]) }
+    if ($Id -eq "review-adversarial") { $skillName = "adversarial-review" }
+    if ($skillName -and $Id -ne "skill-humanizer") {
+        if (-not $Ctx.Skills) { return $false }
+        if ($Ctx.SelectedSkills.Count -gt 0) { return ($Ctx.SelectedSkills -contains $skillName) }
+        return (($SCRIPT_OWNED_SKILLS -contains $skillName) -and ($SCRIPT_OPT_IN_SKILLS -notcontains $skillName))
+    }
+    if ($Id -like "deepxiv-*") { return ($Ctx.DeepXiv -and (($Ctx.DeepXivSkills.Count -eq 0) -or ($Ctx.DeepXivSkills -contains $Id))) }
+    if ($Id -eq "mcp") { return $Ctx.Mcp }
+    if ($Id -eq "mcp-lark") { return $Ctx.Lark }
+    if ($Id -eq "ai-research") {
+        foreach ($p in $PLUGINS_AI_RESEARCH) { if ($Ctx.Plugins -notcontains $p) { return $false } }
+        return $true
+    }
+    $pkgs = @((ConvertTo-MenuSelection -Ids @($Id) -FullSelection $false).SelectedPlugins)
+    if ($pkgs.Count -eq 0) { return $false }
+    foreach ($p in $pkgs) { if ($Ctx.Plugins -notcontains $p) { return $false } }
+    return $true
+}
+
 function Invoke-Uninstall {
     Write-Host ""
     Write-Warn "The following will be removed:"
@@ -3293,6 +3561,7 @@ function Invoke-Uninstall {
         Write-Warn "Claude CLI not found - cannot uninstall plugins or MCP servers"
     }
 
+    Clear-ScriptSelectionRecords
     if (Test-Path $VERSION_STAMP_FILE) { Remove-Item $VERSION_STAMP_FILE -Force }
     Write-Host ""
     Write-Ok "Uninstall complete."
@@ -3617,6 +3886,20 @@ function Main {
     # plugins were selected this run — keeps third-party plugins current.
     Update-InstalledPlugins
     if ($doDeepXiv) { Install-DeepXiv -SelectedDeepXivSkills $deepXivSkills }
+
+    # Selection record for edit-config (agent-config\selection.json).
+    $effPlugins = @()
+    if ($doPlugins) { $effPlugins = @(Get-EffectiveSelectedPlugins -SelectedPluginsList $selectedPlugins -Groups $pluginGroups) }
+    $ctx = @{
+        ClaudeMd = $doClaudeMd; Settings = $doSettings; Rules = $doRules; WritingStyle = $doWritingStyle
+        Hooks = $doHooks; Lessons = $doLessons; Agents = $doAgents; RuleLangs = @($ruleLangs)
+        RuleLangsExplicit = $ruleLangsExplicit; Only = $onlyMode; UpstreamSkills = @($upstreamSkills)
+        Skills = $doSkills; SelectedSkills = @($selectedSkills); DeepXiv = $doDeepXiv; DeepXivSkills = @($deepXivSkills)
+        Mcp = $doMcp; Lark = $doLark; Plugins = $effPlugins
+    }
+    $effIds = @(Get-MenuItemIds | Where-Object { Test-MenuIdEffective -Id $_ -Ctx $ctx })
+    $recordMode = if ($onlyMode) { "only" } elseif ($fullSelection) { "interactive" } elseif ($All) { "all" } else { "default" }
+    try { Write-SelectionRecord -EffectiveIds $effIds -Mode $recordMode } catch { Write-Warn "Could not update agent-config\selection.json: $_" }
 
     # A partial -Only run does not claim the whole configuration version.
     if (-not $DryRun -and -not $onlyMode) {
