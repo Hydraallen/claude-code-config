@@ -739,9 +739,29 @@ function Show-InteractiveMenu {
     $n = $allItems.Count
     $numGroups = $groups.Count
 
-    # Initialize selections from defaults
+    # Initial checked state: what is installed now, the item default for
+    # anything not installed, unless the previous interactive run recorded the
+    # item as unchecked (mirrors interactive_menu in install.sh).
+    $script:PrevDeselectedIds = @(Get-PreviousDeselectedIds)
     $selected = @()
-    for ($i = 0; $i -lt $n; $i++) { $selected += $allItems[$i].Default }
+    for ($i = 0; $i -lt $n; $i++) { $selected += (Get-MenuInitialState -Id $allItems[$i].Id -Default ([bool]$allItems[$i].Default)) }
+
+    if ($env:ACCC_TEST_MENU_IDS) {
+        # Internal test hook (undocumented, mirrors install.sh): replaces the
+        # keyboard selector. "@initial" submits the initial state unchanged;
+        # otherwise a comma/space-separated list of the IDs to leave checked.
+        if ($env:ACCC_TEST_MENU_STATE_OUT) {
+            $dump = @(); for ($i = 0; $i -lt $n; $i++) { $dump += "$($allItems[$i].Id)=$(if ($selected[$i]) { 1 } else { 0 })" }
+            [System.IO.File]::WriteAllText($env:ACCC_TEST_MENU_STATE_OUT, (($dump -join "`n") + "`n"))
+        }
+        if ($env:ACCC_TEST_MENU_IDS -ne "@initial") {
+            $want = @($env:ACCC_TEST_MENU_IDS -split '[,\s]+' | Where-Object { $_ })
+            for ($i = 0; $i -lt $n; $i++) { $selected[$i] = ($want -contains $allItems[$i].Id) }
+        }
+        $ids = @(); $script:MenuDeselectedIds = @()
+        for ($i = 0; $i -lt $n; $i++) { if ($selected[$i]) { $ids += $allItems[$i].Id } else { $script:MenuDeselectedIds += $allItems[$i].Id } }
+        return (ConvertTo-MenuSelection -Ids $ids -FullSelection $true)
+    }
 
     $cursor = 0
     $submitIndex = $numGroups
@@ -915,8 +935,8 @@ function Show-InteractiveMenu {
         [Console]::CursorVisible = $savedCursorVisible
     }
 
-    $ids = @()
-    for ($i = 0; $i -lt $n; $i++) { if ($selected[$i]) { $ids += $allItems[$i].Id } }
+    $ids = @(); $script:MenuDeselectedIds = @()
+    for ($i = 0; $i -lt $n; $i++) { if ($selected[$i]) { $ids += $allItems[$i].Id } else { $script:MenuDeselectedIds += $allItems[$i].Id } }
     return (ConvertTo-MenuSelection -Ids $ids -FullSelection $true)
 }
 
@@ -1304,20 +1324,13 @@ function Install-Rules {
             Write-Info "Would copy: rules\writing-style.md -> $wsDst"
         } elseif (Test-Path $wsSrc) {
             Copy-Item $wsSrc $wsDst -Force
+            Save-OwnedPath -Rel "rules/writing-style.md"
             Write-Ok "Writing style rule installed"
         } else {
             Write-Err "Writing style rule not found: $wsSrc"
         }
-    } elseif ($LangsExplicit -and (Test-Path $wsDst) -and (Test-Path $wsSrc) -and
-              ((Get-FileHash $wsSrc).Hash -eq (Get-FileHash $wsDst).Hash)) {
-        # Deselected in the menu: remove only an unmodified copy of our file.
-        if ($DryRun) {
-            Write-Info "Would remove unselected: $wsDst"
-        } else {
-            Remove-Item $wsDst -Force
-            Write-Ok "Removed unselected rule: writing-style.md"
-        }
     }
+    # An unchecked writing-style rule is removed by Invoke-ReconcileDeselected.
 
     # Retired files from earlier installs are reported, not deleted: they may
     # carry user edits (see docs/migration.md#common-rules), and both would
@@ -1350,6 +1363,7 @@ function Install-Rules {
             } else {
                 if (Test-Path $langDst) { Remove-Item $langDst -Recurse -Force }
                 Copy-Item $langSrc $langDst -Recurse -Force
+                Save-OwnedPath -Rel "rules/$lang"
                 Write-Ok "$lang rules installed"
             }
         } else {
@@ -1357,24 +1371,8 @@ function Install-Rules {
         }
     }
 
-    # Clean up known language rule dirs that were NOT selected (from previous installs)
-    # Only removes languages this installer knows about; preserves user-created dirs
-    if ($LangsExplicit) {
-        $knownLangs = @("python", "typescript", "golang")
-        foreach ($known in $knownLangs) {
-            if ($installLangs -notcontains $known) {
-                $langDir = Join-Path $rulesDir $known
-                if (Test-Path $langDir) {
-                    if ($DryRun) {
-                        Write-Info "Would remove unselected: $langDir"
-                    } else {
-                        Remove-Item $langDir -Recurse -Force
-                        Write-Ok "Removed unselected rules: $known"
-                    }
-                }
-            }
-        }
-    }
+    # Unchecked language rules are removed by Invoke-ReconcileDeselected
+    # (interactive runs only; modified copies are backed up first).
 }
 
 # Repository skills this script installer owns. -All installs exactly these,
@@ -1418,6 +1416,7 @@ function Install-Skills {
                 } else {
                     if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
                     Copy-Item $src $dst -Recurse -Force
+                    Save-OwnedPath -Rel "skills/$skill"
                     Write-Ok "Skill installed: $skill"
                 }
             } else {
@@ -1440,28 +1439,13 @@ function Install-Skills {
             } else {
                 if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
                 Copy-Item $src $dst -Recurse -Force
+                Save-OwnedPath -Rel "skills/$skill"
                 Write-Ok "Skill installed: $skill"
             }
         }
     }
-
-    # Clean up installer-managed skills that were NOT selected (from previous installs)
-    # Only runs for a full (interactive) selection; -Only is additive.
-    if ($FullSelection -and $SelectedSkills.Count -gt 0) {
-        foreach ($known in $SCRIPT_OWNED_SKILLS) {
-            if ($SelectedSkills -contains $known) { continue }
-            if (Test-AgentManagedElsewhere -Target "skills/$known") { continue }
-            $removePath = Join-Path $skillsDir $known
-            if (Test-Path $removePath) {
-                if ($DryRun) {
-                    Write-Info "Would remove unselected skill: $known"
-                } else {
-                    Remove-Item $removePath -Recurse -Force
-                    Write-Ok "Removed unselected skill: $known"
-                }
-            }
-        }
-    }
+    # Unchecked script-owned skills are removed by Invoke-ReconcileDeselected
+    # (interactive runs only, also when every skill item is unchecked).
 }
 
 function Install-Agents {
@@ -1473,6 +1457,7 @@ function Install-Agents {
             Write-Info "Would copy: agents/$($_.Name) -> $agentDir\$($_.Name)"
         } else {
             Copy-Item $_.FullName (Join-Path $agentDir $_.Name) -Force
+            Save-OwnedPath -Rel "agents/$($_.Name)"
             Write-Ok "Agent installed: $($_.Name)"
         }
     }
@@ -2518,15 +2503,28 @@ function Test-UpstreamItemCurrent {
 }
 
 # Remove skills\$Name through managed_files.py when this script recorded it.
+# The helper moves the copy to agent-config\backups\<id>\. -BackupModified
+# (interactive deselect) also removes a locally modified copy that way instead
+# of preserving it; -Uninstall keeps modified copies. Mirrors install.sh.
 function Remove-ScriptManagedSkill {
-    param([string]$Name)
+    param([string]$Name, [switch]$BackupModified)
     if (-not (Test-ScriptManagedCopy -Target "skills/$Name")) { return }
-    if ($DryRun) { Write-Info "Would remove unselected skill: $Name (installer-managed copy)"; return }
     $py = Get-ManagedPython
+    $extra = @(); if ($BackupModified) { $extra = @("--backup-modified") }
+    $helper = Join-Path $script:SCRIPT_DIR "scripts\managed_files.py"
+    if ($DryRun) {
+        if (-not $py) { Write-Info "Would remove unchecked skill: $Name (installer-managed copy)"; return }
+        $r = Invoke-ManagedPython -Py $py -Arguments (@($helper, "--root", $CLAUDE_DIR, "--dry-run", "remove", "skills/$Name") + $extra)
+        if ($r.Code -ne 0) { Write-Info "Would keep ${Name}: $($r.Output -replace '^.*Preserved existing files: ', '')" }
+        elseif ($r.Output -match '"modified": true') { Write-Info "Would back up (differs from the installed copy) and remove unchecked skill: $Name" }
+        else { Write-Info "Would remove unchecked skill: $Name (installer-managed copy)" }
+        return
+    }
     if (-not $py) { Write-Warn "${Name}: python unavailable - cannot verify ownership; kept"; return }
-    $r = Invoke-ManagedPython -Py $py -Arguments @((Join-Path $script:SCRIPT_DIR "scripts\managed_files.py"), "--root", $CLAUDE_DIR, "remove", "skills/$Name")
-    if ($r.Code -eq 0) { Write-Ok "Removed skill: $Name (backup kept under $CLAUDE_DIR\agent-config\backups\)" }
-    else { Write-Warn "${Name}: $($r.Output -replace '^.*Preserved existing files: ', '')" }
+    $r = Invoke-ManagedPython -Py $py -Arguments (@($helper, "--root", $CLAUDE_DIR, "remove", "skills/$Name") + $extra)
+    if ($r.Code -ne 0) { Write-Warn "${Name}: $($r.Output -replace '^.*Preserved existing files: ', '')" }
+    elseif ($r.Output -match '"modified": true') { Write-Warn "Unchecked skill $Name differed from the installed copy - backed up under $CLAUDE_DIR\agent-config\backups\, then removed" }
+    else { Write-Ok "Removed skill: $Name (backup kept under $CLAUDE_DIR\agent-config\backups\)" }
 }
 
 # Install one pinned item. Optional add-on: failures are non-critical warnings.
@@ -2612,7 +2610,7 @@ function Install-UpstreamSkills {
             Install-UpstreamSkillItem -Item $entry.Item
         } elseif ($FullSelection) {
             if ($entry.Item -eq "humanizer-zh") { Remove-LegacyVendoredSkill -Name "humanizer-zh" -Expected $LEGACY_HUMANIZER_ZH_SHA256 }
-            foreach ($name in $entry.Targets) { Remove-ScriptManagedSkill -Name $name }
+            foreach ($name in $entry.Targets) { Remove-ScriptManagedSkill -Name $name -BackupModified }
         }
     }
 }
@@ -2675,6 +2673,7 @@ function Install-DeepXiv {
             if (Test-Path $src) {
                 if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
                 Copy-Item $src $dst -Recurse -Force
+                Save-OwnedPath -Rel "skills/$skill"
                 Write-Ok "DeepXiv skill installed: $skill"
             } else {
                 Write-Warn "DeepXiv skill not found in repo: $skill"
@@ -2718,6 +2717,7 @@ function Install-Hooks {
             Write-Info "Would copy: hooks\$fname -> $dst"
         } else {
             Copy-Item $_.FullName $dst -Force
+            Save-OwnedPath -Rel "hooks/$fname"
             Write-Ok "Hook installed: $fname"
         }
     }
@@ -3445,9 +3445,11 @@ function Write-SelectionRecord {
     if ($old.Contains("items") -and $old["items"]) {
         foreach ($p in $old["items"].PSObject.Properties) {
             $isScript = ($p.Value.PSObject.Properties['source'] -and $p.Value.source -eq "script")
-            # A full selection drops script-written records for known items that
-            # were not selected; agent-written records and -Only runs keep them.
-            if ($Mode -ne "only" -and $isScript -and ($known -contains $p.Name)) { continue }
+            # An interactive run (the only one that removes unchecked items)
+            # drops script-written records for known items that were not
+            # selected; agent-written records are kept, and additive runs
+            # (-All, -Only, the non-interactive default) keep every record.
+            if ($Mode -eq "interactive" -and $isScript -and ($known -contains $p.Name)) { continue }
             $merged[$p.Name] = $p.Value
         }
     }
@@ -3463,11 +3465,18 @@ function Write-SelectionRecord {
     $out["repository"] = [ordered]@{ url = $identity.Url; revision = $identity.Revision; update = $identity.Update }
     $out["selected"] = @($merged.Keys | Sort-Object)
     $out["items"] = $merged
-    $prevOnly = @()
-    if ($Mode -eq "only" -and $old.Contains("script_installer") -and $old["script_installer"].PSObject.Properties['script_only']) { $prevOnly = @($old["script_installer"].script_only) }
+    $prevOnly = @(); $prevDeselected = @()
+    if ($old.Contains("script_installer") -and $old["script_installer"]) {
+        if ($Mode -ne "interactive" -and $old["script_installer"].PSObject.Properties['script_only']) { $prevOnly = @($old["script_installer"].script_only) }
+        if ($old["script_installer"].PSObject.Properties['deselected']) { $prevDeselected = @($old["script_installer"].deselected) }
+    }
+    # Menu IDs left unchecked in the interactive selector; read back by the next
+    # interactive run. Additive runs drop only the IDs they installed.
+    $deselected = if ($Mode -eq "interactive") { @($script:MenuDeselectedIds) } else { @($prevDeselected | Where-Object { $EffectiveIds -notcontains $_ }) }
     $out["script_installer"] = [ordered]@{
         name = "install.ps1"; version = (Get-SourceVersion); mode = $Mode; updated = $now
         script_only = @(($prevOnly + $scriptOnly) | Select-Object -Unique)
+        deselected = @($deselected | Where-Object { $_ })
     }
     $tmp = $null
     try {
@@ -3539,6 +3548,378 @@ function Test-MenuIdEffective {
     if ($pkgs.Count -eq 0) { return $false }
     foreach ($p in $pkgs) { if ($Ctx.Plugins -notcontains $p) { return $false } }
     return $true
+}
+
+# --- Re-run semantics: detected initial state + "unchecked => removed" -------
+# Mirrors the install.sh section of the same name (see there for the detection
+# table). The interactive selector starts from what is installed now; items
+# left unchecked there are removed on submit, ownership-scoped, with files that
+# differ from what was installed moved to agent-config\backups\<ts>-deselect\
+# first. -All, -Only and the non-interactive default are additive.
+# install.ps1 has no launcher / model backend / co-author / mattpocock items,
+# so those parts of install.sh have no counterpart here.
+
+$OWNED_MANIFEST_REL = "agent-config\script-owned.tsv"
+$script:DeselectBackupDir = $null
+$script:MenuDeselectedIds = @()
+$script:PrevDeselectedIds = @()
+# Kept when unchecked, so a previous "unchecked" record overrides the file.
+$KEPT_ON_DESELECT_IDS = @("claude-md", "settings")
+
+function Get-Sha256Hex {
+    param([byte[]]$Bytes)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { return (($sha.ComputeHash($Bytes) | ForEach-Object { $_.ToString("x2") }) -join "") }
+    finally { $sha.Dispose() }
+}
+
+function Test-IsLink {
+    param([string]$Path)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    return ($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint))
+}
+
+# Content digest of a file or directory tree, computed the same way as
+# tree_digest in install.sh ("F ./rel sha" lines, ordinal order, SHA-256).
+function Get-TreeDigest {
+    param([string]$Path)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $null }
+    if (-not $item.PSIsContainer) {
+        return (Get-FileHash -Algorithm SHA256 -LiteralPath $item.FullName).Hash.ToLowerInvariant()
+    }
+    $root = $item.FullName.TrimEnd('\', '/')
+    $lines = @()
+    foreach ($f in @(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+        $rel = "./" + ($f.FullName.Substring($root.Length + 1) -replace '\\', '/')
+        $lines += "F $rel $((Get-FileHash -Algorithm SHA256 -LiteralPath $f.FullName).Hash.ToLowerInvariant())"
+    }
+    [string[]]$arr = $lines
+    [Array]::Sort($arr, [System.StringComparer]::Ordinal)
+    $text = (($arr | ForEach-Object { "$_`n" }) -join "")
+    return (Get-Sha256Hex -Bytes ([System.Text.Encoding]::UTF8.GetBytes($text)))
+}
+
+function Get-OwnedRecordedDigest {
+    param([string]$Rel)
+    $m = Join-Path $CLAUDE_DIR $OWNED_MANIFEST_REL
+    if (-not (Test-Path -LiteralPath $m -PathType Leaf)) { return $null }
+    $digest = $null
+    foreach ($line in @(Get-Content -LiteralPath $m)) {
+        $parts = $line -split "`t", 2
+        if ($parts.Count -eq 2 -and $parts[0] -eq $Rel) { $digest = $parts[1].Trim() }
+    }
+    return $digest
+}
+
+# Rewrite the ownership manifest without $Rel, then with "$Rel<TAB>$Digest".
+function Set-OwnedRecord {
+    param([string]$Rel, [string]$Digest = "")
+    if ($DryRun) { return }
+    $m = Join-Path $CLAUDE_DIR $OWNED_MANIFEST_REL
+    if (Test-IsLink -Path $m) { Write-Warn "Refusing to write ownership record through a link: $m"; return }
+    $lines = @()
+    if (Test-Path -LiteralPath $m -PathType Leaf) {
+        foreach ($line in @(Get-Content -LiteralPath $m)) {
+            if ($line -and (($line -split "`t", 2)[0] -ne $Rel)) { $lines += $line }
+        }
+    }
+    if ($Digest) { $lines += "$Rel`t$Digest" }
+    try {
+        New-Item -ItemType Directory -Path (Split-Path $m -Parent) -Force | Out-Null
+        $text = if ($lines.Count -gt 0) { ($lines -join "`n") + "`n" } else { "" }
+        [System.IO.File]::WriteAllText($m, $text)
+    } catch { Write-Warn "Could not update ownership record $($m): $_" }
+}
+
+# Record the digest of what this installer just wrote at $Rel (forward slashes).
+function Save-OwnedPath {
+    param([string]$Rel)
+    if ($DryRun) { return }
+    $target = Join-Path $CLAUDE_DIR ($Rel -replace '/', '\')
+    $digest = $null
+    try { $digest = Get-TreeDigest -Path $target } catch { $digest = $null }
+    if ($digest) { Set-OwnedRecord -Rel $Rel -Digest $digest }
+}
+
+function Initialize-DeselectBackupDir {
+    if ($script:DeselectBackupDir) { return }
+    $script:DeselectBackupDir = Join-Path $CLAUDE_DIR ("agent-config\backups\" + (Get-Date -Format "yyyyMMdd-HHmmss") + "-deselect")
+    New-Item -ItemType Directory -Path $script:DeselectBackupDir -Force | Out-Null
+}
+
+# Remove ~/.claude/$Rel (installed by this script) for an unchecked item.
+# Unmodified (recorded digest or the shipped $Source): deleted. Modified: moved
+# to this run's backup directory with a notice. Links are left in place.
+function Remove-OwnedPath {
+    param([string]$Rel, [string]$Source = "", [string]$Label)
+    $target = Join-Path $CLAUDE_DIR ($Rel -replace '/', '\')
+    if (-not (Test-Path -LiteralPath $target)) { return }
+    if (Test-IsLink -Path $target) { Write-Warn "${Label}: $target is a link - left in place"; return }
+    $cur = $null
+    try { $cur = Get-TreeDigest -Path $target } catch { $cur = $null }
+    $rec = Get-OwnedRecordedDigest -Rel $Rel
+    $modified = $true
+    if ($cur -and $rec -and $cur -eq $rec) { $modified = $false }
+    elseif ($cur -and $Source -and (Test-Path -LiteralPath $Source)) {
+        $srcDigest = $null
+        try { $srcDigest = Get-TreeDigest -Path $Source } catch { $srcDigest = $null }
+        if ($srcDigest -eq $cur) { $modified = $false }
+    }
+    if ($DryRun) {
+        if ($modified) { Write-Info "Would back up (differs from the installed copy) and remove unchecked ${Label}: $target" }
+        else { Write-Info "Would remove unchecked ${Label}: $target" }
+        return
+    }
+    try {
+        if ($modified) {
+            Initialize-DeselectBackupDir
+            $dest = Join-Path $script:DeselectBackupDir ($Rel -replace '/', '\')
+            New-Item -ItemType Directory -Path (Split-Path $dest -Parent) -Force | Out-Null
+            Move-Item -LiteralPath $target -Destination $dest -Force
+            Write-Warn "Unchecked $Label differed from the installed copy - backed up to $dest, then removed"
+        } else {
+            Remove-Item -LiteralPath $target -Recurse -Force
+            Write-Ok "Removed unchecked ${Label}: $target"
+        }
+    } catch {
+        Write-Warn "Could not remove $($target): $_"
+        $script:InstallWarnings++
+        return
+    }
+    Set-OwnedRecord -Rel $Rel -Digest ""
+}
+
+# --- settings.json / .claude.json probes --------------------------------------
+
+function Get-JsonFileObject {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    try { return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json) } catch { return $null }
+}
+
+function Test-StatusLineOurs {
+    param($Obj)
+    Set-StrictMode -Off   # dynamic JSON properties; scoped to this function
+    if ($null -eq $Obj -or -not $Obj.PSObject.Properties['statusLine'] -or $null -eq $Obj.statusLine) { return $false }
+    if (-not $Obj.statusLine.PSObject.Properties['command']) { return $false }
+    return ([string]$Obj.statusLine.command -match '\.claude\}?[\\/]hooks[\\/]statusline\.sh')
+}
+
+function Test-LessonsHookPresent {
+    param($Obj)
+    Set-StrictMode -Off   # dynamic JSON properties; scoped to this function
+    if ($null -eq $Obj -or -not $Obj.PSObject.Properties['hooks'] -or $null -eq $Obj.hooks) { return $false }
+    if (-not $Obj.hooks.PSObject.Properties['SessionStart']) { return $false }
+    foreach ($entry in @($Obj.hooks.SessionStart)) { if (Test-LessonsHookEntry -Entry $entry) { return $true } }
+    return $false
+}
+
+$MCP_PACKAGES = @{ "playwright" = "@playwright/mcp"; "lark-mcp" = "@larksuiteoapi/lark-mcp" }
+
+function Get-UserMcpServer {
+    param([string]$Name)
+    Set-StrictMode -Off   # dynamic JSON properties; scoped to this function
+    $cfg = Get-JsonFileObject -Path (Join-Path $env:USERPROFILE ".claude.json")
+    if ($null -eq $cfg -or -not $cfg.PSObject.Properties['mcpServers'] -or $null -eq $cfg.mcpServers) { return $null }
+    $p = $cfg.mcpServers.PSObject.Properties[$Name]
+    if (-not $p) { return $null }
+    return $p.Value
+}
+
+# True when user-scope MCP server $Name is the one this installer registers
+# (command npx, directly or through cmd /c, with our package in its args).
+function Test-McpOurs {
+    param([string]$Name)
+    Set-StrictMode -Off   # dynamic JSON properties; scoped to this function
+    $srv = Get-UserMcpServer -Name $Name
+    if ($null -eq $srv -or -not $MCP_PACKAGES.ContainsKey($Name)) { return $false }
+    $pkg = $MCP_PACKAGES[$Name]
+    $cmd = if ($srv.PSObject.Properties['command']) { [string]$srv.command } else { "" }
+    $argv = if ($srv.PSObject.Properties['args']) { @($srv.args | ForEach-Object { [string]$_ }) } else { @() }
+    $viaNpx = ($cmd -match '(^|[\\/])npx(\.cmd|\.exe)?$') -or (($cmd -match '(^|[\\/])cmd(\.exe)?$') -and ($argv -contains "npx"))
+    $hasPkg = @($argv | Where-Object { $_ -eq $pkg -or $_.StartsWith("$pkg@") }).Count -gt 0
+    return ($viaNpx -and $hasPkg)
+}
+
+# --- Detection for the initial menu state -------------------------------------
+
+function Get-PreviousDeselectedIds {
+    Set-StrictMode -Off   # dynamic JSON properties; scoped to this function
+    $sel = Get-JsonFileObject -Path (Join-Path $CLAUDE_DIR "agent-config\selection.json")
+    if ($null -eq $sel -or -not $sel.PSObject.Properties['script_installer'] -or $null -eq $sel.script_installer) { return @() }
+    if (-not $sel.script_installer.PSObject.Properties['deselected']) { return @() }
+    return @($sel.script_installer.deselected | Where-Object { $_ -is [string] })
+}
+
+function Test-ScriptSkillPresent {
+    param([string]$Name)
+    return ((Test-Path -LiteralPath (Join-Path (Join-Path $CLAUDE_DIR "skills") $Name) -PathType Container) -and
+            -not (Test-AgentManagedElsewhere -Target "skills/$Name"))
+}
+
+# True when menu item $Id is detectably installed now (see install.sh).
+function Test-MenuItemInstalled {
+    param([string]$Id)
+    Set-StrictMode -Off   # dynamic JSON properties; scoped to this function
+    $settings = $null
+    if ($Id -in @("statusline", "lessons")) { $settings = Get-JsonFileObject -Path (Join-Path $CLAUDE_DIR "settings.json") }
+    $upstream = @{ "skill-humanizer-zh" = "humanizer-zh"; "skill-neat-freak" = "neat-freak"; "lieflat-charts" = "lieflat-charts"; "researchstudio-idea" = "researchstudio-idea" }
+    $langs = @{ "rules-python" = "python"; "rules-ts" = "typescript"; "rules-go" = "golang" }
+    if ($Id -eq "claude-md") { return (Test-Path -LiteralPath (Join-Path $CLAUDE_DIR "CLAUDE.md") -PathType Leaf) }
+    if ($Id -eq "settings") { return (Test-Path -LiteralPath (Join-Path $CLAUDE_DIR "settings.json") -PathType Leaf) }
+    if ($Id -eq "rules-writing-style") { return (Test-Path -LiteralPath (Join-Path $CLAUDE_DIR "rules\writing-style.md") -PathType Leaf) }
+    if ($Id -eq "statusline") { return (Test-StatusLineOurs -Obj $settings) }
+    if ($Id -eq "lessons") { return (Test-LessonsHookPresent -Obj $settings) }
+    if ($Id -eq "agents") {
+        foreach ($f in @(Get-ChildItem (Join-Path $script:SCRIPT_DIR "agents") -Filter "*.md" -ErrorAction SilentlyContinue)) {
+            if (Test-Path -LiteralPath (Join-Path (Join-Path $CLAUDE_DIR "agents") $f.Name) -PathType Leaf) { return $true }
+        }
+        return $false
+    }
+    if ($langs.ContainsKey($Id)) { return (Test-Path -LiteralPath (Join-Path (Join-Path $CLAUDE_DIR "rules") $langs[$Id]) -PathType Container) }
+    if ($upstream.ContainsKey($Id)) {
+        $entry = Get-UpstreamSkillItem -Item $upstream[$Id]
+        if (-not $entry) { return $false }
+        foreach ($name in $entry.Targets) {
+            if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $CLAUDE_DIR "skills") $name) -PathType Container)) { return $false }
+            if (-not (Test-ScriptManagedCopy -Target "skills/$name")) { return $false }
+        }
+        return $true
+    }
+    if ($Id -eq "review-adversarial") { return (Test-ScriptSkillPresent -Name "adversarial-review") }
+    if ($Id -like "deepxiv-*") { return (Test-Path -LiteralPath (Join-Path (Join-Path $CLAUDE_DIR "skills") $Id) -PathType Container) }
+    if ($Id -eq "mcp") { return (Test-McpOurs -Name "playwright") }
+    if ($Id -eq "mcp-lark") { return (Test-McpOurs -Name "lark-mcp") }
+    if ($Id -eq "ai-research") {
+        $installed = @(Get-InstalledPluginKeys)
+        foreach ($pkg in $PLUGINS_AI_RESEARCH) { if ($installed -contains $pkg) { return $true } }
+        return $false
+    }
+    if ($Id -like "skill-*" -and $Id -ne "skill-humanizer") { return (Test-ScriptSkillPresent -Name $Id.Substring(6)) }
+    $pkgs = @((ConvertTo-MenuSelection -Ids @($Id) -FullSelection $false).SelectedPlugins)
+    if ($pkgs.Count -eq 0) { return $false }
+    $installedKeys = @(Get-InstalledPluginKeys)
+    foreach ($p in $pkgs) { if ($installedKeys -notcontains $p) { return $false } }
+    return $true
+}
+
+function Get-MenuInitialState {
+    param([string]$Id, [bool]$Default)
+    $prevOff = $script:PrevDeselectedIds -contains $Id
+    if ($prevOff -and ($KEPT_ON_DESELECT_IDS -contains $Id)) { return $false }
+    if (Test-MenuItemInstalled -Id $Id) { return $true }
+    if ($prevOff) { return $false }
+    return $Default
+}
+
+# --- Removal of unchecked items (interactive runs only) -----------------------
+
+# Apply $Edit (scriptblock taking the parsed settings object, returning $true
+# when it changed something) to settings.json atomically.
+function Update-SettingsObject {
+    param([scriptblock]$Edit, [string]$What)
+    $settings = Join-Path $CLAUDE_DIR "settings.json"
+    $obj = Get-JsonFileObject -Path $settings
+    if ($null -eq $obj) { return }
+    if ($DryRun) { Write-Info "Would $What in settings.json"; return }
+    $tmp = Join-Path (Split-Path $settings -Parent) ("settings.json.tmp." + [Guid]::NewGuid().ToString("N"))
+    Set-StrictMode -Off   # dynamic JSON properties; scoped to this function
+    try {
+        $changed = & $Edit $obj
+        if (-not $changed) { return }
+        $obj | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $tmp -Encoding UTF8
+        Get-Content -LiteralPath $tmp -Raw | ConvertFrom-Json | Out-Null
+        [System.IO.File]::Replace($tmp, $settings, [NullString]::Value)
+        Write-Ok "settings.json: $What"
+    } catch {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        Write-Warn "Could not $What in settings.json - left unchanged: $_"
+        $script:InstallWarnings++
+    }
+}
+
+function Remove-DeselectedStatusLine {
+    Set-StrictMode -Off   # dynamic JSON properties; scoped to this function
+    $obj = Get-JsonFileObject -Path (Join-Path $CLAUDE_DIR "settings.json")
+    if (Test-StatusLineOurs -Obj $obj) {
+        Update-SettingsObject -What "remove the statusLine that runs hooks/statusline.sh" -Edit {
+            param($o); $o.PSObject.Properties.Remove('statusLine'); return $true
+        }
+    } elseif ($obj -and $obj.PSObject.Properties['statusLine']) {
+        Write-Info "statusLine in settings.json is not the one this installer set - left unchanged"
+    }
+    Remove-OwnedPath -Rel "hooks/statusline.sh" -Source (Join-Path (Get-ClaudeTemplatesDir) "hooks\statusline.sh") -Label "StatusLine hook"
+}
+
+function Remove-DeselectedLessonsHook {
+    Set-StrictMode -Off   # dynamic JSON properties; scoped to this function
+    $obj = Get-JsonFileObject -Path (Join-Path $CLAUDE_DIR "settings.json")
+    if (-not (Test-LessonsHookPresent -Obj $obj)) { return }
+    Update-SettingsObject -What "remove the lessons SessionStart hook (lessons.md itself is kept)" -Edit {
+        param($o)
+        $kept = @()
+        foreach ($entry in @($o.hooks.SessionStart)) {
+            $inner = @($entry.hooks | Where-Object { -not ($_.command -and ($_.command -match 'LESSONS_FILE=')) })
+            if ($inner.Count -gt 0) { $entry.hooks = $inner; $kept += $entry }
+        }
+        if ($kept.Count -gt 0) { $o.hooks.SessionStart = $kept }
+        else { $o.hooks.PSObject.Properties.Remove('SessionStart') }
+        if (@($o.hooks.PSObject.Properties).Count -eq 0) { $o.PSObject.Properties.Remove('hooks') }
+        return $true
+    }
+}
+
+function Remove-DeselectedMcp {
+    param([string]$Name)
+    if ($null -eq (Get-UserMcpServer -Name $Name)) { return }
+    if (-not (Test-McpOurs -Name $Name)) {
+        Write-Warn "MCP server '$Name' was not registered by this installer (different command) - left in place"
+        return
+    }
+    if ($DryRun) { Write-Info "Would remove unchecked MCP server: $Name"; return }
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+        Write-Warn "claude CLI not found - cannot remove MCP server $Name (run: claude mcp remove $Name --scope user)"
+        return
+    }
+    & claude mcp remove $Name --scope user 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { Write-Ok "Removed unchecked MCP server: $Name" }
+    else { Write-Warn "Could not remove MCP server $Name (run: claude mcp remove $Name --scope user)"; $script:InstallWarnings++ }
+}
+
+# Remove everything installed but left unchecked in this run's interactive
+# selector. Mirrors reconcile_deselected in install.sh.
+function Invoke-ReconcileDeselected {
+    param([hashtable]$Ctx)
+    Write-Info "Removing items left unchecked in the selector (installer-owned only)..."
+    $templates = Get-ClaudeTemplatesDir
+    if (-not ($Ctx.Rules -and $Ctx.WritingStyle)) {
+        Remove-OwnedPath -Rel "rules/writing-style.md" -Source (Join-Path $templates "rules\writing-style.md") -Label "rule writing-style.md"
+    }
+    foreach ($known in @("python", "typescript", "golang")) {
+        if ($Ctx.Rules -and ($Ctx.RuleLangs -contains $known)) { continue }
+        Remove-OwnedPath -Rel "rules/$known" -Source (Join-Path $templates "rules\$known") -Label "$known rules"
+    }
+    foreach ($known in $SCRIPT_OWNED_SKILLS) {
+        if ($Ctx.Skills -and ($Ctx.SelectedSkills -contains $known)) { continue }
+        if (Test-AgentManagedElsewhere -Target "skills/$known") { continue }
+        if (Test-ScriptManagedCopy -Target "skills/$known") { continue }
+        Remove-OwnedPath -Rel "skills/$known" -Source (Get-SkillSourceDir -Name $known) -Label "skill $known"
+    }
+    foreach ($id in @("deepxiv-cli", "deepxiv-trending-digest", "deepxiv-baseline-table")) {
+        if ($Ctx.DeepXiv -and ($Ctx.DeepXivSkills -contains $id)) { continue }
+        Remove-OwnedPath -Rel "skills/$id" -Label "DeepXiv skill $id"
+    }
+    if (-not $Ctx.Agents) {
+        foreach ($f in @(Get-ChildItem (Join-Path $script:SCRIPT_DIR "agents") -Filter "*.md" -ErrorAction SilentlyContinue)) {
+            Remove-OwnedPath -Rel "agents/$($f.Name)" -Source $f.FullName -Label "agent $($f.Name)"
+        }
+    }
+    if (-not $Ctx.Mcp) { Remove-DeselectedMcp -Name "playwright" }
+    if (-not $Ctx.Lark) { Remove-DeselectedMcp -Name "lark-mcp" }
+    if (-not $Ctx.Hooks) { Remove-DeselectedStatusLine }
+    if (-not $Ctx.Lessons) { Remove-DeselectedLessonsHook }
+    if ($script:DeselectBackupDir) { Write-Warn "Modified files removed on deselect were backed up under: $($script:DeselectBackupDir)" }
 }
 
 function Invoke-Uninstall {
@@ -3715,10 +4096,13 @@ Usage: .\install.ps1 [OPTIONS]
 Install Claude Code configuration files.
 
 Running without options launches an interactive component selector.
-Works with both local and remote installs (irm | iex).
+Works with both local and remote installs (irm | iex). The selector starts
+from what is already installed (defaults for anything that is not); items you
+uncheck there are removed on submit - only what this installer put there, with
+modified files backed up to ~\.claude\agent-config\backups\ first.
 
 Options:
-    -All                Install everything (non-interactive)
+    -All                Install everything (non-interactive, additive)
     -Only <ids>         Install just these menu items (comma-separated IDs, see
                         -ListIds), non-interactively. Additive: nothing else is
                         removed and plugins are not reconciled
@@ -3726,18 +4110,21 @@ Options:
     -Uninstall          Remove all installed files
     -Version            Show version info
     -DryRun             Show what would be installed without doing it,
-                        including which plugins/marketplaces would be REMOVED
+                        including everything an interactive run would REMOVE
     -Force              Skip confirmation prompts
     -PruneForeignPlugins
                         Also uninstall plugins this installer does not manage
                         when they are not selected this run (hand-installed
                         third-party ones included). By default only
-                        installer-managed plugins are reconciled.
+                        installer-managed plugins are reconciled. Plugins are
+                        only ever reconciled on interactive runs.
     -KeepForeignPlugins Accepted for compatibility; this is now the default.
     -Help               Show this help
 
-Every run also removes retired items (github plugin + GitHub MCP, claude-mem,
-PUA). -All installs every item except the opt-in storage-analyzer skill.
+Only an interactive run removes unchecked items. -All, -Only and the
+non-interactive default are additive and remove nothing, except that every run
+removes retired items (github plugin + GitHub MCP, claude-mem, PUA).
+-All installs every item except the opt-in storage-analyzer skill.
 
 Examples:
     .\install.ps1                  # Interactive selector
@@ -3890,7 +4277,7 @@ function Main {
         $reviewCodex = $false
         $selectedPlugins = @("code-review@claude-plugins-official")
         $selectedSkills = @()
-    } elseif ([Environment]::UserInteractive -and $Host.Name -eq "ConsoleHost") {
+    } elseif ($env:ACCC_TEST_MENU_IDS -or ([Environment]::UserInteractive -and $Host.Name -eq "ConsoleHost")) {
         # Interactive mode: show menu (with fallback if console APIs fail)
         $menuResult = $null
         try {
@@ -4037,6 +4424,15 @@ function Main {
     # plugins were selected this run — keeps third-party plugins current.
     Update-InstalledPlugins -PluginsReinstalled $doPlugins
     if ($doDeepXiv) { Install-DeepXiv -SelectedDeepXivSkills $deepXivSkills }
+
+    # Interactive runs only: remove what is installed but was left unchecked.
+    if ($fullSelection) {
+        Invoke-ReconcileDeselected -Ctx @{
+            Rules = $doRules; WritingStyle = $doWritingStyle; RuleLangs = @($ruleLangs)
+            Skills = $doSkills; SelectedSkills = @($selectedSkills); DeepXiv = $doDeepXiv; DeepXivSkills = @($deepXivSkills)
+            Agents = $doAgents; Mcp = $doMcp; Lark = $doLark; Hooks = $doHooks; Lessons = $doLessons
+        }
+    }
 
     # Selection record for edit-config (agent-config\selection.json).
     $effPlugins = @()
