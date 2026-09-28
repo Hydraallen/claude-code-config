@@ -5598,8 +5598,7 @@ remove_owned_path() {
     if $modified; then
         _ensure_deselect_backup_dir
         dest="$DESELECT_BACKUP_DIR/$rel"
-        mkdir -p "$(dirname "$dest")"
-        if mv -- "$target" "$dest"; then
+        if mkdir -p "$(dirname "$dest")" 2>/dev/null && mv -- "$target" "$dest"; then
             warn "Unchecked $label differed from the installed copy — backed up to $dest, then removed"
         else
             warn "Could not back up $target — left in place"
@@ -5846,8 +5845,7 @@ remove_deselected_mattpocock() {
         else
             _ensure_deselect_backup_dir
             dest="$DESELECT_BACKUP_DIR/skills/$name"
-            mkdir -p "$(dirname "$dest")"
-            if mv -- "$path" "$dest"; then
+            if mkdir -p "$(dirname "$dest")" 2>/dev/null && mv -- "$path" "$dest"; then
                 warn "Unchecked mattpocock skill '$name' differed from the installed copy — backed up to $dest, then removed"
             else
                 warn "Could not back up $path — left in place"
@@ -5882,7 +5880,11 @@ remove_deselected_shell_wrapper() {
             info "Would back up ~/.zshrc and remove the line: $SHELL_WRAPPER_RC_LINE"
         else
             _ensure_deselect_backup_dir
-            cp -p "$rc" "$DESELECT_BACKUP_DIR/.zshrc"
+            if ! cp -p "$rc" "$DESELECT_BACKUP_DIR/.zshrc" 2>/dev/null; then
+                warn "Could not back up ~/.zshrc — left the '$SHELL_WRAPPER_RC_LINE' line in place"
+                (( INSTALL_WARNINGS++ )) || true
+                return 0
+            fi
             tmp="$(mktemp "$rc.XXXXXX")" || return 0
             if awk -v l="$SHELL_WRAPPER_RC_LINE" '{ t = $0; sub(/[ \t\r]+$/, "", t) } t != l { print }' "$rc" > "$tmp"; then
                 chmod --reference="$rc" "$tmp" 2>/dev/null || chmod "$(stat -f '%Lp' "$rc" 2>/dev/null || echo 644)" "$tmp" 2>/dev/null || true
