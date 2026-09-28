@@ -239,7 +239,6 @@ $PLUGINS_ESSENTIAL = @(
     "code-simplifier@claude-plugins-official"
     "ralph-loop@claude-plugins-official"
     "example-skills@anthropic-agent-skills"
-    "github@claude-plugins-official"
 )
 
 # Optional plugins: default OFF, installed only via explicit -All or manual opt-in
@@ -247,10 +246,6 @@ $PLUGINS_OPTIONAL = @(
     "ecc@ecc"
     "frontend-slides@frontend-slides"
     "ppt-master@ppt-master"
-)
-
-$PLUGINS_CLAUDE_MEM = @(
-    "claude-mem@thedotmack"
 )
 
 $PLUGINS_AI_RESEARCH = @(
@@ -262,21 +257,25 @@ $PLUGINS_AI_RESEARCH = @(
     "optimization@ai-research-skills"
 )
 
-$PLUGINS_PUA = @(
-    "pua@pua-skills"
-)
-
 # Plugins/marketplaces retired or renamed upstream. Re-running the installer
 # uninstalls these stale ids and removes their orphaned marketplaces so a
 # rename (e.g. everything-claude-code -> ecc) self-heals on the next run.
+# This sweep (Remove-RetiredPlugins) runs on every invocation and is
+# independent of PluginPruneScope: tombstoned ids are uninstalled even under
+# the default "catalogue" scope. Mirrors RETIRED_PLUGINS in install.sh.
 $RETIRED_PLUGINS = @(
     "frontend-design@claude-plugins-official"
     "everything-claude-code@everything-claude-code"
     "health@claude-health"
+    "github@claude-plugins-official"   # GitHub MCP/plugin retired (4.2.0)
+    "claude-mem@thedotmack"            # claude-mem retired (4.2.0)
+    "pua@pua-skills"                   # PUA retired (4.2.0)
 )
 $RETIRED_MARKETPLACES = @(
     "everything-claude-code"
     "claude-health"
+    "thedotmack"
+    "pua-skills"
 )
 
 # Tombstones: plugins removed upstream. Stripped from a user's enabledPlugins
@@ -284,15 +283,20 @@ $RETIRED_MARKETPLACES = @(
 $PLUGINS_REMOVED = @(
     "frontend-design@claude-plugins-official"
     "everything-claude-code@everything-claude-code"
+    "github@claude-plugins-official"
+    "claude-mem@thedotmack"
+    "pua@pua-skills"
 )
+
+# Retired standalone GitHub MCP registration (very early releases). Removed
+# only while the user-scope "github" entry still points at this URL.
+$RETIRED_GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/"
 
 $MARKETPLACE_LIST = @(
     @{ Name = "anthropic-agent-skills"; Repo = "anthropics/skills" }
     @{ Name = "ecc"; Repo = "affaan-m/everything-claude-code" }
     @{ Name = "ai-research-skills"; Repo = "zechenzhangAGI/AI-research-SKILLs" }
     @{ Name = "claude-plugins-official"; Repo = "anthropics/claude-plugins-official" }
-    @{ Name = "thedotmack"; Repo = "thedotmack/claude-mem" }
-    @{ Name = "pua-skills"; Repo = "tanweai/pua" }
     @{ Name = "openai-codex"; Repo = "openai/codex-plugin-cc" }
     @{ Name = "frontend-slides"; Repo = "zarazhangrui/frontend-slides" }
     @{ Name = "ppt-master"; Repo = "hugohe3/ppt-master" }
@@ -330,9 +334,7 @@ function Get-PluginCatalogue {
     $all = @()
     $all += $PLUGINS_ESSENTIAL
     $all += $PLUGINS_OPTIONAL
-    $all += $PLUGINS_CLAUDE_MEM
     $all += $PLUGINS_AI_RESEARCH
-    $all += $PLUGINS_PUA
     return ($all | Select-Object -Unique)
 }
 
@@ -483,7 +485,6 @@ function Show-InteractiveMenu {
         )}
         @{ Label = "Integrations"; Hint = "external tools & services"; Items = @(
             @{ Label = "context7";        Desc = "Real-time library documentation";   Default = $true;  Id = "plug-context7" }
-            @{ Label = "github";          Desc = "GitHub integration (issues, PRs, workflows)"; Default = $true;  Id = "plug-github" }
             @{ Label = "playwright";      Desc = "Browser automation & E2E testing";  Default = $true;  Id = "plug-playwright" }
         )}
         @{ Label = "Design & Content"; Hint = "documents, UI, creative artifacts, humanization"; Items = @(
@@ -495,10 +496,6 @@ function Show-InteractiveMenu {
         @{ Label = "Slides"; Hint = "AI slide / PPTX generation | default off"; Items = @(
             @{ Label = "frontend-slides"; Desc = "HTML slide generator with PPT conversion (zarazhangrui)"; Default = $false; Id = "plug-frontend-slides" }
             @{ Label = "ppt-master";      Desc = "Editable PPTX from PDF/DOCX/URL/Markdown; needs pip install (hugohe3)"; Default = $false; Id = "plug-ppt-master" }
-        )}
-        @{ Label = "Memory & Lifestyle"; Hint = "session memory and personal productivity"; Items = @(
-            @{ Label = "claude-mem";      Desc = "Cross-session memory (~3k tokens/session)"; Default = $false; Id = "plug-claude-mem" }
-            @{ Label = "PUA";             Desc = "AI agent productivity booster (pua, pua-en, pua-ja)"; Default = $false; Id = "plug-pua" }
         )}
         @{ Label = "Academic Research"; Hint = "training/inference plugins + paper-reading & DeepXiv skills"; Items = @(
             @{ Label = "paper-reading";   Desc = "Research paper summarization (skill)"; Default = $true; Id = "skill-paper-reading" }
@@ -727,9 +724,6 @@ function Show-InteractiveMenu {
         "plug-code-simplifier" = "code-simplifier@claude-plugins-official"
         "plug-ralph-loop" = "ralph-loop@claude-plugins-official"
         "plug-example-skills" = "example-skills@anthropic-agent-skills"
-        "plug-github" = "github@claude-plugins-official"
-        "plug-claude-mem" = "claude-mem@thedotmack"
-        "plug-pua" = "pua@pua-skills"
         "plug-tokenization" = "tokenization@ai-research-skills"
         "plug-fine-tuning" = "fine-tuning@ai-research-skills"
         "plug-post-training" = "post-training@ai-research-skills"
@@ -856,10 +850,8 @@ function Get-EffectiveSelectedPlugins {
     foreach ($g in $Groups) {
         switch ($g) {
             "essential" { $pkgs += $PLUGINS_ESSENTIAL }
-            "claude-mem" { $pkgs += $PLUGINS_CLAUDE_MEM }
             "ai-research" { $pkgs += $PLUGINS_AI_RESEARCH }
-            "pua" { $pkgs += $PLUGINS_PUA }
-            "all" { $pkgs += $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_AI_RESEARCH + $PLUGINS_PUA }
+            "all" { $pkgs += $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_AI_RESEARCH }
         }
     }
     return @($pkgs | Select-Object -Unique)
@@ -948,7 +940,7 @@ function Install-Settings {
                     $obj = Get-Content $target -Raw | ConvertFrom-Json
                     # Fresh install: catalogue = source keys ∪ selection so plugins
                     # picked in the menu that aren't declared in the shipped
-                    # settings.json (codex, health, pua) still land as true.
+                    # settings.json (e.g. codex) still land as true.
                     $filtered = [ordered]@{}
                     $seen = @{}
                     if ($obj.enabledPlugins) {
@@ -1039,7 +1031,7 @@ function Install-Settings {
         # enabledPlugins: if plugins were interacted with this run, apply the selection
         # filter to the catalogue (source keys ∪ selected keys — so plugins picked in
         # the menu that aren't declared in the shipped settings.json, e.g. codex,
-        # health, pua, still land as true). User-added keys that exist only in
+        # still land as true). User-added keys that exist only in
         # $existing (outside our catalogue) are preserved verbatim so the installer
         # never silently disables third-party plugins.
         # If plugins were not interacted with, fall back to union merge with existing
@@ -2410,10 +2402,8 @@ function Install-Plugins {
     foreach ($group in $Groups) {
         switch ($group) {
             "essential" { $plugins += $PLUGINS_ESSENTIAL }
-            "claude-mem" { $plugins += $PLUGINS_CLAUDE_MEM }
             "ai-research" { $plugins += $PLUGINS_AI_RESEARCH }
-            "pua" { $plugins += $PLUGINS_PUA }
-            "all" { $plugins += $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_AI_RESEARCH + $PLUGINS_PUA }
+            "all" { $plugins += $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_AI_RESEARCH }
         }
     }
 
@@ -2532,6 +2522,27 @@ function Remove-RetiredPlugins {
             else { Write-Warn "Could not remove retired marketplace: $mkt" }
         }
     }
+    Remove-RetiredGithubMcp
+}
+
+# Remove the retired user-scope GitHub MCP server that very early releases
+# registered, only while it is still named "github" AND points at
+# $RETIRED_GITHUB_MCP_URL. Reads ~/.claude.json instead of `claude mcp list`,
+# which health-checks every server. Mirrors prune_retired_github_mcp().
+function Remove-RetiredGithubMcp {
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { return }
+    $cfg = Join-Path $env:USERPROFILE ".claude.json"
+    if (-not (Test-Path -LiteralPath $cfg -PathType Leaf)) { return }
+    try { $obj = Get-Content -LiteralPath $cfg -Raw | ConvertFrom-Json } catch { return }
+    if (-not $obj.PSObject.Properties['mcpServers']) { return }
+    $gh = $obj.mcpServers.PSObject.Properties['github']
+    if (-not $gh -or -not $gh.Value.PSObject.Properties['url']) { return }
+    $url = [string]$gh.Value.url
+    if ($url -ne $RETIRED_GITHUB_MCP_URL -and $url -ne $RETIRED_GITHUB_MCP_URL.TrimEnd('/')) { return }
+    if ($DryRun) { Write-Info "Would remove retired MCP server: github ($RETIRED_GITHUB_MCP_URL)"; return }
+    & claude mcp remove github --scope user 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { Write-Ok "Removed retired MCP server: github" }
+    else { Write-Warn "Could not remove retired MCP server: github (remove it with: claude mcp remove github --scope user)" }
 }
 
 # Reconcile installed plugins against this run's selection: uninstall every
@@ -2879,7 +2890,7 @@ function Invoke-Uninstall {
 
     $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
     if ($claudeCmd) {
-        $allPlugins = $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_CLAUDE_MEM + $PLUGINS_AI_RESEARCH + $PLUGINS_PUA + $PLUGINS_REMOVED
+        $allPlugins = $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_AI_RESEARCH + $PLUGINS_REMOVED
         foreach ($entry in $allPlugins) {
             $pluginName = ($entry -split '@')[0]
             & claude plugin uninstall $entry 2>$null
@@ -3067,7 +3078,6 @@ function Main {
             $reviewCodex = $menuResult.ReviewCodex
         } else {
             # Fallback when interactive menu failed
-            # claude-mem is default OFF and only ships with explicit -All.
             $doClaudeMd = $true
             $doSettings = $true
             $doRules = $true
@@ -3081,8 +3091,7 @@ function Main {
     } else {
         # Non-interactive fallback: essential plugins plus the default-selected
         # third-party plugins, so a `irm | iex` install without -All still
-        # brings them along. claude-mem is default OFF and only ships with
-        # explicit -All. No MCP server is registered here: lark-mcp needs
+        # brings them along. No MCP server is registered here: lark-mcp needs
         # credentials, and the standalone playwright MCP would take the
         # `playwright` name at user scope and shadow the playwright plugin this
         # same branch installs. Opt in with -All or the interactive menu.

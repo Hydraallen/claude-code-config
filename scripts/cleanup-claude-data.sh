@@ -5,8 +5,7 @@
 # ~/.claude/projects (default 30 days, via settings.json "cleanupPeriodDays").
 # It never touches telemetry, debug logs, file-history snapshots, homunculus
 # state, shell snapshots, paste cache, or leftover plugin marketplace temp dirs.
-# This script prunes those by age, plus optionally the oversized claude-mem
-# observer-session logs.
+# This script prunes those by age.
 #
 # SAFE BY DEFAULT: runs in dry-run mode. Pass --apply to actually delete.
 #
@@ -14,21 +13,22 @@
 #   scripts/cleanup-claude-data.sh                  # dry-run, 30-day threshold
 #   scripts/cleanup-claude-data.sh --apply          # actually delete (>30 days)
 #   scripts/cleanup-claude-data.sh --days 14 --apply # custom age threshold
-#   scripts/cleanup-claude-data.sh --include-mem --apply  # also prune claude-mem observer logs
 set -euo pipefail
 
 CLAUDE_DIR="${CLAUDE_DIR:-$HOME/.claude}"
 DAYS=30
 APPLY=false
-INCLUDE_MEM=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --apply) APPLY=true; shift ;;
         --days) DAYS="${2:?--days needs a number}"; shift 2 ;;
-        --include-mem) INCLUDE_MEM=true; shift ;;
+        --include-mem)
+            # claude-mem is retired; the flag is accepted so old invocations keep working.
+            echo "Note: --include-mem is ignored (claude-mem support was removed)." >&2
+            shift ;;
         -h|--help)
-            sed -n '2,18p' "$0"; exit 0 ;;
+            sed -n '2,15p' "$0"; exit 0 ;;
         *) echo "Unknown arg: $1" >&2; exit 2 ;;
     esac
 done
@@ -92,18 +92,6 @@ if [[ -d "$mkt" ]]; then
     done < <(find "$mkt" -maxdepth 1 -type d \( -name 'temp_*' -o -name '*.bak' \) 2>/dev/null)
 else
     echo "  (no marketplaces dir)"
-fi
-
-if $INCLUDE_MEM; then
-    echo
-    echo "Pruning claude-mem observer-session logs older than ${DAYS}d:"
-    while IFS= read -r d; do
-        [[ -z "$d" ]] && continue
-        prune_age "$d"
-    done < <(find "$CLAUDE_DIR/projects" -maxdepth 1 -type d -name '*claude-mem-observer-sessions' 2>/dev/null)
-else
-    echo
-    echo "(claude-mem observer logs left untouched; rerun with --include-mem to prune them)"
 fi
 
 echo

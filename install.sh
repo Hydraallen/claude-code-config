@@ -798,7 +798,6 @@ PLUGINS_ESSENTIAL=(
     "code-simplifier@claude-plugins-official"
     "ralph-loop@claude-plugins-official"
     "example-skills@anthropic-agent-skills"
-    "github@claude-plugins-official"
 )
 
 # Optional plugins: default OFF, installed only via explicit --all or manual opt-in
@@ -806,10 +805,6 @@ PLUGINS_OPTIONAL=(
     "ecc@ecc"
     "frontend-slides@frontend-slides"
     "ppt-master@ppt-master"
-)
-
-PLUGINS_CLAUDE_MEM=(
-    "claude-mem@thedotmack"
 )
 
 PLUGINS_AI_RESEARCH=(
@@ -821,21 +816,27 @@ PLUGINS_AI_RESEARCH=(
     "optimization@ai-research-skills"
 )
 
-PLUGINS_PUA=(
-    "pua@pua-skills"
-)
-
 # Plugins/marketplaces retired or renamed upstream. Re-running the installer
 # uninstalls these stale ids and removes their orphaned marketplaces so a
 # rename (e.g. everything-claude-code -> ecc) self-heals on the next run.
+#
+# This sweep (prune_retired_plugins) runs on every invocation and is independent
+# of PLUGIN_PRUNE_SCOPE: tombstoned ids are uninstalled even under the default
+# "catalogue" scope, which otherwise never touches plugins the installer does
+# not manage.
 RETIRED_PLUGINS=(
     "frontend-design@claude-plugins-official"
     "everything-claude-code@everything-claude-code"  # renamed to ecc@ecc
     "health@claude-health"                           # claude-health renamed to the waza suite
+    "github@claude-plugins-official"                 # GitHub MCP/plugin retired (4.2.0)
+    "claude-mem@thedotmack"                          # claude-mem retired (4.2.0)
+    "pua@pua-skills"                                 # PUA retired (4.2.0)
 )
 RETIRED_MARKETPLACES=(
     "everything-claude-code"  # superseded by the ecc marketplace
     "claude-health"           # superseded by waza
+    "thedotmack"              # claude-mem retired
+    "pua-skills"              # PUA retired
 )
 
 # Tombstones: plugins removed upstream. Stripped from a user's enabledPlugins
@@ -843,7 +844,15 @@ RETIRED_MARKETPLACES=(
 PLUGINS_REMOVED=(
     "frontend-design@claude-plugins-official"
     "everything-claude-code@everything-claude-code"
+    "github@claude-plugins-official"
+    "claude-mem@thedotmack"
+    "pua@pua-skills"
 )
+
+# Retired standalone MCP registration: very early releases added GitHub's
+# hosted MCP server at user scope under this name and URL. Removed only when
+# both still match, so a user's own "github" server is left alone.
+RETIRED_GITHUB_MCP_URL="https://api.githubcopilot.com/mcp/"
 
 # --- Terminal detection (single source of truth) -----------------------
 
@@ -1004,7 +1013,6 @@ update-config|Configure Claude Code via settings.json (skill)|1|skill-update-con
     GROUP_LABELS+=("Integrations")
     GROUP_HINTS+=("external tools & services")
     GROUP_ITEMS+=("context7|Real-time library documentation|1|plug-context7
-github|GitHub integration (issues, PRs, workflows)|1|plug-github
 playwright|Browser automation & E2E testing|1|plug-playwright")
 
     # Group 5: Design & Content
@@ -1020,12 +1028,6 @@ humanizer-zh|Remove AI writing patterns (Chinese, op7418) (skill)|0|skill-humani
     GROUP_HINTS+=("AI slide / PPTX generation · default off")
     GROUP_ITEMS+=("frontend-slides|HTML slide generator with PPT conversion (zarazhangrui)|0|plug-frontend-slides
 ppt-master|Editable PPTX from PDF/DOCX/URL/Markdown; needs pip install (hugohe3)|0|plug-ppt-master")
-
-    # Group 7: Memory & Lifestyle
-    GROUP_LABELS+=("Memory & Lifestyle")
-    GROUP_HINTS+=("session memory and personal productivity")
-    GROUP_ITEMS+=("claude-mem|Cross-session memory (~3k tokens/session)|0|plug-claude-mem
-PUA|AI agent productivity booster (pua, pua-en, pua-ja)|0|plug-pua")
 
     # Group 8: Academic Research (AI Research plugins + DeepXiv skills + paper-reading)
     GROUP_LABELS+=("Academic Research")
@@ -1422,9 +1424,6 @@ Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/sessio
             plug-code-simplifier)   echo "code-simplifier@claude-plugins-official" ;;
             plug-ralph-loop)        echo "ralph-loop@claude-plugins-official" ;;
             plug-example-skills)    echo "example-skills@anthropic-agent-skills" ;;
-            plug-github)            echo "github@claude-plugins-official" ;;
-            plug-claude-mem)        echo "claude-mem@thedotmack" ;;
-            plug-pua)               echo "pua@pua-skills" ;;
             plug-tokenization)      echo "tokenization@ai-research-skills" ;;
             plug-fine-tuning)       echo "fine-tuning@ai-research-skills" ;;
             plug-post-training)     echo "post-training@ai-research-skills" ;;
@@ -1601,10 +1600,8 @@ _effective_selected_plugins_json() {
         for g in "${PLUGIN_GROUPS[@]}"; do
             case "$g" in
                 essential|core) pkgs+=("${PLUGINS_ESSENTIAL[@]}") ;;
-                claude-mem)     pkgs+=("${PLUGINS_CLAUDE_MEM[@]}") ;;
                 ai-research)    pkgs+=("${PLUGINS_AI_RESEARCH[@]}") ;;
-                pua)            pkgs+=("${PLUGINS_PUA[@]}") ;;
-                all)            pkgs+=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}" "${PLUGINS_AI_RESEARCH[@]}" "${PLUGINS_PUA[@]}") ;;
+                all)            pkgs+=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_AI_RESEARCH[@]}") ;;
             esac
         done
     fi
@@ -1769,7 +1766,7 @@ _install_settings_from() {
             fi
             # Apply enabledPlugins selection filter. Catalogue = source keys ∪ selection,
             # so plugins picked in the menu that aren't declared in the shipped
-            # settings.json (codex, health, pua) still land as true.
+            # settings.json (e.g. codex) still land as true.
             if $INSTALL_PLUGINS && command -v jq &>/dev/null && [[ -f "$CLAUDE_DIR/settings.json" ]]; then
                 local sel_json; sel_json="$(_effective_selected_plugins_json)"
                 local tmp; tmp="$(jq --argjson selected "$sel_json" '
@@ -1876,8 +1873,8 @@ _install_settings_from() {
     (if $apply_sel then
        (
          # Known catalogue = $base keys + $sel keys (so plugins picked in the menu
-         # that are not declared in the shipped settings.json — e.g. codex, health,
-         # pua — still land in enabledPlugins as true).
+         # that are not declared in the shipped settings.json — e.g. codex —
+         # still land in enabledPlugins as true).
          (($base.enabledPlugins // {}) + $sel) as $catalogue |
          ($catalogue | to_entries
            | map({key, value: ($sel[.key] // false)}) | from_entries) as $known_map |
@@ -3785,9 +3782,7 @@ build_plugin_catalogue() {
     local all=(
         "${PLUGINS_ESSENTIAL[@]}"
         "${PLUGINS_OPTIONAL[@]}"
-        "${PLUGINS_CLAUDE_MEM[@]}"
         "${PLUGINS_AI_RESEARCH[@]}"
-        "${PLUGINS_PUA[@]}"
     )
     local seen="" entry
     for entry in "${all[@]}"; do
@@ -3957,17 +3952,11 @@ install_plugins() {
                 # "essential" (see parse_args). PLUGINS_OPTIONAL (e.g. ecc@ecc) is
                 # surfaced via SELECTED_PLUGINS or the "all" group, never as an
                 # "optional" group token, so it can never reach this case.
-                claude-mem)
-                    plugins+=("${PLUGINS_CLAUDE_MEM[@]}")
-                    ;;
                 ai-research)
                     plugins+=("${PLUGINS_AI_RESEARCH[@]}")
                     ;;
-                pua)
-                    plugins+=("${PLUGINS_PUA[@]}")
-                    ;;
                 all)
-                    plugins+=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}" "${PLUGINS_AI_RESEARCH[@]}" "${PLUGINS_PUA[@]}")
+                    plugins+=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_AI_RESEARCH[@]}")
                     ;;
             esac
         done
@@ -3997,8 +3986,6 @@ install_plugins() {
         "ecc|affaan-m/everything-claude-code"
         "ai-research-skills|zechenzhangAGI/AI-research-SKILLs"
         "claude-plugins-official|anthropics/claude-plugins-official"
-        "thedotmack|thedotmack/claude-mem"
-        "pua-skills|tanweai/pua"
         "openai-codex|openai/codex-plugin-cc"
         "karpathy-skills|forrestchang/andrej-karpathy-skills"
         "frontend-slides|zarazhangrui/frontend-slides"
@@ -4131,6 +4118,29 @@ prune_retired_plugins() {
             warn "Could not remove retired marketplace: $mkt"
         fi
     done
+    prune_retired_github_mcp
+}
+
+# Remove the retired user-scope GitHub MCP server that very early releases
+# registered. Only an entry that is still named "github" AND still points at
+# RETIRED_GITHUB_MCP_URL is ours; any other "github" server is the user's.
+prune_retired_github_mcp() {
+    command -v claude &>/dev/null || return 0
+    command -v jq &>/dev/null || return 0
+    # User-scope MCP servers live in ~/.claude.json; reading it avoids
+    # `claude mcp list`, which health-checks every configured server.
+    local cfg="$HOME/.claude.json"
+    [[ -f "$cfg" ]] || return 0
+    jq -e --arg u "$RETIRED_GITHUB_MCP_URL" \
+        '(.mcpServers.github.url // "") as $x | ($x == $u or $x == ($u | rtrimstr("/")))' \
+        "$cfg" >/dev/null 2>&1 || return 0
+    if $DRY_RUN; then
+        info "Would remove retired MCP server: github ($RETIRED_GITHUB_MCP_URL)"
+    elif claude mcp remove github --scope user >/dev/null 2>&1; then
+        ok "Removed retired MCP server: github"
+    else
+        warn "Could not remove retired MCP server: github (remove it with: claude mcp remove github --scope user)"
+    fi
 }
 
 # Reconcile installed plugins against this run's selection: uninstall every
@@ -4538,7 +4548,7 @@ uninstall() {
     fi
 
     if command -v claude &>/dev/null; then
-        local all_plugins=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_CLAUDE_MEM[@]}" "${PLUGINS_AI_RESEARCH[@]}" "${PLUGINS_PUA[@]}" "${PLUGINS_REMOVED[@]}")
+        local all_plugins=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_AI_RESEARCH[@]}" "${PLUGINS_REMOVED[@]}")
         for entry in "${all_plugins[@]}"; do
             local plugin_name="${entry%%@*}"
             claude plugin uninstall "$entry" 2>/dev/null && \
@@ -5347,7 +5357,6 @@ main() {
             # Implicit (non-TTY fallback): essential plugins plus the
             # default-selected third-party plugins, so a `curl | bash` install
             # without --all still brings them along.
-            # claude-mem is default OFF and only ships with explicit --all.
             # No MCP server is registered here: lark-mcp needs credentials, and
             # the standalone playwright MCP would take the `playwright` name at
             # user scope and shadow the playwright plugin this same branch
