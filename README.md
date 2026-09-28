@@ -30,10 +30,10 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 
 Launches a two-level interactive selector: 47 items in 11 groups, 29 of them on by default. On Windows, `install.ps1` offers 40 items in 10 groups; the model backends, shell wrapper, co-author and Matt skills are macOS/Linux only for now. Flags (PowerShell spelling in parentheses):
 
-- `--all` (`-All`): skip the menu and install every item except the opt-in storage-analyzer.
+- `--all` (`-All`): skip the menu and install every item except the opt-in storage-analyzer. Additive: nothing is removed.
 - `--only <ids>` (`-Only`): install just the listed menu items, comma-separated. Additive: nothing is removed, plugins are not reconciled, `enabledPlugins` is not rebuilt and the version stamp is not written.
 - `--list-ids` (`-ListIds`): print every menu ID with its default and group.
-- `--prune-foreign-plugins` (`-PruneForeignPlugins`): also reconcile plugins the installer does not manage (see below).
+- `--prune-foreign-plugins` (`-PruneForeignPlugins`): on an interactive run, also reconcile plugins the installer does not manage (see below).
 - `--dry-run` (`-DryRun`), `--uninstall` (`-Uninstall`), `--force` (`-Force`), `--version` (`-Version`).
 
 ```
@@ -55,9 +55,18 @@ Launches a two-level interactive selector: 47 items in 11 groups, 29 of them on 
 - Shortcuts (any level): **a** all on, **n** all off, **d** defaults; in sub-menus these only affect that group.
 - The Review group's `adversarial-review` and `codex` are mutually exclusive — selecting one deselects the other.
 
-**Re-running the installer reconciles the plugins it manages.** Catalogue plugins you did not select this run are uninstalled, along with any marketplace no remaining plugin needs; plugins outside the installer's catalogue are left alone unless you pass `--prune-foreign-plugins`. Uninstalls are not reversible, so preview with `--dry-run` first. Selecting no plugins at all reconciles nothing, and `--only` never reconciles.
+**Re-running the interactive installer: unchecked means removed.** The menu opens with what is already installed checked; anything not installed starts at its default, except items you unchecked on an earlier interactive run, which stay unchecked. Submitting it unchanged changes nothing. Every item you leave unchecked is removed on submit, but only what the installer put there:
 
-**Every run, including `--only`, removes retired items:** the github plugin, the old user-scope GitHub MCP server (only when it points at `api.githubcopilot.com/mcp/`), and the claude-mem and PUA plugins with their marketplaces. If you still use claude-mem, read the [migration note](docs/migration.md#removed-integrations) before upgrading. Each run records its selection in `~/.claude/agent-config/selection.json`, so `edit-config` can take over later.
+- Plugins from the installer's catalogue (code-review and codex included) are uninstalled, and so are the marketplaces no remaining plugin needs (never `claude-plugins-official`). Plugins you installed yourself stay unless you pass `--prune-foreign-plugins`. Unchecking every plugin item uninstalls all catalogue plugins.
+- Skills, language rules, the writing-style rule, DeepXiv skills, the search agent, the Matt skills and pinned upstream skills are deleted. A copy you edited is first moved to `~/.claude/agent-config/backups/<timestamp>-deselect/` (pinned upstream skills: `agent-config/backups/<id>/`), and the installer says so.
+- The Playwright and Lark MCP servers are removed only when their command is the one the installer registers (`npx @playwright/mcp` / `npx @larksuiteoapi/lark-mcp`); a same-name server of your own is kept, with a warning.
+- StatusLine removes the `statusLine` setting (only when it runs `~/.claude/hooks/statusline.sh`) and that script. Lessons removes the SessionStart hook and keeps `lessons.md`. Co-authored-by sets `includeCoAuthoredBy` to `false`.
+- The launcher (Shell wrapper, with every model backend unchecked) removes `claude.zsh`, `system-prompt.txt` and a `source ~/.claude/claude.zsh` line in `~/.zshrc` that matches exactly (the rc file is backed up first; other forms get a warning). `profiles/` and `default-profile` hold your API keys and are always kept, also for an unchecked backend.
+- CLAUDE.md and settings.json are never deleted; unchecking them only stops the installer from updating them.
+
+`--all`, `--only` and a run without a terminal (for example `curl | bash` in CI) are additive: they install what they select and remove nothing. Removals cannot be undone, so preview with `--dry-run`, which lists every removal and every backup.
+
+**Every run, additive ones included, removes retired items:** the github plugin, the old user-scope GitHub MCP server (only when it points at `api.githubcopilot.com/mcp/`), and the claude-mem and PUA plugins with their marketplaces. If you still use claude-mem, read the [migration note](docs/migration.md#removed-integrations) before upgrading. Each run records its selection in `~/.claude/agent-config/selection.json`, so `edit-config` can take over later.
 
 ### Option B — agent-guided setup (Claude or Codex)
 

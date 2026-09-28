@@ -30,10 +30,10 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 
 启动两级交互菜单：11 个分组共 47 项，其中 29 项默认开启。Windows 上的 `install.ps1` 提供 10 个分组共 40 项；模型后端、shell wrapper、co-author 与 Matt skills 目前只支持 macOS / Linux。参数（括号内为 PowerShell 写法）：
 
-- `--all`（`-All`）：跳过菜单，安装除可选 storage-analyzer 之外的全部条目。
+- `--all`（`-All`）：跳过菜单，安装除可选 storage-analyzer 之外的全部条目。增量安装：不删除任何内容。
 - `--only <ids>`（`-Only`）：只安装列出的菜单项，逗号分隔。增量安装：不删除其他内容、不对账插件、不重建 `enabledPlugins`、不写版本戳。
 - `--list-ids`（`-ListIds`）：列出全部菜单 ID、默认值与分组。
-- `--prune-foreign-plugins`（`-PruneForeignPlugins`）：对账时也处理安装器不管理的插件（见下文）。
+- `--prune-foreign-plugins`（`-PruneForeignPlugins`）：交互式运行对账时，也处理安装器不管理的插件（见下文）。
 - `--dry-run`（`-DryRun`）、`--uninstall`（`-Uninstall`）、`--force`（`-Force`）、`--version`（`-Version`）。
 
 ```
@@ -55,9 +55,18 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 - 快捷键（任意层级）：**a** 全选，**n** 全不选，**d** 恢复默认；在子菜单中只作用于当前分组。
 - Review 分组中 `adversarial-review` 与 `codex` 互斥——选中一个会取消另一个。
 
-**重跑安装器会对账它管理的插件。** 本次未勾选的目录内插件会被卸载，不再被任何存活插件需要的 marketplace 也会移除；安装器目录之外的插件保持不动，除非传入 `--prune-foreign-plugins`。卸载不可逆，建议先用 `--dry-run` 预览。一个插件都没勾选时，对账不做任何动作；`--only` 从不对账。
+**交互式重跑安装器：取消勾选即删除。** 菜单打开时，已安装的条目处于勾选状态；未安装的条目按默认值显示，但你在之前某次交互式运行中取消勾选过的条目保持未勾选。原样提交不会改变任何东西。提交时，所有未勾选的条目都会被删除，但只删除安装器自己装上的内容：
 
-**每次运行（包括 `--only`）都会清理已退役的条目：** github 插件、旧的 user scope GitHub MCP 服务（仅当它指向 `api.githubcopilot.com/mcp/`），以及 claude-mem、PUA 插件和它们的 marketplace。仍在使用 claude-mem 的话，升级前请先读[迁移说明](docs/migration.md#removed-integrations)。每次运行都会把选择记录到 `~/.claude/agent-config/selection.json`，之后可以交给 `edit-config` 接管。
+- 安装器目录内的插件（包括 code-review 和 codex）会被卸载，不再被任何剩余插件需要的 marketplace 也会移除（`claude-plugins-official` 除外）。你自己安装的插件保留，除非传入 `--prune-foreign-plugins`。把所有插件项都取消勾选，会卸载全部目录内插件。
+- skill、语言规则、writing-style 规则、DeepXiv skill、搜索 agent、Matt skills 和固定版本的上游 skill 会被删除。你改过的副本会先移到 `~/.claude/agent-config/backups/<时间戳>-deselect/`（固定版本上游 skill 移到 `agent-config/backups/<id>/`），安装器会提示。
+- Playwright 和 Lark MCP 服务只在其命令与安装器注册的一致时（`npx @playwright/mcp` / `npx @larksuiteoapi/lark-mcp`）才移除；你自己注册的同名服务保留，并给出警告。
+- StatusLine：删除 `statusLine` 设置（仅当它运行 `~/.claude/hooks/statusline.sh`）和这个脚本。Lessons：删除 SessionStart hook，保留 `lessons.md`。Co-authored-by：把 `includeCoAuthoredBy` 设为 `false`。
+- 启动器（Shell wrapper，且所有模型后端都未勾选）：删除 `claude.zsh`、`system-prompt.txt`，以及 `~/.zshrc` 中完全一致的 `source ~/.claude/claude.zsh` 这一行（先备份 rc 文件；其他写法只给警告）。`profiles/` 和 `default-profile` 存有你的 API key，始终保留，取消勾选某个后端时也一样。
+- CLAUDE.md 和 settings.json 不会被删除；取消勾选只表示安装器不再更新它们。
+
+`--all`、`--only` 以及没有终端的运行（例如 CI 里的 `curl | bash`）都是增量的：只安装选中的内容，不删除任何东西。删除不可撤销，建议先用 `--dry-run` 预览，它会列出每一项删除和备份。
+
+**每次运行（包括增量运行）都会清理已退役的条目：** github 插件、旧的 user scope GitHub MCP 服务（仅当它指向 `api.githubcopilot.com/mcp/`），以及 claude-mem、PUA 插件和它们的 marketplace。仍在使用 claude-mem 的话，升级前请先读[迁移说明](docs/migration.md#removed-integrations)。每次运行都会把选择记录到 `~/.claude/agent-config/selection.json`，之后可以交给 `edit-config` 接管。
 
 ### 方式 B —— agent 引导安装（Claude 或 Codex）
 

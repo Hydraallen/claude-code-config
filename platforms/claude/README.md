@@ -117,7 +117,8 @@ bash install.sh --only shell-wrapper,backend-glm
 
 运行前告知用户这些副作用：
 
-- `--only` 是增量安装：不对账插件、不重建 `enabledPlugins`、不写版本戳，只追加 selection.json 中的 `script_installer.script_only` 记录。
+- `--only` 是增量安装：不删除任何内容、不对账插件、不重建 `enabledPlugins`、不写版本戳，只追加 selection.json 中的 `script_installer.script_only` 记录。
+- 不要替用户运行不带参数的 `install.sh` / `install.ps1`：交互菜单提交时会删除所有未勾选的已安装条目（仅限脚本装上的内容，改动过的文件先备份）。
 - 每次运行都会安装 image-gen skill 及其包装器，并执行退役清理：卸载 `github@claude-plugins-official`、`claude-mem@thedotmack`、`pua@pua-skills` 及 thedotmack、pua-skills marketplace，移除指向 `api.githubcopilot.com/mcp/` 的旧 user scope `github` MCP。仍在使用 claude-mem 的用户须先确认，见[迁移说明](../../docs/migration.md#removed-integrations)。
 - shell-wrapper、co-author 与各后端只支持 macOS / Linux；`install.ps1 -Only <ids>` 不提供这些菜单项。
 - 后端需要用户自己填写凭据或登录，见 [BACKENDS](../../docs/BACKENDS.zh-CN.md)。

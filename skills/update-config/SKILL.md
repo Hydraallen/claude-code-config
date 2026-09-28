@@ -50,7 +50,10 @@ On Windows (PowerShell) the equivalent is:
 ```
 
 This launches the interactive component selector (without a terminal it falls back to the
-default selection). The installer handles:
+default selection, which only adds and never removes). The selector opens with what is
+installed already checked; anything the user unchecks is removed on submit (installer-owned
+items only, edited files backed up to `~/.claude/agent-config/backups/`). Tell the user this
+before running it. The installer handles:
 - Smart merging of `settings.json` (preserves user customizations)
 - Version stamping
 - Font and dependency installation

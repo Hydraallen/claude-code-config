@@ -30,7 +30,7 @@ python3 scripts/managed_files.py --root "$target_dir" remove skills/paper-readin
 
 Use `--agent claude` for a Claude home. Each agent has its own blank template under `platforms/<agent>/templates/lessons.md`; the helper never infers the agent from a directory name. Existing lessons are always preserved, including when upgrading from the previous shared blank template. Never deploy the repository's project lessons as global memory.
 
-The last command is only for an explicit removal request. Only helper-created, unchanged copies are removable. JSON/TOML merge targets cannot be removed with this operation.
+The last command is only for an explicit removal request. Only helper-created, unchanged copies are removable; the removed copy is moved to `agent-config/backups/<id>/`. `remove --backup-modified` also removes a locally modified copy the same way (the script installers use it when a pinned skill is unchecked in their interactive selector). JSON/TOML merge targets cannot be removed with this operation.
 
 ## Partial configuration merge
 

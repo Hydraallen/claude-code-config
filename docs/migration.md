@@ -83,7 +83,7 @@ Codex 关闭 `desktop.external-agent-import-sync-enabled`。旧 `model_instructi
 
 现有同内容文件可以复用；不同内容的 AGENTS/CLAUDE、skills、hooks 或配置先备份并准备具体合并。旧版 marker、npx lock 和导入 cache 仅作为识别线索，不自动证明新工具拥有删除权。数据库和真实 lessons 不搬移、不清空。
 
-在本 fork 中，`install.sh` / `install.ps1` 仍是受支持的安装器（交互菜单、`--all`、`--only`、`--list-ids`、`--dry-run`、`--uninstall` 等）；agent 引导安装使用同一份当前仓库的 INSTALL.md。两条路径共用 `agent-config/selection.json`：脚本写入的条目带 `"source": "script"`，完整选择只替换脚本自己写入的条目，agent 写入的条目保留。
+在本 fork 中，`install.sh` / `install.ps1` 仍是受支持的安装器（交互菜单、`--all`、`--only`、`--list-ids`、`--dry-run`、`--uninstall` 等）；agent 引导安装使用同一份当前仓库的 INSTALL.md。两条路径共用 `agent-config/selection.json`：脚本写入的条目带 `"source": "script"`，agent 写入的条目保留。只有交互式运行会删除未勾选的条目（仅限脚本自己装上的内容，改动过的文件先备份到 `agent-config/backups/`，见 [README](../README.zh-CN.md)），也只有它会替换脚本写入的记录；`--all`、`--only` 与无终端运行是增量的，保留已有记录。4.2.0 起交互菜单按已安装状态预先勾选，交互式运行在 `script_installer.deselected` 中记下未勾选的菜单 ID。
 
 文件归属、hash 和备份由 `agent-config/files.json` 保存；agent 的选择/原生操作记录由 `agent-config/selection.json` 保存。失败或中断后先恢复/核实真实状态，避免把计划当成成功。卸载只处理明确选择且归属可靠的内容。
 

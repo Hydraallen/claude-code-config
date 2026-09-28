@@ -12,6 +12,9 @@
 - **两个安装器新增默认关闭的条目：** `skill-neat-freak`、`lieflat-charts`、`skill-storage-analyzer`（新的 Storage 分组）、`researchstudio-idea`，以及 `ai-research`——它把六个 AI Research 插件 ID（`plug-tokenization`、`plug-fine-tuning`、`plug-post-training`、`plug-inference-serving`、`plug-distributed-training`、`plug-optimization`）合并为一项。install.sh 现有 11 个分组共 47 项（29 项默认开启）；install.ps1 为 10 个分组共 40 项。PowerShell 的 StatusLine ID 改为 `statusline`，旧 ID `hooks` 仍可用。
 - **新参数：** `--only <ids>` / `-Only` 只安装列出的菜单项，且为增量安装：不对账插件、不重建 `enabledPlugins`、不写版本戳。`--list-ids` / `-ListIds` 列出菜单 ID。`--prune-foreign-plugins` / `-PruneForeignPlugins` 让对账也处理安装器不管理的插件。`cleanup-claude-data.sh` 的 `--include-mem` 仍被接受，但不再起作用。
 - **插件对账范围默认改为 `catalogue`：** 重跑时只卸载安装器自己目录中未勾选的插件（外加退役条目），不再卸载用户手动安装的第三方插件。
+- **重跑语义：菜单显示已安装状态，取消勾选即删除。** 两个安装器的交互菜单现在按检测到的安装状态打开：插件看 `installed_plugins.json`，skill / 规则 / agent / 启动器看磁盘上的文件，固定版本 skill 看 `agent-config/files.json` 中的记录，MCP 服务看其命令是否为安装器注册的那一个，statusLine、lessons hook 与 `includeCoAuthoredBy` 看 settings.json。未安装的条目按默认值显示，但之前某次交互式运行中取消勾选的条目（记录在 selection.json 的 `script_installer.deselected`）保持未勾选。原样提交不做任何改动；所有未勾选的条目都会按归属删除：目录内插件（现在包括 code-review 与 codex，以前只是停用）及不再需要的 marketplace、脚本自有 skill、语言规则、writing-style、固定版本上游 skill、DeepXiv skill、搜索 agent、Matt skill 子集、仅当运行安装器 `npx` 包时的 lark/playwright MCP、statusLine 与 `hooks/statusline.sh`、lessons SessionStart hook（保留 `lessons.md`）、co-author（`includeCoAuthoredBy` 设为 `false`）以及启动器（`claude.zsh`、`system-prompt.txt` 和 `~/.zshrc` 中完全一致的 `source ~/.claude/claude.zsh` 行；`profiles/` 与 `default-profile` 始终保留）。整组取消勾选时，该组条目同样会被删除。
+- **删除前备份：** 安装器要删除的文件若与它装上的内容不同（以新文件 `agent-config/script-owned.tsv` 中记录的摘要为准，没有记录时与当前源码中的副本比较），会先移到 `agent-config/backups/<时间戳>-deselect/` 并给出提示；删除 `~/.zshrc` 中那一行前也会先备份该文件。固定版本上游 skill 使用新增的 `managed_files.py remove --backup-modified`。`--dry-run` 会预览每一项删除与备份。
+- **增量运行：** `--all`、`--only` 与没有终端的运行不删除、不停用任何内容（以前无终端的默认运行会卸载 AI Research 插件包并停用未选插件），保留 selection.json 中已有的记录，并更新本次没有重装的已安装插件。只有退役条目仍在每次运行时清理。
 - **humanizer** 改为安装上游插件 `humanizer@humanizer`（blader/humanizer，需要 Claude Code 2.1.142 或更高），调用名 `/humanizer:humanizer`。**humanizer-zh** 固定在 op7418/Humanizer-zh@`91f3d39`。旧的内置副本只在未修改时删除。
 - **写作规则取代 Common rules**（菜单 `rules-writing-style`，默认开启）。已有的 `~/.claude/rules/common/` 只给出警告，不会删除。
 - **共享选择记录：** 安装器写入 `~/.claude/agent-config/selection.json`（仓库 URL、revision、更新策略，以及标记为 `"source": "script"` 的逐项记录），便于 `edit-config` 接管；安装器装的固定版本上游 skill 记录在 `agent-config/files.json`。`update-config` 与 `edit-config` 改为指向 Hydraallen/claude-code-config。
@@ -22,7 +25,10 @@
 - 保留两条安装路径，是为了同时照顾想一次性勾选菜单的用户和希望 agent 逐项解释的用户；共用模板与 `selection.json` 避免两边分叉，`check-catalog-sync.sh` 负责发现目录与菜单之间的偏差。
 - claude-mem、PUA、GitHub 采用主动清理，因为只从菜单隐藏的插件会继续从旧安装中运行。GitHub MCP 的清理只匹配本仓库曾经注册的 URL，用户自己配置的 `github` 服务不受影响。
 - Lark 因 fork 作者仍在使用而保留；由于需要凭据且内存占用高，继续默认关闭、不推荐。
-- 对账范围改为 `catalogue`，重跑不会再卸载用户手动安装的插件；原先处理全部插件的行为仍可通过参数启用。
+- 对账范围改为 `catalogue`，重跑不会再卸载用户手动安装的插件；原先处理全部插件的行为仍可在交互式运行中通过参数启用。
+- 菜单从已安装状态开始，交互式运行就等于“编辑我的配置”：看到勾选的就会保留，只按了提交的用户不会被删除动作吓到。记住有意取消勾选的条目，可以避免默认开启的条目每次重跑都重新被勾上；新版本新增的条目仍从默认值开始。
+- 只有交互式运行会删除内容，因为只有它让用户看过并回答了每一项；`--all`、`--only` 和无人值守运行分不清“没选”和“没问”。
+- 改动过的文件选择备份而不是保留：用户已经要求移除该条目，把文件挪开既能找回改动，又不会留下删了一半、仍被 Claude Code 加载的条目。
 - `--only` 设计为增量安装，agent 路径与脚本自动化可以只加一项，而不必对账其他全部内容。
 - `edit-config` 把上游仓库视为不同来源而不是别名，因为 fork 的目录、安装器与默认值都与上游不同。
 
@@ -30,8 +36,11 @@
 - **claude-mem 用户注意：** 升级到 4.2.0 后第一次运行安装器就会卸载 claude-mem 插件及其 marketplace。数据目录不会删除，但插件和它的 hooks 不再运行。升级前请阅读 `docs/migration.md#removed-integrations`。
 - **版本号重名：** 上游也发布过 2.9.0 – 3.2.0（归档在 `platforms/claude/CHANGELOG.previous.zh-CN.md`），本 fork 下方同一区间也有自己的版本；号码相同，内容不同。本 fork 合并上游 4.1.0 后直接升到 4.2.0；本地的上游 tag 不推送。
 - **install.ps1 仍有缺口：** 尚不支持模型后端、shell wrapper、co-author 与 Matt skills（见 `check-catalog-sync.sh` 中的 `PS1_MISSING_MENU_IDS`）。
-- **本版本没有在 PowerShell 中实际运行 install.ps1**（环境中没有 `pwsh`），只做了静态检查。
-- `--uninstall` 不会移除 code-review 与 codex 插件。
+- **本版本没有在 Windows PowerShell 中完整运行 install.ps1。** 它能在 PowerShell 7（Linux 容器）中通过解析，`tests/install_ps1_rerun.ps1` 在该环境中测试了检测、取消勾选删除、退役 Matt 清理与选择记录；整个安装器只做了静态检查。install.ps1 没有启动器、后端、co-author 与 Matt 条目，这些删除只存在于 install.sh。
+- 安装器自己从不添加 `source ~/.claude/claude.zsh` 这一行；取消勾选启动器时，只删除与这段文字完全一致的行，也就是安装器提示用户添加的那一行。
+- `--prune-foreign-plugins` 现在只扩大交互式运行的对账范围；在 `--all` 和无人值守运行中不起作用。
+- `--uninstall` 现在也会移除 code-review 与 codex 插件。
+- 升级后的第一次交互式运行还没有 `deselected` 记录，因此未安装的默认开启条目会显示为勾选；取消勾选一次后，之后的运行会记住。
 - 脚本默认值与 catalog 推荐在少数地方有意不同：语言规则在脚本中默认开启，但上游不推荐；neat-freak 与 adversarial-review 在上游推荐，但脚本中默认关闭。详见 catalog.md 的推荐依据。
 - 已有安装在安装器或 edit-config 重新部署之前，保留原来的 CLAUDE.md、规则与设置。
 
