@@ -16,11 +16,22 @@
 # Wrap in & { param() ... } to isolate parameter scope.
 # In `irm | iex` mode, $args in the outer scope may contain garbage tokens
 # (e.g. "adversarial-review") leaked from script parsing. We filter $args
-# to only pass recognized switch-style arguments (starting with "-").
-$_safeArgs = @( $args | Where-Object { $_ -is [string] -and $_ -match '^-' } )
+# to only pass recognized switch-style arguments (starting with "-"), plus the
+# single value that follows -Only (its menu ID list).
+$_safeArgs = @()
+$_takeValue = $false
+foreach ($_a in $args) {
+    if ($_takeValue) { $_safeArgs += $_a; $_takeValue = $false; continue }
+    if ($_a -is [string] -and $_a -match '^-') {
+        $_safeArgs += $_a
+        if ($_a -match '^-Only$') { $_takeValue = $true }
+    }
+}
 & {
 param(
     [switch]$All,
+    [string[]]$Only = @(),
+    [switch]$ListIds,
     [switch]$Uninstall,
     [switch]$Version,
     [switch]$DryRun,
@@ -452,16 +463,16 @@ function Get-MarketplacesToRemove {
     return $result
 }
 
-# --- Interactive menu ------------------------------------------------------
-
-function Show-InteractiveMenu {
-    # Two-level menu: groups contain items, Enter opens sub-menu
-    $groups = @(
+# --- Menu definition -------------------------------------------------------
+# Single source of truth for the selectable items: Show-InteractiveMenu, -Only
+# and scripts/check-catalog-sync.sh read it. Item IDs match install.sh.
+function Get-MenuGroups {
+    return @(
         @{ Label = "Core"; Hint = ""; Items = @(
             @{ Label = "CLAUDE.md";       Desc = "Global instructions template";      Default = $true;  Id = "claude-md" }
             @{ Label = "settings.json";   Desc = "Smart-merged Claude Code settings"; Default = $true;  Id = "settings" }
             @{ Label = "Writing style rule"; Desc = "Complete English writing rule (rules/writing-style.md)"; Default = $true; Id = "rules-writing-style" }
-            @{ Label = "StatusLine";      Desc = "Gradient bars + Anthropic/GLM 5h quota"; Default = $true; Id = "hooks" }
+            @{ Label = "StatusLine";      Desc = "Gradient bars + Anthropic/GLM 5h quota"; Default = $true; Id = "statusline" }
             @{ Label = "Lessons";         Desc = "lessons.md template + SessionStart hook"; Default = $true; Id = "lessons" }
             @{ Label = "Search agent";    Desc = "Jeff read-only web search agent"; Default = $true; Id = "agents" }
         )}
@@ -523,6 +534,111 @@ function Show-InteractiveMenu {
             @{ Label = "Lark/Feishu MCP"; Desc = "Feishu/Lark integration -- needs App ID/Secret, ~1GB RAM/session"; Default = $false; Id = "mcp-lark" }
         )}
     )
+}
+
+# Every menu item ID, in menu order.
+function Get-MenuItemIds {
+    $ids = @()
+    foreach ($g in (Get-MenuGroups)) { foreach ($it in $g.Items) { $ids += $it.Id } }
+    return $ids
+}
+
+# Map selected menu item IDs to install flags. -FullSelection marks a complete
+# (interactive) selection, the only case in which deselected items are removed;
+# -Only passes $false so the run is additive. Mirrors apply_menu_id in install.sh.
+function ConvertTo-MenuSelection {
+    param([string[]]$Ids = @(), [bool]$FullSelection = $true)
+    # Plugin ID -> package mapping
+    $pluginMap = @{
+        "plug-andrej-karpathy-skills" = "andrej-karpathy-skills@karpathy-skills"
+        "plug-everything-claude-code" = "ecc@ecc"
+        "plug-superpowers" = "superpowers@claude-plugins-official"
+        "plug-frontend-slides" = "frontend-slides@frontend-slides"
+        "plug-ppt-master" = "ppt-master@ppt-master"
+        "plug-context7" = "context7@claude-plugins-official"
+        "plug-commit-commands" = "commit-commands@claude-plugins-official"
+        "plug-document-skills" = "document-skills@anthropic-agent-skills"
+        "plug-playwright" = "playwright@claude-plugins-official"
+        "plug-feature-dev" = "feature-dev@claude-plugins-official"
+        "plug-code-simplifier" = "code-simplifier@claude-plugins-official"
+        "plug-ralph-loop" = "ralph-loop@claude-plugins-official"
+        "plug-example-skills" = "example-skills@anthropic-agent-skills"
+        "review-code-review" = "code-review@claude-plugins-official"
+    }
+
+    # Map selections to return value
+    $result = @{
+        ClaudeMd           = $false
+        Settings           = $false
+        Rules              = $false
+        WritingStyle       = $false
+        RuleLangs          = @()
+        RuleLangsExplicit  = $FullSelection
+        Hooks              = $false
+        Lessons            = $false
+        Skills             = $false
+        SelectedSkills     = @()
+        Agents             = $false
+        Plugins            = $false
+        SelectedPlugins    = @()
+        PluginGroups       = @()
+        Mcp                = $false
+        Lark               = $false
+        DeepXiv            = $false
+        DeepXivSkills      = @()
+        UpstreamSkills     = @()
+        FullSelection      = $FullSelection
+        ReviewAdversarial  = $false
+        ReviewCodex        = $false
+        ReviewCodeReview   = $false
+    }
+
+    foreach ($id in $Ids) {
+        switch -Wildcard ($id) {
+            "claude-md"          { $result.ClaudeMd = $true }
+            "settings"           { $result.Settings = $true }
+            "rules-writing-style" { $result.Rules = $true; $result.WritingStyle = $true }
+            "statusline"         { $result.Hooks = $true }
+            "hooks"              { $result.Hooks = $true }   # pre-4.2.0 id of the StatusLine item
+            "lessons"            { $result.Lessons = $true }
+            "agents"             { $result.Agents = $true }
+            "rules-python"       { $result.Rules = $true; $result.RuleLangs += "python" }
+            "rules-ts"           { $result.Rules = $true; $result.RuleLangs += "typescript" }
+            "rules-go"           { $result.Rules = $true; $result.RuleLangs += "golang" }
+            "review-code-review" { $result.ReviewCodeReview = $true; $result.Plugins = $true; $result.SelectedPlugins += "code-review@claude-plugins-official" }
+            "review-adversarial" { $result.ReviewAdversarial = $true; $result.Skills = $true; $result.SelectedSkills += "adversarial-review" }
+            "review-codex"       { $result.ReviewCodex = $true; $result.Plugins = $true; $result.SelectedPlugins += "codex@openai-codex" }
+            "skill-paper-reading"  { $result.Skills = $true; $result.SelectedSkills += "paper-reading" }
+            "skill-cheatsheet-creator" { $result.Skills = $true; $result.SelectedSkills += "cheatsheet-creator" }
+            "skill-storage-analyzer" { $result.Skills = $true; $result.SelectedSkills += "storage-analyzer" }
+            "skill-humanizer"      { $result.Plugins = $true; $result.SelectedPlugins += "humanizer@humanizer" }
+            "skill-humanizer-zh"   { $result.UpstreamSkills += "humanizer-zh" }
+            "skill-neat-freak"     { $result.UpstreamSkills += "neat-freak" }
+            "lieflat-charts"       { $result.UpstreamSkills += "lieflat-charts" }
+            "researchstudio-idea"  { $result.UpstreamSkills += "researchstudio-idea" }
+            "ai-research"          { $result.Plugins = $true; $result.SelectedPlugins += $PLUGINS_AI_RESEARCH }
+            "skill-update-config"  { $result.Skills = $true; $result.SelectedSkills += "update-config" }
+            "deepxiv-cli"          { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-cli" }
+            "deepxiv-trending-digest" { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-trending-digest" }
+            "deepxiv-baseline-table"  { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-baseline-table" }
+            "mcp"                { $result.Mcp = $true }
+            "mcp-lark"           { $result.Lark = $true }
+            "plug-*"             {
+                $result.Plugins = $true
+                if ($pluginMap.ContainsKey($id)) { $result.SelectedPlugins += $pluginMap[$id] }
+            }
+        }
+    }
+
+    return $result
+}
+
+# --- Interactive menu ------------------------------------------------------
+
+function Show-InteractiveMenu {
+    # Two-level menu: groups contain items, Enter opens sub-menu.
+    # Item data comes from Get-MenuGroups (shared with -Only).
+    $groups = Get-MenuGroups
 
     # Flatten groups into parallel arrays
     $allItems = @()
@@ -712,91 +828,9 @@ function Show-InteractiveMenu {
         [Console]::CursorVisible = $savedCursorVisible
     }
 
-    # Plugin ID -> package mapping
-    $pluginMap = @{
-        "plug-andrej-karpathy-skills" = "andrej-karpathy-skills@karpathy-skills"
-        "plug-everything-claude-code" = "ecc@ecc"
-        "plug-superpowers" = "superpowers@claude-plugins-official"
-        "plug-frontend-slides" = "frontend-slides@frontend-slides"
-        "plug-ppt-master" = "ppt-master@ppt-master"
-        "plug-context7" = "context7@claude-plugins-official"
-        "plug-commit-commands" = "commit-commands@claude-plugins-official"
-        "plug-document-skills" = "document-skills@anthropic-agent-skills"
-        "plug-playwright" = "playwright@claude-plugins-official"
-        "plug-feature-dev" = "feature-dev@claude-plugins-official"
-        "plug-code-simplifier" = "code-simplifier@claude-plugins-official"
-        "plug-ralph-loop" = "ralph-loop@claude-plugins-official"
-        "plug-example-skills" = "example-skills@anthropic-agent-skills"
-        "review-code-review" = "code-review@claude-plugins-official"
-    }
-
-    # Map selections to return value
-    $result = @{
-        ClaudeMd           = $false
-        Settings           = $false
-        Rules              = $false
-        WritingStyle       = $false
-        RuleLangs          = @()
-        RuleLangsExplicit  = $true
-        Hooks              = $false
-        Lessons            = $false
-        Skills             = $false
-        SelectedSkills     = @()
-        Agents             = $false
-        Plugins            = $false
-        SelectedPlugins    = @()
-        PluginGroups       = @()
-        Mcp                = $false
-        Lark               = $false
-        DeepXiv            = $false
-        DeepXivSkills      = @()
-        UpstreamSkills     = @()
-        FullSelection      = $true
-        ReviewAdversarial  = $false
-        ReviewCodex        = $false
-        ReviewCodeReview   = $false
-    }
-
-    for ($i = 0; $i -lt $n; $i++) {
-        if (-not $selected[$i]) { continue }
-        $id = $allItems[$i].Id
-
-        switch -Wildcard ($id) {
-            "claude-md"          { $result.ClaudeMd = $true }
-            "settings"           { $result.Settings = $true }
-            "rules-writing-style" { $result.Rules = $true; $result.WritingStyle = $true }
-            "hooks"              { $result.Hooks = $true }
-            "lessons"            { $result.Lessons = $true }
-            "agents"             { $result.Agents = $true }
-            "rules-python"       { $result.Rules = $true; $result.RuleLangs += "python" }
-            "rules-ts"           { $result.Rules = $true; $result.RuleLangs += "typescript" }
-            "rules-go"           { $result.Rules = $true; $result.RuleLangs += "golang" }
-            "review-code-review" { $result.ReviewCodeReview = $true; $result.Plugins = $true; $result.SelectedPlugins += "code-review@claude-plugins-official" }
-            "review-adversarial" { $result.ReviewAdversarial = $true; $result.Skills = $true; $result.SelectedSkills += "adversarial-review" }
-            "review-codex"       { $result.ReviewCodex = $true; $result.Plugins = $true; $result.SelectedPlugins += "codex@openai-codex" }
-            "skill-paper-reading"  { $result.Skills = $true; $result.SelectedSkills += "paper-reading" }
-            "skill-cheatsheet-creator" { $result.Skills = $true; $result.SelectedSkills += "cheatsheet-creator" }
-            "skill-storage-analyzer" { $result.Skills = $true; $result.SelectedSkills += "storage-analyzer" }
-            "skill-humanizer"      { $result.Plugins = $true; $result.SelectedPlugins += "humanizer@humanizer" }
-            "skill-humanizer-zh"   { $result.UpstreamSkills += "humanizer-zh" }
-            "skill-neat-freak"     { $result.UpstreamSkills += "neat-freak" }
-            "lieflat-charts"       { $result.UpstreamSkills += "lieflat-charts" }
-            "researchstudio-idea"  { $result.UpstreamSkills += "researchstudio-idea" }
-            "ai-research"          { $result.Plugins = $true; $result.SelectedPlugins += $PLUGINS_AI_RESEARCH }
-            "skill-update-config"  { $result.Skills = $true; $result.SelectedSkills += "update-config" }
-            "deepxiv-cli"          { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-cli" }
-            "deepxiv-trending-digest" { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-trending-digest" }
-            "deepxiv-baseline-table"  { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-baseline-table" }
-            "mcp"                { $result.Mcp = $true }
-            "mcp-lark"           { $result.Lark = $true }
-            "plug-*"             {
-                $result.Plugins = $true
-                if ($pluginMap.ContainsKey($id)) { $result.SelectedPlugins += $pluginMap[$id] }
-            }
-        }
-    }
-
-    return $result
+    $ids = @()
+    for ($i = 0; $i -lt $n; $i++) { if ($selected[$i]) { $ids += $allItems[$i].Id } }
+    return (ConvertTo-MenuSelection -Ids $ids -FullSelection $true)
 }
 
 # --- Install functions -----------------------------------------------------
@@ -1109,7 +1143,8 @@ function Install-Rules {
     param(
         [string[]]$Langs = @(),
         [bool]$LangsExplicit = $false,
-        [bool]$WritingStyle = $true
+        [bool]$WritingStyle = $true,
+        [bool]$Additive = $false
     )
 
     Write-Info "Installing rules..."
@@ -1153,7 +1188,7 @@ function Install-Rules {
     $installLangs = @()
     if ($Langs.Count -gt 0) {
         $installLangs = $Langs
-    } elseif (-not $LangsExplicit) {
+    } elseif (-not $LangsExplicit -and -not $Additive) {
         # Auto-detect: install all available languages (--all mode)
         Get-ChildItem (Join-Path (Get-ClaudeTemplatesDir) "rules") -Directory | ForEach-Object {
             if ($_.Name -ne "common") { $installLangs += $_.Name }
@@ -3277,6 +3312,10 @@ Works with both local and remote installs (irm | iex).
 
 Options:
     -All                Install everything (non-interactive)
+    -Only <ids>         Install just these menu items (comma-separated IDs, see
+                        -ListIds), non-interactively. Additive: nothing else is
+                        removed and plugins are not reconciled
+    -ListIds            Print every menu item ID with its default and group
     -Uninstall          Remove all installed files
     -Version            Show version info
     -DryRun             Show what would be installed without doing it,
@@ -3296,6 +3335,7 @@ Examples:
     .\install.ps1 -Uninstall       # Uninstall everything
     .\install.ps1 -DryRun -All     # Preview full install
     .\install.ps1 -DryRun          # Preview plugin reconciliation
+    .\install.ps1 -Only lieflat-charts,skill-neat-freak   # Add two items only
     & ([scriptblock]::Create((irm $($script:REPO_URL)/raw/$($script:REPO_BRANCH)/install.ps1)))  # Remote install
 
 "@
@@ -3322,7 +3362,19 @@ function Main {
         Write-Host ""
         Write-Warn "DRY RUN (remote) -- source not downloaded; no network, USERPROFILE, or temp writes"
         Write-Info "Would download $plannedVer from $($script:REPO_URL), then install selected components into $CLAUDE_DIR"
-        if ($All) { Write-Info "Mode: -All (everything)" } else { Write-Info "Mode: interactive selector" }
+        if ($All) { Write-Info "Mode: -All (everything)" }
+        elseif ($Only.Count -gt 0) { Write-Info "Mode: -Only $($Only -join ',')" }
+        else { Write-Info "Mode: interactive selector" }
+        return
+    }
+
+    if ($ListIds) {
+        "{0,-30} {1,-8} {2}" -f "ID", "DEFAULT", "GROUP" | Write-Host
+        foreach ($g in (Get-MenuGroups)) {
+            foreach ($it in $g.Items) {
+                "{0,-30} {1,-8} {2}" -f $it.Id, $(if ($it.Default) { "on" } else { "off" }), $g.Label | Write-Host
+            }
+        }
         return
     }
 
@@ -3355,6 +3407,7 @@ function Main {
     $deepXivSkills = @()
     $upstreamSkills = @()
     $fullSelection = $false
+    $onlyMode = $false
     $ruleLangs = @()
     $ruleLangsExplicit = $false
     $pluginGroups = @()
@@ -3363,7 +3416,42 @@ function Main {
     $reviewAdversarial = $false
     $reviewCodex = $false
 
-    if ($All) {
+    if ($Only.Count -gt 0) {
+        # -Only: just the listed menu IDs, additively (no removals, no plugin
+        # reconciliation, no version stamp). Mirrors --only in install.sh.
+        if ($All -or $Uninstall) { Write-Err "-Only cannot be combined with -All or -Uninstall"; exit 1 }
+        $ids = @($Only | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ })
+        $known = Get-MenuItemIds
+        $bad = @($ids | Where-Object { $known -notcontains $_ -and $_ -ne "hooks" })
+        if ($ids.Count -eq 0 -or $bad.Count -gt 0) {
+            if ($bad.Count -gt 0) { Write-Err "Unknown menu ID(s) for -Only: $($bad -join ' ')" }
+            Write-Err "Run '.\install.ps1 -ListIds' for the valid IDs."
+            exit 1
+        }
+        $onlyMode = $true
+        $sel = ConvertTo-MenuSelection -Ids $ids -FullSelection $false
+        $doClaudeMd = $sel.ClaudeMd
+        $doSettings = $sel.Settings
+        $doRules = $sel.Rules
+        $doWritingStyle = $sel.WritingStyle
+        $doSkills = $sel.Skills
+        $doAgents = $sel.Agents
+        $doLessons = $sel.Lessons
+        $doHooks = $sel.Hooks
+        $doPlugins = $sel.Plugins
+        $doMcp = $sel.Mcp
+        $doLark = $sel.Lark
+        $doDeepXiv = $sel.DeepXiv
+        $deepXivSkills = $sel.DeepXivSkills
+        $upstreamSkills = $sel.UpstreamSkills
+        $ruleLangs = $sel.RuleLangs
+        $ruleLangsExplicit = $false
+        $selectedSkills = $sel.SelectedSkills
+        $selectedPlugins = $sel.SelectedPlugins
+        $reviewAdversarial = $sel.ReviewAdversarial
+        $reviewCodex = $sel.ReviewCodex
+        Write-Info "-Only: $($ids -join ' ') (additive: nothing else is installed or removed)"
+    } elseif ($All) {
         # Explicit -All: install everything including MCP
         # mattpocock/skills is installed by default (replaces the former handoff/teach skills)
         $doClaudeMd = $true
@@ -3454,8 +3542,9 @@ function Main {
         $selectedPlugins = $PLUGINS_OPTIONAL
     }
 
-    # Auto-enable settings.json when StatusLine, Lessons, or Plugins need it for config
-    if (($doHooks -or $doLessons -or $doPlugins) -and -not $doSettings) {
+    # Auto-enable settings.json when StatusLine, Lessons, or Plugins need it for config.
+    # -Only merges it only for items that write keys into it.
+    if (($doHooks -or $doLessons -or ($doPlugins -and -not $onlyMode)) -and -not $doSettings) {
         $doSettings = $true
         Write-Info "settings.json auto-enabled (required by StatusLine/Lessons/Plugins)"
     }
@@ -3491,8 +3580,9 @@ function Main {
     }
 
     if ($doClaudeMd) { Install-ClaudeMd -ReviewAdversarial $reviewAdversarial -ReviewCodex $reviewCodex }
-    if ($doSettings) { Install-Settings -InstallPlugins $doPlugins -SelectedPluginsList $selectedPlugins -PluginGroups $pluginGroups }
-    if ($doRules) { Install-Rules -Langs $ruleLangs -LangsExplicit $ruleLangsExplicit -WritingStyle $doWritingStyle }
+    # -Only never disables plugins that were simply not listed.
+    if ($doSettings) { Install-Settings -InstallPlugins ($doPlugins -and -not $onlyMode) -SelectedPluginsList $selectedPlugins -PluginGroups $pluginGroups }
+    if ($doRules) { Install-Rules -Langs $ruleLangs -LangsExplicit $ruleLangsExplicit -WritingStyle $doWritingStyle -Additive $onlyMode }
     Remove-RetiredSkills
     Remove-RetiredEnabledPlugins
     if ($doSkills) { Install-Skills -SelectedSkills $selectedSkills -FullSelection $fullSelection }
@@ -3508,7 +3598,7 @@ function Main {
     if ($doHooks) { Install-Hooks }
     if ($doMcp -or $doLark) { Install-Mcp -InstallPlaywright $doMcp -InstallLark $doLark }
     Remove-RetiredPlugins
-    if ($doPlugins -and $script:PluginPruneScope -eq "all" -and -not $DryRun) {
+    if ($doPlugins -and -not $onlyMode -and $script:PluginPruneScope -eq "all" -and -not $DryRun) {
         Write-Info "This run aligns your installed plugins to this run's selection - anything not selected is uninstalled. Preview it any time with: .\install.ps1 -DryRun"
     }
     if ($doPlugins) { Install-Plugins -Groups $pluginGroups -SelectedPluginsList $selectedPlugins }
@@ -3519,15 +3609,17 @@ function Main {
     # marketplace is only orphaned once its plugins are gone), and all of it
     # before Update-InstalledPlugins so we never spend retries refreshing a
     # catalog we are about to delete.
-    if ($doPlugins) { Remove-UnlistedPlugins }
-    if ($doPlugins) { Remove-UnlistedMarketplaces }
-    if ($doPlugins) { Sync-EnabledPluginsSettings -SelectedPluginsList $selectedPlugins -PluginGroups $pluginGroups }
+    # -Only is additive and skips reconciliation entirely.
+    if ($doPlugins -and -not $onlyMode) { Remove-UnlistedPlugins }
+    if ($doPlugins -and -not $onlyMode) { Remove-UnlistedMarketplaces }
+    if ($doPlugins -and -not $onlyMode) { Sync-EnabledPluginsSettings -SelectedPluginsList $selectedPlugins -PluginGroups $pluginGroups }
     # Always refresh marketplaces and update installed plugins, even when no
     # plugins were selected this run — keeps third-party plugins current.
     Update-InstalledPlugins
     if ($doDeepXiv) { Install-DeepXiv -SelectedDeepXivSkills $deepXivSkills }
 
-    if (-not $DryRun) {
+    # A partial -Only run does not claim the whole configuration version.
+    if (-not $DryRun -and -not $onlyMode) {
         if ($InstallCritical -eq 0) {
             Save-VersionStamp
         } else {

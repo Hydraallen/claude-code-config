@@ -471,7 +471,11 @@ Works with both local and piped installs (curl | bash).
 
 Options:
     --all               Install everything (non-interactive)
+    --only <ids>        Install just these menu items (comma- or space-separated
+                        IDs, see --list-ids), non-interactively. Additive:
+                        nothing else is removed, plugins are not reconciled
     --uninstall         Remove all installed files
+    --list-ids          Print every menu item ID with its default and group
     --version           Show version info
     --dry-run           Show what would be installed without doing it,
                         including which plugins/marketplaces would be REMOVED
@@ -491,6 +495,7 @@ Examples:
     $(basename "$0") --uninstall                     # Uninstall everything
     $(basename "$0") --dry-run --all                 # Preview full install
     $(basename "$0") --dry-run                       # Preview plugin reconciliation
+    $(basename "$0") --only lieflat-charts,skill-neat-freak   # Add two items only
     bash <(curl -fsSL $REPO_URL/raw/$REPO_BRANCH/install.sh)        # Remote install (interactive)
     bash <(curl -fsSL $REPO_URL/raw/$REPO_BRANCH/install.sh) --all  # Remote install (everything)
 EOF
@@ -532,6 +537,11 @@ WRAPPER_PREEXISTED=false
 LARK_MCP_PRESET="preset.light"
 CO_AUTHOR=false
 INSTALL_DEEPXIV=false
+# --only: install just the listed menu IDs, additively (no removals, no plugin
+# reconciliation). ONLY_IDS holds the raw, not yet validated list.
+ONLY_MODE=false
+ONLY_IDS=""
+LIST_IDS=false
 UNINSTALL=false
 FORCE=false
 SHOW_VERSION=false
@@ -901,6 +911,27 @@ parse_args() {
                 has_action=true
                 shift
                 ;;
+            --only)
+                if [[ $# -lt 2 || -z "${2:-}" || "$2" == --* ]]; then
+                    error "--only needs a list of menu IDs (see --list-ids)"
+                    exit 1
+                fi
+                ONLY_MODE=true
+                ONLY_IDS="${ONLY_IDS:+$ONLY_IDS,}$2"
+                has_action=true
+                shift 2
+                ;;
+            --only=*)
+                ONLY_MODE=true
+                ONLY_IDS="${ONLY_IDS:+$ONLY_IDS,}${1#--only=}"
+                has_action=true
+                shift
+                ;;
+            --list-ids)
+                LIST_IDS=true
+                has_action=true
+                shift
+                ;;
             --version)
                 SHOW_VERSION=true
                 has_action=true
@@ -934,6 +965,11 @@ parse_args() {
                 ;;
         esac
     done
+
+    if $ONLY_MODE && { $INSTALL_ALL || $UNINSTALL; }; then
+        error "--only cannot be combined with --all or --uninstall"
+        exit 1
+    fi
 
     # Only modifier flags (--dry-run, --force) with no action
     if ! $has_action; then
@@ -1087,6 +1123,48 @@ is_menu_item_id() {
         [[ "${entry%%|*}" == "$needle" ]] && return 0
     done < <(menu_item_ids)
     return 1
+}
+
+# --list-ids: one "id  default  group" row per menu item.
+print_menu_ids() {
+    local entry id df group
+    printf '%-30s %-8s %s\n' "ID" "DEFAULT" "GROUP"
+    while IFS='|' read -r id df group; do
+        printf '%-30s %-8s %s\n' "$id" "$([[ "$df" == 1 ]] && echo on || echo off)" "$group"
+    done < <(menu_item_ids)
+}
+
+# --only: validate ONLY_IDS and apply them like menu picks, additively.
+apply_only_selection() {
+    local raw="${ONLY_IDS//,/ }" id bad=()
+    local -a ids=()
+    read -r -a ids <<< "$raw"
+    if [[ ${#ids[@]} -eq 0 ]]; then
+        error "--only needs at least one menu ID (see --list-ids)"
+        exit 1
+    fi
+    for id in "${ids[@]}"; do
+        is_menu_item_id "$id" || bad+=("$id")
+    done
+    if [[ ${#bad[@]} -gt 0 ]]; then
+        error "Unknown menu ID(s) for --only: ${bad[*]}"
+        error "Run '$(basename "$0") --list-ids' for the valid IDs."
+        exit 1
+    fi
+    INSTALL_ALL=false
+    FULL_SELECTION=false
+    RULE_LANGS_EXPLICIT=false
+    INSTALL_WRITING_STYLE=false
+    for id in "${ids[@]}"; do
+        apply_menu_id "$id"
+    done
+    # settings.json is merged only when an item writes keys into it; a plugin
+    # pick alone does not need it (claude plugin install enables the plugin).
+    if ($INSTALL_STATUSLINE || $INSTALL_LESSONS || $CO_AUTHOR) && ! $INSTALL_SETTINGS; then
+        INSTALL_SETTINGS=true
+        info "settings.json auto-enabled (required by StatusLine/Lessons/Co-author)"
+    fi
+    info "--only: ${ids[*]} (additive: nothing else is installed or removed)"
 }
 
 # Map a plug-* menu ID to its package name (bash 3.2 compatible, no associative arrays).
@@ -1836,7 +1914,7 @@ _install_settings_from() {
             # Apply enabledPlugins selection filter. Catalogue = source keys ∪ selection,
             # so plugins picked in the menu that aren't declared in the shipped
             # settings.json (e.g. codex) still land as true.
-            if $INSTALL_PLUGINS && command -v jq &>/dev/null && [[ -f "$CLAUDE_DIR/settings.json" ]]; then
+            if $INSTALL_PLUGINS && ! $ONLY_MODE && command -v jq &>/dev/null && [[ -f "$CLAUDE_DIR/settings.json" ]]; then
                 local sel_json; sel_json="$(_effective_selected_plugins_json)"
                 local tmp; tmp="$(jq --argjson selected "$sel_json" '
                     ($selected | reduce .[] as $p ({}; .[$p] = true)) as $sel |
@@ -1875,7 +1953,7 @@ _install_settings_from() {
         info "Would smart-merge settings.json (jq available)"
         info "  - env: incoming as defaults, existing overrides"
         info "  - permissions.allow: union of arrays"
-        if $INSTALL_PLUGINS; then
+        if $INSTALL_PLUGINS && ! $ONLY_MODE; then
             info "  - enabledPlugins: selection-aware rebuild (unselected known plugins disabled, unknown plugins preserved)"
         else
             info "  - enabledPlugins: union (existing preserved on conflict)"
@@ -1911,7 +1989,8 @@ _install_settings_from() {
     local selected_json
     selected_json="$(_effective_selected_plugins_json)"
     local apply_sel=false
-    $INSTALL_PLUGINS && apply_sel=true
+    # --only is additive: never disable plugins that were simply not listed.
+    $INSTALL_PLUGINS && ! $ONLY_MODE && apply_sel=true
 
     # Tombstoned plugin keys to strip from a user's existing enabledPlugins on upgrade.
     local removed_json
@@ -2051,7 +2130,7 @@ install_rules() {
     local langs=()
     if [[ ${#RULE_LANGS[@]} -gt 0 ]]; then
         langs=("${RULE_LANGS[@]}")
-    elif ! $RULE_LANGS_EXPLICIT; then
+    elif ! $RULE_LANGS_EXPLICIT && ! $ONLY_MODE; then
         # Auto-detect: install all available languages (--all mode or legacy)
         for lang_dir in "$CLAUDE_TEMPLATES_DIR"/rules/*/; do
             local lang
@@ -5746,6 +5825,11 @@ main() {
     detect_script_dir
     parse_args "$@"
 
+    if $LIST_IDS; then
+        print_menu_ids
+        exit 0
+    fi
+
     # Handle --version
     if $SHOW_VERSION; then
         show_version
@@ -5765,6 +5849,9 @@ main() {
     # Interactive mode: show menu first
     if $INTERACTIVE; then
         interactive_menu
+    fi
+    if $ONLY_MODE; then
+        apply_only_selection
     fi
 
     # --all mode: set all flags
@@ -5870,7 +5957,7 @@ main() {
     $INSTALL_STATUSLINE && install_statusline
     { $INSTALL_MCP || $INSTALL_LARK; } && install_mcp
     prune_retired_plugins
-    if $INSTALL_PLUGINS && [[ "$PLUGIN_PRUNE_SCOPE" == "all" ]] && ! $DRY_RUN; then
+    if $INSTALL_PLUGINS && ! $ONLY_MODE && [[ "$PLUGIN_PRUNE_SCOPE" == "all" ]] && ! $DRY_RUN; then
         info "This run aligns your installed plugins to this run's selection — anything not selected is uninstalled. Preview it any time with: $(basename "$0") --dry-run"
     fi
     $INSTALL_PLUGINS && install_plugins
@@ -5881,17 +5968,21 @@ main() {
     # marketplace is only orphaned once its plugins are gone), and all of it
     # before update_installed_plugins() so we never spend NET_TIMEOUT refreshing
     # a catalog we are about to delete.
-    $INSTALL_PLUGINS && prune_unlisted_plugins
-    $INSTALL_PLUGINS && prune_unlisted_marketplaces
-    $INSTALL_PLUGINS && sync_enabled_plugins_settings
+    # --only is additive and skips reconciliation entirely.
+    if $INSTALL_PLUGINS && ! $ONLY_MODE; then
+        prune_unlisted_plugins
+        prune_unlisted_marketplaces
+        sync_enabled_plugins_settings
+    fi
     # Always refresh marketplaces and update installed plugins, even when no
     # plugins were selected this run — keeps third-party plugins current.
     update_installed_plugins
     $INSTALL_SHELL_WRAPPER && install_shell_wrapper
     $INSTALL_DEEPXIV && install_deepxiv
 
-    # Stamp version (skip only on critical warnings — non-critical like plugin failures are OK)
-    if ! $DRY_RUN; then
+    # Stamp version (skip only on critical warnings — non-critical like plugin failures are OK).
+    # A partial --only run does not claim the whole configuration version.
+    if ! $DRY_RUN && ! $ONLY_MODE; then
         if [[ $INSTALL_CRITICAL -eq 0 ]]; then
             stamp_version
         else
