@@ -4779,6 +4779,325 @@ prune_retired_github_mcp() {
     fi
 }
 
+# --- Retired-item leftovers ---------------------------------------------
+# `claude plugin uninstall` / `marketplace remove` leave data behind: the
+# plugin cache of the retired marketplace (claude-mem kept every old version,
+# ~1.4 GB), the plugin's data dir, usage records in ~/.claude.json, and
+# claude-mem's own ~/.claude-mem store. prune_retired_leftovers() removes those
+# on every run (after prune_retired_plugins) and on --uninstall. It needs no
+# claude CLI. Every deletion is gated on "retired AND no installed plugin still
+# uses it"; when the installed-plugin state cannot be read, nothing is deleted.
+
+# Claude Code's own temp clones (plugins/cache/temp_git_*) are removed only
+# when nothing inside them changed for this many minutes, so a plugin install
+# running in another session is never pulled out from under it.
+RETIRED_TEMP_GIT_MIN_AGE_MIN=60
+# Top-level ~/.claude.json maps whose keys name plugins/skills. Nothing else in
+# ~/.claude.json (projects, history, auth, mcpServers, ...) is ever edited here.
+RETIRED_CLAUDE_JSON_MAPS=("skillUsage" "pluginUsage")
+# claude-mem's local store. Removed only once claude-mem@* is no longer
+# installed and no claude-mem process is running. Opt out: ACCC_KEEP_CLAUDE_MEM_DATA=1
+RETIRED_CLAUDE_MEM_PLUGIN="claude-mem"
+
+# Print installed plugin keys (plugin@marketplace), one per line. Returns 1
+# when installed_plugins.json exists but cannot be parsed: callers must then
+# treat every plugin as possibly installed and delete nothing.
+_leftover_installed_keys() {
+    local state="$CLAUDE_DIR/plugins/installed_plugins.json"
+    [[ -f "$state" ]] || return 0
+    if command -v jq >/dev/null 2>&1; then
+        jq -r '(.plugins // {}) | keys[]' "$state" 2>/dev/null || return 1
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 - "$state" <<'PY' 2>/dev/null || return 1
+import json, sys
+with open(sys.argv[1]) as fh:
+    data = json.load(fh)
+for key in (data.get("plugins") or {}):
+    print(key)
+PY
+    else
+        return 1
+    fi
+}
+
+# Installed keys as this run will leave them. In dry-run, retired plugins that
+# prune_retired_plugins() would uninstall (claude CLI present) are dropped so
+# the preview matches what a real run does.
+_leftover_effective_keys() {
+    local keys key
+    keys="$(_leftover_installed_keys)" || return 1
+    while IFS= read -r key; do
+        [[ -n "$key" ]] || continue
+        if $DRY_RUN && command -v claude >/dev/null 2>&1 && _leftover_in_list "$key" "${RETIRED_PLUGINS[@]}"; then
+            continue
+        fi
+        printf '%s\n' "$key"
+    done <<< "$keys"
+}
+
+# _leftover_has_key <keys> exact|prefix|suffix <value>: literal match (no regex).
+_leftover_has_key() {
+    local k
+    while IFS= read -r k; do
+        [[ -n "$k" ]] || continue
+        case "$2" in
+            exact)  [[ "$k" == "$3" ]] && return 0 ;;
+            prefix) [[ "$k" == "$3"* ]] && return 0 ;;
+            suffix) [[ "$k" == *"$3" ]] && return 0 ;;
+        esac
+    done <<< "$1"
+    return 1
+}
+
+_leftover_in_list() {
+    local needle="$1" item; shift
+    for item in "$@"; do [[ "$item" == "$needle" ]] && return 0; done
+    return 1
+}
+
+# Size in KiB (cheap enough for a one-off sweep; 0 when unreadable).
+_leftover_kib() { du -sk "$1" 2>/dev/null | awk '{ s = $1 } END { print s + 0 }' || echo 0; }
+
+_leftover_human() {
+    awk -v k="${1:-0}" 'BEGIN { if (k >= 1048576) printf "%.1f GB", k/1048576; else if (k >= 1024) printf "%.1f MB", k/1024; else printf "%d KB", k }'
+}
+
+_LEFTOVER_COUNT=0
+_LEFTOVER_KIB=0
+
+# _leftover_remove <path> <label>: preview or delete one path, with its size.
+_leftover_remove() {
+    local path="$1" label="$2" kib
+    [[ -e "$path" || -L "$path" ]] || return 0
+    kib="$(_leftover_kib "$path")"
+    if $DRY_RUN; then
+        info "Would remove $label: $path ($(_leftover_human "$kib"))"
+    elif rm -rf -- "$path" 2>/dev/null && [[ ! -e "$path" && ! -L "$path" ]]; then
+        ok "Removed $label: $path ($(_leftover_human "$kib"))"
+    else
+        warn "Could not remove $label: $path"
+        return 0
+    fi
+    _LEFTOVER_COUNT=$((_LEFTOVER_COUNT + 1))
+    _LEFTOVER_KIB=$((_LEFTOVER_KIB + kib))
+}
+
+# Is <marketplace> still registered in known_marketplaces.json? Unknown
+# (unparsable file, no jq/python3) counts as registered.
+_leftover_mkt_registered() {
+    local mkt="$1" known="$CLAUDE_DIR/plugins/known_marketplaces.json"
+    [[ -f "$known" ]] || return 1
+    if command -v jq >/dev/null 2>&1; then
+        local out
+        out="$(jq -r --arg m "$mkt" 'has($m)' "$known" 2>/dev/null)" || return 0
+        [[ "$out" != "false" ]]
+    else
+        grep -q "\"$mkt\"" "$known" 2>/dev/null || return 1
+    fi
+}
+
+_leftover_prune_plugin_dirs() {
+    local keys="$1" mkt pkg name dir
+    for mkt in "${RETIRED_MARKETPLACES[@]}"; do
+        if _leftover_has_key "$keys" suffix "@${mkt}"; then
+            info "Keeping plugin cache of retired marketplace $mkt: an installed plugin still uses it"
+            continue
+        fi
+        _leftover_remove "$CLAUDE_DIR/plugins/cache/$mkt" "retired marketplace plugin cache"
+        # A registered marketplace is prune_retired_plugins()' job (via the
+        # CLI); only an unregistered, stale clone is removed here.
+        dir="$CLAUDE_DIR/plugins/marketplaces/$mkt"
+        if [[ -d "$dir" ]] && ! _leftover_mkt_registered "$mkt"; then
+            _leftover_remove "$dir" "stale retired marketplace clone"
+        fi
+    done
+    for pkg in "${RETIRED_PLUGINS[@]}"; do
+        _leftover_has_key "$keys" exact "$pkg" && continue
+        name="${pkg%%@*}"
+        _leftover_remove "$CLAUDE_DIR/plugins/data/${name}-${pkg#*@}" "retired plugin data dir"
+    done
+}
+
+# Claude Code's leftover temp clones. Kept while anything inside changed in
+# the last RETIRED_TEMP_GIT_MIN_AGE_MIN minutes.
+_leftover_prune_temp_git() {
+    local cache="$CLAUDE_DIR/plugins/cache" d young
+    [[ -d "$cache" ]] || return 0
+    while IFS= read -r d; do
+        [[ -n "$d" ]] || continue
+        young="$(find "$d" -mmin "-$RETIRED_TEMP_GIT_MIN_AGE_MIN" -print 2>/dev/null | head -n 1 || true)"
+        if [[ -n "$young" ]]; then
+            info "Keeping recent plugin temp clone (may be in use): $d"
+            continue
+        fi
+        _leftover_remove "$d" "stale plugin temp clone"
+    done < <(find "$cache" -mindepth 1 -maxdepth 1 -type d -name 'temp_git_*' 2>/dev/null)
+}
+
+# JSON arrays for the ~/.claude.json filter, one per line: exact keys (retired
+# plugin@mkt), skill prefixes ("<plugin>:") and marketplace suffixes
+# ("@<mkt>"). A retired name is left alone while any installed plugin shares it.
+_leftover_claude_json_patterns() {
+    local keys="$1" pkg name mkt exact="" prefix="" suffix=""
+    for pkg in "${RETIRED_PLUGINS[@]}"; do
+        _leftover_has_key "$keys" exact "$pkg" && continue
+        exact+="$pkg"$'\n'
+        name="${pkg%%@*}"
+        _leftover_has_key "$keys" prefix "${name}@" || prefix+="${name}:"$'\n'
+    done
+    for mkt in "${RETIRED_MARKETPLACES[@]}"; do
+        _leftover_has_key "$keys" suffix "@${mkt}" || suffix+="@${mkt}"$'\n'
+    done
+    _leftover_json_array "$exact"; printf '\n'
+    _leftover_json_array "$prefix"; printf '\n'
+    _leftover_json_array "$suffix"; printf '\n'
+}
+
+# Newline list -> JSON string array. Entries are installer constants
+# ([A-Za-z0-9._@:-]), so no escaping is needed.
+_leftover_json_array() {
+    local out="" item
+    while IFS= read -r item; do
+        [[ -n "$item" ]] || continue
+        out+="${out:+,}\"$item\""
+    done <<< "$1"
+    printf '[%s]' "$out"
+}
+
+# Remove ~/.claude.json usage records (skillUsage / pluginUsage) whose key names
+# a retired plugin. Atomic: temp file in the same dir, validated, then mv; a
+# timestamped backup is kept only when something changed. Aborts when the file
+# changes while it is being edited (Claude Code rewrites it at runtime).
+_leftover_prune_claude_json() {
+    local keys="$1" cfg="$HOME/.claude.json" pats exact prefix suffix maps removals tmp sum_before bak
+    [[ -f "$cfg" ]] || return 0
+    pats="$(_leftover_claude_json_patterns "$keys")"
+    exact="$(sed -n 1p <<< "$pats")"; prefix="$(sed -n 2p <<< "$pats")"; suffix="$(sed -n 3p <<< "$pats")"
+    maps="$(_leftover_json_array "$(printf '%s\n' "${RETIRED_CLAUDE_JSON_MAPS[@]}")")"
+    local filter='def gone($k): any($exact[]; . == $k) or any($prefix[]; . as $p | $k | startswith($p)) or any($suffix[]; . as $s | $k | endswith($s));'
+    sum_before="$(cksum < "$cfg")"
+    if command -v jq >/dev/null 2>&1; then
+        removals="$(jq -r --argjson exact "$exact" --argjson prefix "$prefix" --argjson suffix "$suffix" --argjson maps "$maps" \
+            "$filter"' . as $root | $maps[] as $m | ($root | .[$m]) as $sec | select(($sec | type) == "object") | $sec | keys[] | select(gone(.)) | "\($m)[\(.)]"' \
+            "$cfg" 2>/dev/null)" || { warn "~/.claude.json is not valid JSON — skipping retired usage records"; return 0; }
+    elif command -v python3 >/dev/null 2>&1; then
+        removals="$(_leftover_claude_json_py list "$cfg" "$exact" "$prefix" "$suffix" "$maps")" \
+            || { warn "~/.claude.json is not valid JSON — skipping retired usage records"; return 0; }
+    else
+        warn "Neither jq nor python3 found — skipping retired usage records in ~/.claude.json"
+        return 0
+    fi
+    [[ -n "$removals" ]] || return 0
+    local n; n="$(grep -c . <<< "$removals")"
+    if $DRY_RUN; then
+        local r
+        while IFS= read -r r; do info "Would remove retired usage record from ~/.claude.json: $r"; done <<< "$removals"
+        return 0
+    fi
+    tmp="$(mktemp "${cfg}.tmp.XXXXXX")" || { warn "Could not create a temp file next to ~/.claude.json"; return 0; }
+    if command -v jq >/dev/null 2>&1; then
+        jq --argjson exact "$exact" --argjson prefix "$prefix" --argjson suffix "$suffix" --argjson maps "$maps" \
+            "$filter"' reduce $maps[] as $m (.; if (.[$m] | type) == "object" then .[$m] |= with_entries(select(gone(.key) | not)) else . end)' \
+            "$cfg" > "$tmp" 2>/dev/null && jq empty "$tmp" 2>/dev/null
+    else
+        _leftover_claude_json_py write "$cfg" "$exact" "$prefix" "$suffix" "$maps" > "$tmp" \
+            && python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$tmp" 2>/dev/null
+    fi || { rm -f "$tmp"; warn "Could not rewrite ~/.claude.json safely — left unchanged"; return 0; }
+    if [[ ! -s "$tmp" ]]; then rm -f "$tmp"; warn "Could not rewrite ~/.claude.json safely — left unchanged"; return 0; fi
+    if [[ "$(cksum < "$cfg")" != "$sum_before" ]]; then
+        rm -f "$tmp"; warn "~/.claude.json changed while editing (Claude Code running?) — left unchanged; re-run the installer later"
+        return 0
+    fi
+    bak="${cfg}.$(date +%Y%m%d-%H%M%S).bak"
+    if ! cp -p "$cfg" "$bak" 2>/dev/null; then
+        rm -f "$tmp"; warn "Could not back up ~/.claude.json — left unchanged"; return 0
+    fi
+    chmod --reference="$cfg" "$tmp" 2>/dev/null || chmod 600 "$tmp" 2>/dev/null || true
+    if mv -f "$tmp" "$cfg"; then
+        ok "Removed $n retired usage record(s) from ~/.claude.json (backup: $bak)"
+    else
+        rm -f "$tmp"; warn "Could not replace ~/.claude.json — left unchanged"
+    fi
+}
+
+# python3 fallback for the ~/.claude.json filter. $1 = list|write.
+_leftover_claude_json_py() {
+    python3 - "$@" <<'PY'
+import json, sys
+mode, path, exact, prefix, suffix, maps = sys.argv[1:7]
+exact, prefix, suffix, maps = (json.loads(x) for x in (exact, prefix, suffix, maps))
+with open(path) as fh:
+    data = json.load(fh)
+if not isinstance(data, dict):
+    sys.exit(1)
+def gone(k):
+    return k in exact or any(k.startswith(p) for p in prefix) or any(k.endswith(s) for s in suffix)
+for m in maps:
+    section = data.get(m)
+    if not isinstance(section, dict):
+        continue
+    for k in sorted(section):
+        if gone(k):
+            if mode == "list":
+                print(f"{m}[{k}]")
+            else:
+                del section[k]
+if mode == "write":
+    json.dump(data, sys.stdout, indent=2, ensure_ascii=False)
+    sys.stdout.write("\n")
+PY
+}
+
+# Is any claude-mem worker / chroma process running? Unknown counts as running.
+_leftover_claude_mem_running() {
+    if command -v pgrep >/dev/null 2>&1; then
+        pgrep -f 'claude-mem' >/dev/null 2>&1
+        return $?
+    fi
+    local procs
+    procs="$(ps -A -o command= 2>/dev/null)" || return 0
+    grep -q 'claude-mem' <<< "$procs"
+}
+
+_leftover_prune_claude_mem_data() {
+    local keys="$1" data="$HOME/.claude-mem"
+    [[ -e "$data" || -L "$data" ]] || return 0
+    if [[ -n "${ACCC_KEEP_CLAUDE_MEM_DATA:-}" ]]; then
+        info "Keeping $data (ACCC_KEEP_CLAUDE_MEM_DATA is set)"
+        return 0
+    fi
+    if _leftover_has_key "$keys" prefix "${RETIRED_CLAUDE_MEM_PLUGIN}@"; then
+        info "Keeping $data: the claude-mem plugin is still installed"
+        return 0
+    fi
+    if _leftover_claude_mem_running; then
+        warn "Keeping $data: claude-mem processes are still running. Quit Claude Code (or stop them), then re-run: $(basename "$0")"
+        return 0
+    fi
+    _leftover_remove "$data" "retired claude-mem data"
+}
+
+prune_retired_leftovers() {
+    local keys
+    _LEFTOVER_COUNT=0
+    _LEFTOVER_KIB=0
+    if ! keys="$(_leftover_effective_keys)"; then
+        warn "Cannot read installed_plugins.json — skipping retired-item leftover cleanup"
+        return 0
+    fi
+    _leftover_prune_plugin_dirs "$keys"
+    _leftover_prune_temp_git
+    _leftover_prune_claude_mem_data "$keys"
+    _leftover_prune_claude_json "$keys"
+    if (( _LEFTOVER_COUNT > 0 )); then
+        if $DRY_RUN; then
+            info "Retired leftovers: would remove $_LEFTOVER_COUNT path(s), ~$(_leftover_human "$_LEFTOVER_KIB")"
+        else
+            ok "Retired leftovers: removed $_LEFTOVER_COUNT path(s), freed ~$(_leftover_human "$_LEFTOVER_KIB")"
+        fi
+    fi
+}
+
 # Reconcile installed plugins against this run's selection: uninstall every
 # installed plugin that was NOT selected (rule 1). Under the default
 # PLUGIN_PRUNE_SCOPE=catalogue only installer-managed plugins are considered;
@@ -5987,6 +6306,8 @@ uninstall() {
     echo "  - $CLAUDE_DIR/hooks/ (installer-managed only)"
     echo "  - Installed plugins (requires claude CLI)"
     echo "  - MCP servers: playwright, lark-mcp (if present; requires claude CLI)"
+    echo "  - Retired-plugin leftovers: plugin caches/data of retired marketplaces, stale plugins/cache/temp_git_*,"
+    echo "    ~/.claude-mem (claude-mem data), retired usage records in ~/.claude.json (backed up first)"
     [[ -f "$VERSION_STAMP_FILE" ]] && echo "  - $VERSION_STAMP_FILE"
     echo ""
 
@@ -6119,6 +6440,9 @@ uninstall() {
     else
         warn "Claude CLI not found — cannot uninstall plugins or MCP servers"
     fi
+    # After the plugin uninstalls, so leftovers of a just-removed retired
+    # plugin are swept too. Same "retired and no longer installed" gates.
+    prune_retired_leftovers || true
 
     clear_script_selection_records || true
     rm -f "$VERSION_STAMP_FILE"
@@ -6985,6 +7309,7 @@ main() {
     $INSTALL_STATUSLINE && install_statusline
     { $INSTALL_MCP || $INSTALL_LARK; } && install_mcp
     prune_retired_plugins || true
+    prune_retired_leftovers || true
     resolve_plugin_selection
     if ! $FULL_SELECTION && [[ "$PLUGIN_PRUNE_SCOPE" == "all" ]]; then
         info "--prune-foreign-plugins has no effect here: only interactive runs remove plugins"
