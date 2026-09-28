@@ -337,6 +337,17 @@ $PLUGINS_AI_RESEARCH = @(
     "optimization@ai-research-skills"
 )
 
+# Review plugins (Review group). Part of the installer-owned catalogue so an
+# interactive run that unchecks them uninstalls them. Mirrors PLUGINS_REVIEW.
+$PLUGINS_REVIEW = @(
+    "code-review@claude-plugins-official"
+    "codex@openai-codex"
+)
+
+# Never removed as an orphaned marketplace: Claude Code's built-in catalog.
+# Mirrors PROTECTED_MARKETPLACES in install.sh.
+$PROTECTED_MARKETPLACES = @("claude-plugins-official")
+
 # Plugins/marketplaces retired or renamed upstream. Re-running the installer
 # uninstalls these stale ids and removes their orphaned marketplaces so a
 # rename (e.g. everything-claude-code -> ecc) self-heals on the next run.
@@ -421,6 +432,7 @@ function Get-PluginCatalogue {
     $all += $PLUGINS_ESSENTIAL
     $all += $PLUGINS_OPTIONAL
     $all += $PLUGINS_AI_RESEARCH
+    $all += $PLUGINS_REVIEW
     return ($all | Select-Object -Unique)
 }
 
@@ -439,10 +451,11 @@ function Get-PluginsToPrune {
         [string]$Scope = "all"
     )
     $result = @()
-    # Empty selection means "prune nothing", never "prune everything" — the same
-    # safety valve Remove-UnlistedPlugins enforces, repeated here so the
-    # invariant survives any future caller that forgets to guard.
-    if ($Selected.Count -eq 0) { return $result }
+    # Under Scope=all an empty selection means "prune nothing", never "prune
+    # everything" — the same safety valve Remove-UnlistedPlugins enforces. Under
+    # the catalogue scope an empty selection (every plugin item unchecked) is
+    # bounded by the catalogue and prunes only installer-owned plugins.
+    if ($Selected.Count -eq 0 -and $Scope -eq "all") { return $result }
     foreach ($entry in $Installed) {
         if (-not $entry) { continue }
         # Never touch local skills-dir pseudo-plugins. `claude plugin init`
@@ -513,10 +526,11 @@ function Get-MarketplacesToRemove {
         [string[]]$Catalogue = @()
     )
     $result = @()
-    # Empty survivor set means "remove nothing", never "remove every
-    # marketplace". Same safety valve as Get-PluginsToPrune.
-    if ($Surviving.Count -eq 0) { return $result }
+    # Under Scope=all an empty survivor set means "remove nothing", never
+    # "remove every marketplace". Same safety valve as Get-PluginsToPrune.
+    if ($Surviving.Count -eq 0 -and $Scope -eq "all") { return $result }
     $needed = @{}
+    foreach ($p in $PROTECTED_MARKETPLACES) { $needed[$p] = $true }
     foreach ($entry in $Surviving) {
         if (-not $entry) { continue }
         $needed[($entry -split '@')[-1]] = $true
@@ -1031,6 +1045,9 @@ function Test-LessonsHookEntry {
 function Install-Settings {
     param(
         [bool]$InstallPlugins = $false,
+        # Interactive (full-selection) run: unselected known plugins are disabled.
+        # Every other run is additive and never disables anything.
+        [bool]$Reconcile = $false,
         [string[]]$SelectedPluginsList = @(),
         [string[]]$PluginGroups = @(),
         [bool]$InstallStatusLine = $true,
@@ -1062,7 +1079,9 @@ function Install-Settings {
                 $script:InstallCritical++
                 return
             }
-            if ($InstallPlugins) {
+            # A fresh file has nothing to disable, so every mode gets the filter:
+            # template keys that were not selected (not installed) become false.
+            if (Test-Path -LiteralPath $target -PathType Leaf) {
                 try {
                     Set-StrictMode -Off
                     $obj = Get-Content $target -Raw | ConvertFrom-Json
@@ -1098,10 +1117,10 @@ function Install-Settings {
         Write-Info "Would smart-merge settings.json"
         Write-Info "  - env: incoming as defaults, existing overrides"
         Write-Info "  - permissions.allow: union of arrays"
-        if ($InstallPlugins) {
+        if ($Reconcile) {
             Write-Info "  - enabledPlugins: selection-aware rebuild (unselected known plugins disabled, unknown plugins preserved)"
         } else {
-            Write-Info "  - enabledPlugins: union (existing preserved on conflict)"
+            Write-Info "  - enabledPlugins: additive (selected enabled, existing preserved, nothing disabled)"
         }
         if ($InstallLessons) {
             Write-Info "  - hooks.SessionStart: deduplicated by matcher"
@@ -1172,7 +1191,7 @@ function Install-Settings {
         # never silently disables third-party plugins.
         # If plugins were not interacted with, fall back to union merge with existing
         # winning on conflict (per the documented promise).
-        if ($InstallPlugins) {
+        if ($Reconcile) {
             $mergedPlugins = [ordered]@{}
             $catalogueKeys = @{}
             if ($incoming.enabledPlugins) {
@@ -1192,8 +1211,17 @@ function Install-Settings {
                 }
             }
         } else {
-            # Swapped order: $incoming first, $existing second → existing wins on conflict.
-            $mergedPlugins = & $mergeHt $incoming.enabledPlugins $existing.enabledPlugins
+            # Additive (mirrors install.sh): existing wins on conflict, template
+            # keys the user does not have yet are added as false (not installed
+            # by this run), and this run's selection is enabled.
+            $mergedPlugins = [ordered]@{}
+            if ($incoming.enabledPlugins) {
+                foreach ($prop in $incoming.enabledPlugins.PSObject.Properties) { $mergedPlugins[$prop.Name] = $false }
+            }
+            if ($existing.enabledPlugins) {
+                foreach ($prop in $existing.enabledPlugins.PSObject.Properties) { $mergedPlugins[$prop.Name] = $prop.Value }
+            }
+            foreach ($k in $selSet.Keys) { $mergedPlugins[$k] = $true }
         }
 
         # Strip tombstoned (removed) plugins so they don't linger enabled after upgrade.
@@ -2896,8 +2924,8 @@ function Install-Plugins {
         if (-not $okVer) { Write-Warn "humanizer@humanizer needs Claude Code >= 2.1.142 ($verText found) - update Claude Code if /humanizer:humanizer does not load" }
     }
 
-    # Expose this run's selection so Remove-UnlistedPlugins can reconcile.
-    $script:ResolvedPlugins = $plugins
+    # $script:ResolvedPlugins is set by Main (Get-EffectiveSelectedPlugins)
+    # before this step, so reconciliation never depends on it running.
 
     $groupNames = $Groups -join ","
     Write-Info "Installing plugins (groups: $groupNames)..."
@@ -3042,13 +3070,12 @@ function Remove-UnlistedPlugins {
     # Reset on every entry: an early return below must not leave a stale prune
     # list behind for Remove-UnlistedMarketplaces to subtract.
     $script:PrunedPlugins = @()
-    # Deliberate semantic boundary: an empty resolved set means "uninstall
-    # NOTHING", never "uninstall everything". If the plugin step ran but ended
-    # with zero selected plugins (user deselected them all), a full-scope
-    # reconcile would otherwise wipe every installed plugin on the machine off
-    # the back of an empty set. Losing the ability to deselect-all-to-remove-all
-    # is the cheaper failure; do not "fix" this by removing the guard.
-    if ($script:ResolvedPlugins.Count -eq 0) { return }
+    # Deliberate semantic boundary: under Scope=all an empty resolved set means
+    # "uninstall NOTHING", never "uninstall everything" (a full-scope reconcile
+    # would otherwise wipe every plugin on the machine). Under the default
+    # catalogue scope the prune set is bounded by the catalogue, so unchecking
+    # every plugin item does uninstall the installer-owned plugins.
+    if ($script:ResolvedPlugins.Count -eq 0 -and $script:PluginPruneScope -eq "all") { return }
 
     $installed = @(Get-InstalledPluginKeys)
     if ($installed.Count -eq 0) { return }
@@ -3085,7 +3112,7 @@ function Remove-UnlistedPlugins {
 function Remove-UnlistedMarketplaces {
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { return }
     # Same empty-selection safety valve as Remove-UnlistedPlugins.
-    if ($script:ResolvedPlugins.Count -eq 0) { return }
+    if ($script:ResolvedPlugins.Count -eq 0 -and $script:PluginPruneScope -eq "all") { return }
 
     $listJson = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
     if (-not (Test-Path -LiteralPath $listJson -PathType Leaf)) {
@@ -3139,7 +3166,7 @@ function Sync-EnabledPluginsSettings {
     $settings = Join-Path $CLAUDE_DIR "settings.json"
     if (-not (Test-Path -LiteralPath $settings -PathType Leaf)) { return }
     # Same empty-selection safety valve as Remove-UnlistedPlugins.
-    if ($script:ResolvedPlugins.Count -eq 0) { return }
+    if ($script:ResolvedPlugins.Count -eq 0 -and $script:PluginPruneScope -eq "all") { return }
 
     try { $obj = Get-Content -LiteralPath $settings -Raw | ConvertFrom-Json }
     catch { Write-Warn "settings.json is invalid - leaving enabledPlugins unchanged"; return }
@@ -3181,6 +3208,7 @@ function Sync-EnabledPluginsSettings {
 }
 
 function Update-InstalledPlugins {
+    param([bool]$PluginsReinstalled = $false)
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
         Write-Info "claude CLI not found - skipping plugin updates"
         return
@@ -3188,12 +3216,12 @@ function Update-InstalledPlugins {
 
     $listJson = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
 
-    # Skip installer-managed catalogue plugins here: selected ones were just
-    # reinstalled fresh, unselected ones were already pruned. Only update the
-    # PRESERVED user-owned third-party plugins; never resurrect a pruned plugin.
-    # Under PluginPruneScope=all nothing survives outside the catalogue, so this
-    # loop simply idles; under the default catalogue scope it updates the user's own plugins.
-    $catalogue = Get-PluginCatalogue
+    # Skip the plugins this run already handled: selected ones were just
+    # reinstalled fresh, pruned ones were uninstalled (never resurrect those).
+    # Everything else still installed — user-owned third-party plugins and
+    # installer-owned ones an additive run left alone — is updated.
+    $catalogue = @($script:PrunedPlugins)
+    if ($PluginsReinstalled) { $catalogue += @($script:ResolvedPlugins) }
 
     if ($DryRun) {
         Write-Info "Would run: claude plugin marketplace update (all catalogs)"
@@ -3645,7 +3673,7 @@ function Invoke-Uninstall {
 
     $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
     if ($claudeCmd) {
-        $allPlugins = $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_AI_RESEARCH + $PLUGINS_REMOVED
+        $allPlugins = $PLUGINS_ESSENTIAL + $PLUGINS_OPTIONAL + $PLUGINS_AI_RESEARCH + $PLUGINS_REVIEW + $PLUGINS_REMOVED
         foreach ($entry in $allPlugins) {
             $pluginName = ($entry -split '@')[0]
             & claude plugin uninstall $entry 2>$null
@@ -3962,8 +3990,9 @@ function Main {
     }
 
     if ($doClaudeMd) { Install-ClaudeMd -ReviewAdversarial $reviewAdversarial -ReviewCodex $reviewCodex }
-    # -Only never disables plugins that were simply not listed.
-    if ($doSettings) { Install-Settings -InstallPlugins ($doPlugins -and -not $onlyMode) -SelectedPluginsList $selectedPlugins -PluginGroups $pluginGroups -InstallStatusLine $doHooks -InstallLessons $doLessons }
+    # Only an interactive run disables unselected plugins; -All, -Only and the
+    # non-interactive default are additive.
+    if ($doSettings) { Install-Settings -InstallPlugins $doPlugins -Reconcile $fullSelection -SelectedPluginsList $selectedPlugins -PluginGroups $pluginGroups -InstallStatusLine $doHooks -InstallLessons $doLessons }
     if ($doRules) { Install-Rules -Langs $ruleLangs -LangsExplicit $ruleLangsExplicit -WritingStyle $doWritingStyle -Additive $onlyMode }
     Remove-RetiredSkills
     Remove-RetiredEnabledPlugins
@@ -3980,24 +4009,33 @@ function Main {
     if ($doHooks) { Install-Hooks }
     if ($doMcp -or $doLark) { Install-Mcp -InstallPlaywright $doMcp -InstallLark $doLark }
     Remove-RetiredPlugins
-    if ($doPlugins -and -not $onlyMode -and $script:PluginPruneScope -eq "all" -and -not $DryRun) {
+    # This run's plugin selection, resolved up front so reconciliation never
+    # depends on Install-Plugins having run (mirrors resolve_plugin_selection).
+    $script:ResolvedPlugins = @()
+    if ($doPlugins) { $script:ResolvedPlugins = @(Get-EffectiveSelectedPlugins -SelectedPluginsList $selectedPlugins -Groups $pluginGroups) }
+    if ($fullSelection -and $script:PluginPruneScope -eq "all" -and -not $DryRun) {
         Write-Info "This run aligns your installed plugins to this run's selection - anything not selected is uninstalled. Preview it any time with: .\install.ps1 -DryRun"
+    }
+    if (-not $fullSelection -and $script:PluginPruneScope -eq "all") {
+        Write-Info "-PruneForeignPlugins has no effect here: only interactive runs remove plugins"
     }
     if ($doPlugins) { Install-Plugins -Groups $pluginGroups -SelectedPluginsList $selectedPlugins }
     # Reconcile what is installed against what was selected this run: uninstall
     # unselected plugins, then drop the marketplaces and enabledPlugins entries
-    # they leave behind. All three are gated on $doPlugins so a run that skips
-    # the plugin step never reconciles. Order matters: plugins first (a
-    # marketplace is only orphaned once its plugins are gone), and all of it
-    # before Update-InstalledPlugins so we never spend retries refreshing a
-    # catalog we are about to delete.
-    # -Only is additive and skips reconciliation entirely.
-    if ($doPlugins -and -not $onlyMode) { Remove-UnlistedPlugins }
-    if ($doPlugins -and -not $onlyMode) { Remove-UnlistedMarketplaces }
-    if ($doPlugins -and -not $onlyMode) { Sync-EnabledPluginsSettings -SelectedPluginsList $selectedPlugins -PluginGroups $pluginGroups }
+    # they leave behind. Only an interactive (full-selection) run reconciles —
+    # also when every plugin item was unchecked and the plugin step was
+    # skipped. -All, -Only and the non-interactive default are additive.
+    # Order matters: plugins first (a marketplace is only orphaned once its
+    # plugins are gone), and all of it before Update-InstalledPlugins so we
+    # never spend retries refreshing a catalog we are about to delete.
+    if ($fullSelection) {
+        Remove-UnlistedPlugins
+        Remove-UnlistedMarketplaces
+        Sync-EnabledPluginsSettings -SelectedPluginsList $selectedPlugins -PluginGroups $pluginGroups
+    }
     # Always refresh marketplaces and update installed plugins, even when no
     # plugins were selected this run — keeps third-party plugins current.
-    Update-InstalledPlugins
+    Update-InstalledPlugins -PluginsReinstalled $doPlugins
     if ($doDeepXiv) { Install-DeepXiv -SelectedDeepXivSkills $deepXivSkills }
 
     # Selection record for edit-config (agent-config\selection.json).
