@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LESSONS_FILE=\"${CLAUDE_CONFIG_DIR:-${USERPROFILE:-$HOME}/.claude}/lessons.md\"; if [ -f \"$LESSONS_FILE\" ]; then echo '=== Lessons Learned (SessionStart hook) ==='; LESSONS_BYTES=$(wc -c < \"$LESSONS_FILE\" | tr -d ' '); if [ \"$LESSONS_BYTES\" -lt 9000 ]; then cat \"$LESSONS_FILE\"; else echo \"$LESSONS_FILE is $LESSONS_BYTES bytes. Claude Code replaces hook output longer than 10,000 characters with a 2,000-character preview, so the file is not printed here. Read the whole file with the Read tool before the first task of this session; when Read returns a partial view, continue from the offset it names until the last line.\"; fi; echo '=== End of Lessons ==='; else echo 'No lessons.md found at ~/.claude/lessons.md'; fi",
+            "statusMessage": "Loading lessons..."
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LESSONS_FILE=\"${CLAUDE_CONFIG_DIR:-${USERPROFILE:-$HOME}/.claude}/lessons.md\"; if [ -f \"$LESSONS_FILE\" ]; then echo '=== Lessons Learned (reloaded after compaction) ==='; LESSONS_BYTES=$(wc -c < \"$LESSONS_FILE\" | tr -d ' '); if [ \"$LESSONS_BYTES\" -lt 9000 ]; then cat \"$LESSONS_FILE\"; else echo \"$LESSONS_FILE is $LESSONS_BYTES bytes. Claude Code replaces hook output longer than 10,000 characters with a 2,000-character preview, so the file is not printed here. After compaction, re-read with the Read tool the entries relevant to the current task; when Read returns a partial view, continue from the offset it names.\"; fi; echo '=== End of Lessons ==='; else echo 'No lessons.md found at ~/.claude/lessons.md'; fi",
+            "statusMessage": "Reloading lessons after compaction..."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,291 @@
+import os
+import shutil
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Any
+
+import pytest
+from paper_reading_helpers import SKILL_DIR, load_script, write_valid_report
+
+
+def _playwright_entry() -> Any:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ModuleNotFoundError:
+        if os.environ.get("PAPER_READING_REQUIRE_BROWSER") == "1":
+            pytest.fail(
+                "PAPER_READING_REQUIRE_BROWSER=1 but playwright is unavailable",
+                pytrace=False,
+            )
+        pytest.skip(
+            "playwright is optional for ordinary unit runs; set "
+            "PAPER_READING_REQUIRE_BROWSER=1 in the browser verification gate"
+        )
+    return sync_playwright
+
+
+def _browser_report(output_dir: Path) -> Path:
+    script = (SKILL_DIR / "assets" / "report.js").read_text(encoding="utf-8")
+    style = (SKILL_DIR / "assets" / "report.css").read_text(encoding="utf-8")
+    report = write_valid_report(output_dir, script=script)
+    svg = """<figure data-lightbox tabindex="0" role="button"
+                   aria-label="SVG diagram, click to enlarge">
+      <svg viewBox="0 0 20 20" role="img" aria-label="Test diagram">
+        <style>#diagram-shape { clip-path: url("#diagram-clip"); fill: rgb(12, 34, 56); }</style>
+        <defs><clipPath id="diagram-clip"><rect width="10" height="10"></rect></clipPath></defs>
+        <g id="diagram-shape"><circle cx="5" cy="5" r="5"></circle></g>
+      </svg><figcaption>SVG test</figcaption>
+    </figure>"""
+    math = """<p id="inline-math-test">内联记号
+      <span class="math-inline"><math display="inline"><semantics><mi>x</mi>
+        <annotation encoding="application/x-tex">x</annotation>
+      </semantics></math></span> 不应出现滚动控件。</p>
+    <div class="equation-block">
+      <div class="math-display"><math display="block"><semantics><mi>x</mi>
+        <annotation encoding="application/x-tex">x</annotation>
+      </semantics></math></div>
+      <p class="equation-explanation">这里 x 表示被解释的量；整式说明该量保持不变，用来验证公式下方直接跟随自然语言。</p>
+    </div>"""
+    html = report.read_text(encoding="utf-8").replace("</main>", f"{math}{svg}</main>")
+    style_start = html.index("<style>") + len("<style>")
+    style_end = html.index("</style>", style_start)
+    html = f"{html[:style_start]}{style}{html[style_end:]}"
+    report.write_text(html, encoding="utf-8")
+    return report
+
+
+def _assert_lightboxes(page: Any) -> None:
+    page.locator("figure[data-lightbox]").first.click()
+    assert page.locator("#lightbox").evaluate("node => node.open") is True
+    page.keyboard.press("Escape")
+    assert page.locator("#lightbox").evaluate("node => node.open") is False
+    svg_figure = page.locator(
+        'figure[data-lightbox][aria-label="SVG diagram, click to enlarge"]'
+    )
+    svg_figure.click()
+    assert page.locator("#diagram-clip").count() == 1
+    assert page.locator("#lightbox #diagram-clip").count() == 1
+    assert (
+        page.locator("#lightbox #diagram-shape").evaluate(
+            "node => getComputedStyle(node).fill"
+        )
+        == "rgb(12, 34, 56)"
+    )
+    assert "diagram-clip" in page.locator("#lightbox #diagram-shape").evaluate(
+        "node => getComputedStyle(node).clipPath"
+    )
+    page.keyboard.press("Escape")
+    page.wait_for_function(
+        "document.querySelectorAll('figure[data-lightbox] #diagram-clip').length === 1"
+    )
+    assert svg_figure.locator("#diagram-clip").count() == 1
+
+
+def _assert_outline_and_math(page: Any) -> None:
+    assert (
+        page.locator(
+            "[data-lens], [data-lenses], [data-trace], [data-evidence-index], "
+            ".reading-lenses, .evidence-index"
+        ).count()
+        == 0
+    )
+    first_outline_link = page.locator(".outline-links a").first
+    assert first_outline_link.get_attribute("href") == "#C1"
+    first_outline_link.click()
+    page.wait_for_function(
+        """() => {
+          const box = document.querySelector('#C1').getBoundingClientRect();
+          return location.hash === '#C1' && box.top < innerHeight && box.bottom > 0;
+        }"""
+    )
+    inline_metrics = page.locator("#inline-math-test .math-inline").evaluate(
+        """node => ({
+          display: getComputedStyle(node).display,
+          overflowX: getComputedStyle(node).overflowX,
+          overflowY: getComputedStyle(node).overflowY
+        })"""
+    )
+    assert inline_metrics == {
+        "display": "inline-block",
+        "overflowX": "visible",
+        "overflowY": "visible",
+    }
+    inline_alignment = page.locator("#inline-math-test").evaluate(
+        """node => {
+          const leading = document.createRange();
+          leading.selectNodeContents(node.firstChild);
+          const textBox = leading.getBoundingClientRect();
+          const mathBox = node.querySelector('.math-inline').getBoundingClientRect();
+          return {
+            sameLine: Math.abs(textBox.bottom - mathBox.bottom) < 8,
+            oneMathFragment: node.querySelector('.math-inline').getClientRects().length
+          };
+        }"""
+    )
+    assert inline_alignment == {"sameLine": True, "oneMathFragment": 1}
+    equation = page.locator(".equation-block").first
+    assert equation.locator(":scope > .math-display").count() == 1
+    assert equation.locator(":scope > .equation-explanation").count() == 1
+
+
+def _assert_reading_surface(page: Any) -> None:
+    assert page.locator("nav").count() == 1
+    assert page.locator("nav.reader-nav[data-reader-navigation]").count() == 1
+    assert (
+        page.locator(".report-hero .paper-fingerprint, .report-hero .eyebrow").count()
+        == 0
+    )
+    assert page.locator("h1 .title-focus").count() == 1
+    assert (
+        page.locator('[data-section="basic-information"] [data-paper-facts]').count()
+        == 1
+    )
+    assert (
+        page.locator(
+            '[data-section="basic-information"] table, '
+            '[data-section="basic-information"] dl'
+        ).count()
+        == 0
+    )
+    for marker in (
+        "data-author-homepage",
+        "data-contact-homepage",
+        "data-lab-homepage",
+    ):
+        assert page.locator(f'[data-section="basic-information"] a[{marker}]').count()
+    sizes = page.evaluate(
+        """() => ({
+          body: parseFloat(getComputedStyle(document.body).fontSize),
+          title: parseFloat(getComputedStyle(document.querySelector('h1')).fontSize)
+        })"""
+    )
+    assert sizes["title"] / sizes["body"] <= 2.6
+
+
+def _assert_wheel_zoom(page: Any) -> None:
+    page.locator(
+        'figure[data-lightbox][aria-label="SVG diagram, click to enlarge"]'
+    ).click()
+    stage = page.locator("#lightbox .lightbox-stage")
+    visual = stage.locator("img, svg").first
+    box = visual.bounding_box()
+    assert box is not None
+    viewport = page.viewport_size
+    assert viewport is not None
+    assert box["width"] <= viewport["width"] * 0.86
+    assert box["height"] <= viewport["height"] * 0.78
+    pointer = {
+        "x": box["x"] + box["width"] * 0.68,
+        "y": box["y"] + box["height"] * 0.35,
+    }
+    anchor_before = {
+        "x": (pointer["x"] - box["x"]) / box["width"],
+        "y": (pointer["y"] - box["y"]) / box["height"],
+    }
+    page.mouse.move(
+        pointer["x"],
+        pointer["y"],
+    )
+    before = float(stage.get_attribute("data-zoom") or "1")
+    scroll_before = page.evaluate(
+        "() => ({page: window.scrollY, stage: document.querySelector('.lightbox-stage').scrollTop})"
+    )
+    page.mouse.wheel(0, -600)
+    page.wait_for_timeout(50)
+    assert float(stage.get_attribute("data-zoom") or "1") > before
+    zoomed_box = visual.bounding_box()
+    assert zoomed_box is not None
+    anchor_after = {
+        "x": (pointer["x"] - zoomed_box["x"]) / zoomed_box["width"],
+        "y": (pointer["y"] - zoomed_box["y"]) / zoomed_box["height"],
+    }
+    assert abs(anchor_after["x"] - anchor_before["x"]) < 0.015
+    assert abs(anchor_after["y"] - anchor_before["y"]) < 0.015
+    assert (
+        page.evaluate(
+            "() => ({page: window.scrollY, stage: document.querySelector('.lightbox-stage').scrollTop})"
+        )
+        == scroll_before
+    )
+    page.keyboard.press("Escape")
+
+
+def _assert_pinch_zoom(page: Any, report: Path) -> None:
+    page.goto(report.as_uri())
+    page.locator("figure[data-lightbox]").first.click()
+    dialog_box = page.locator("#lightbox").bounding_box()
+    caption_box = page.locator("#lightbox .lightbox-caption").bounding_box()
+    assert dialog_box is not None
+    assert caption_box is not None
+    assert (
+        caption_box["y"] + caption_box["height"]
+        <= dialog_box["y"] + dialog_box["height"]
+    )
+    stage = page.locator("#lightbox .lightbox-stage")
+    before = float(stage.get_attribute("data-zoom") or "1")
+    for event, payload in (
+        ("pointerdown", {"pointerId": 1, "clientX": 120, "clientY": 300}),
+        ("pointerdown", {"pointerId": 2, "clientX": 220, "clientY": 300}),
+        ("pointermove", {"pointerId": 2, "clientX": 290, "clientY": 300}),
+        ("pointerup", {"pointerId": 1, "clientX": 120, "clientY": 300}),
+        ("pointerup", {"pointerId": 2, "clientX": 290, "clientY": 300}),
+    ):
+        stage.dispatch_event(event, {**payload, "pointerType": "touch"})
+    assert float(stage.get_attribute("data-zoom") or "1") > before
+
+
+@pytest.mark.e2e
+def test_html_interactions_work_in_a_real_browser(tmp_path: Path) -> None:
+    sync_playwright = _playwright_entry()
+    chrome = shutil.which("google-chrome") or shutil.which("chromium")
+    with sync_playwright() as playwright:
+        options: dict[str, Any] = {"headless": True}
+        if chrome:
+            options["executable_path"] = chrome
+        browser = playwright.chromium.launch(**options)
+        page = browser.new_page(viewport={"width": 1200, "height": 900})
+        report = _browser_report(tmp_path / "report")
+        page.goto(report.as_uri())
+        assert page.locator("html").get_attribute("data-enhanced") == "true"
+        _assert_reading_surface(page)
+        _assert_outline_and_math(page)
+        _assert_lightboxes(page)
+        _assert_wheel_zoom(page)
+        mobile = browser.new_page(
+            viewport={"width": 390, "height": 844}, has_touch=True
+        )
+        _assert_pinch_zoom(mobile, report)
+        browser.close()
+
+
+@pytest.mark.e2e
+def test_reserialized_mathml_cannot_create_active_html(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sync_playwright = _playwright_entry()
+    renderer = load_script("render_math")
+    monkeypatch.setattr(renderer, "_load_xml_parser", lambda: ET.fromstring)
+
+    def converter(latex: str, *, display: str) -> str:
+        del latex, display
+        return (
+            '<math xmlns="http://www.w3.org/1998/Math/MathML"><mtext><![CDATA['
+            "</mtext></math><script>globalThis.__unexpectedMathScript=1</script>"
+            "<math><mtext>]]></mtext></math>"
+        )
+
+    fragment = renderer.render_math("x", display="inline", converter=converter)
+    report = write_valid_report(tmp_path / "math-security")
+    html = report.read_text(encoding="utf-8").replace("</main>", f"{fragment}</main>")
+    report.write_text(html, encoding="utf-8")
+    chrome = shutil.which("google-chrome") or shutil.which("chromium")
+    with sync_playwright() as playwright:
+        options: dict[str, Any] = {"headless": True}
+        if chrome:
+            options["executable_path"] = chrome
+        browser = playwright.chromium.launch(**options)
+        page = browser.new_page()
+        page.goto(report.as_uri())
+        assert page.evaluate("typeof globalThis.__unexpectedMathScript") == "undefined"
+        assert page.locator("script").count() == 1
+        browser.close()

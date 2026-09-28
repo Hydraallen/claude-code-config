@@ -1,0 +1,729 @@
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from paper_reading_helpers import SCRIPTS_DIR, load_script, write_valid_report
+
+CONTRACT_CORRUPTIONS = (
+    ("<!doctype html>", ""),
+    ('<meta charset="utf-8">', ""),
+    ('<meta name="viewport" content="width=device-width, initial-scale=1">', ""),
+    ("<title>测试论文精读</title>", ""),
+    (
+        "<style>",
+        '<link rel="stylesheet" href="remote.css"><style>@import "https://example.test/x.css";',
+    ),
+    (
+        "<script data-report-script>",
+        '<script src="https://example.test/app.js"></script><script data-report-script>',
+    ),
+    (
+        'data-paper-report data-paper-type="empirical"',
+        'data-paper-report data-level="brief" data-paper-type="empirical"',
+    ),
+    ('data-paper-type="empirical"', 'data-paper-type="unknown"'),
+    ('class="report-hero"', 'class="plain"'),
+    ('aria-label="阅读导航"', ""),
+    ('class="title-focus"', 'class="plain-title"'),
+    (
+        '<nav class="reader-nav"',
+        '<nav aria-label="重复导航"></nav><nav class="reader-nav"',
+    ),
+    ('id="report-content"', 'id="C1"'),
+    ('class="outline-links"', 'class="missing-outline"'),
+    ('id="lightbox"', 'id="other-dialog"'),
+    ('src="assets/figure.png"', 'src="https://example.test/figure.png"'),
+    ('alt="主结果图"', 'alt=""'),
+    ('data-coordinate="C2"', 'data-coordinate="bad"'),
+    ('data-kind="limitation"', 'data-kind="claim"'),
+    ("</main>", '<figure><svg viewBox="0 0 10 10"></svg></figure></main>'),
+)
+EXPECTED_CONTRACT_ERRORS = (
+    "doctype",
+    "charset",
+    "viewport",
+    "<title>",
+    "link elements",
+    "network dependency",
+    "external script",
+    "data-level",
+    "data-paper-type",
+    "report-hero",
+    "navigation requires",
+    "title focus",
+    "exactly one navigation",
+    "report-content",
+    "section outline",
+    "lightbox",
+    "duplicate id",
+    "#missing",
+    "network asset",
+    "alt text",
+    "inline SVG",
+    "data-lightbox",
+    "malformed evidence coordinate",
+    "E404",
+    "does not match data-kind",
+)
+@pytest.mark.unit
+def test_validator_accepts_a_complete_report(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    assert validator.validate_report(report) == []
+
+
+@pytest.mark.unit
+def test_validator_requires_original_result_evidence_for_empirical_reports(
+    tmp_path: Path,
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "missing-original-result")
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "data-original-result", "data-recreated-result", 1
+        ),
+        encoding="utf-8",
+    )
+    assert any(
+        "original paper result figure" in error
+        for error in validator.validate_report(report)
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    (
+        ("data-module-anatomy", "data-missing-module-anatomy", "module-anatomy"),
+        (
+            'data-module-field="inputs"',
+            'data-module-field="unknown-inputs"',
+            "missing field: inputs",
+        ),
+        (
+            "commit 0123456 · models/encoder.py::Encoder。",
+            "代码主页中似乎存在对应实现。",
+            "code-evidence requires",
+        ),
+        (
+            "data-module-visual",
+            "data-missing-module-visual",
+            "requires exactly one adjacent data-module-visual SVG",
+        ),
+        (
+            '<ul class="module-io-list">',
+            '<div class="module-io-list">',
+            "inputs must use an unordered list",
+        ),
+        (
+            '<math display="inline"><semantics><mi>x</mi><annotation encoding="application/x-tex">x</annotation></semantics></math>',
+            "x",
+            "inputs requires static MathML symbols",
+        ),
+    ),
+)
+def test_validator_requires_complete_module_anatomy(
+    tmp_path: Path, old: str, new: str, message: str
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / message.replace(" ", "-"))
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(old, new, 1),
+        encoding="utf-8",
+    )
+    assert any(message in error for error in validator.validate_report(report))
+
+
+@pytest.mark.unit
+def test_validator_requires_module_visual_before_fields(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "visual-order")
+    html = report.read_text(encoding="utf-8")
+    visual = re.search(
+        r'\s*<figure class="module-visual".*?</figure>', html, re.DOTALL
+    )
+    assert visual is not None
+    moved = html[: visual.start()] + html[visual.end() :]
+    moved = moved.replace("</article>", visual.group(0) + "\n          </article>", 1)
+    report.write_text(moved, encoding="utf-8")
+    assert any(
+        "module visual must appear above every detail field" in error
+        for error in validator.validate_report(report)
+    )
+
+
+@pytest.mark.unit
+def test_validator_requires_separate_nodes_for_parallel_interfaces(
+    tmp_path: Path,
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "separate-interface-nodes")
+    html = report.read_text(encoding="utf-8").replace(
+        "归一化图像张量。</li></ul>",
+        "归一化图像张量。</li><li>第二个独立输入。</li></ul>",
+        1,
+    )
+    report.write_text(html, encoding="utf-8")
+    assert any(
+        "separate diagram input node" in error
+        for error in validator.validate_report(report)
+    )
+
+
+@pytest.mark.unit
+def test_validator_requires_static_mathml_in_math_blocks(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    html = report.read_text(encoding="utf-8").replace(
+        "</main>",
+        '<div class="equation-card"><code>\\mathcal{L}(\\theta)=0</code></div></main>',
+    )
+    report.write_text(html, encoding="utf-8")
+    assert any("math-like code" in error for error in validator.validate_report(report))
+    mathml = (
+        '<div class="equation-block"><div class="math-display">'
+        '<math display="block"><semantics><mi>L</mi>'
+        '<annotation encoding="application/x-tex">\\mathcal{L}=0</annotation>'
+        '</semantics></math></div><p class="equation-explanation">'
+        "这个目标函数衡量模型输出与冻结训练目标之间的距离，数值越小表示本轮更新越接近期望漂移。"
+        "</p></div>"
+    )
+    report.write_text(
+        html.replace(
+            '<div class="equation-card"><code>\\mathcal{L}(\\theta)=0</code></div>',
+            mathml,
+        ),
+        encoding="utf-8",
+    )
+    assert validator.validate_report(report) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("fragment", "message"),
+    (
+        (
+            '<div class="math-display"><math display="block"><semantics><mi>x</mi>'
+            '<annotation encoding="application/x-tex">x</annotation>'
+            "</semantics></math></div>",
+            "own equation-block",
+        ),
+        (
+            '<div class="equation-block"><div class="math-display">'
+            '<math display="block"><semantics><mi>x</mi>'
+            '<annotation encoding="application/x-tex">x</annotation>'
+            "</semantics></math></div></div>",
+            "plain-language explanation",
+        ),
+        (
+            '<div class="equation-block"><div class="math-display">'
+            '<math display="block"><semantics><mi>x</mi>'
+            '<annotation encoding="application/x-tex">x</annotation>'
+            '</semantics></math></div><p class="equation-explanation">太短</p></div>',
+            "too short",
+        ),
+        (
+            '<div class="equation-block"><p class="equation-explanation">'
+            "这段解释虽然足够长，但错误地放在公式前面。"
+            '</p><div class="math-display"><math display="block"><semantics><mi>x</mi>'
+            '<annotation encoding="application/x-tex">x</annotation>'
+            "</semantics></math></div></div>",
+            "immediately followed",
+        ),
+        (
+            '<p class="equation-explanation">这段解释没有紧邻并归属于任何独立展示公式。</p>',
+            "not attached",
+        ),
+    ),
+)
+def test_validator_requires_one_local_explanation_per_display_equation(
+    tmp_path: Path, fragment: str, message: str
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / message.replace(" ", "-"))
+    report.write_text(
+        report.read_text(encoding="utf-8").replace("</main>", f"{fragment}</main>"),
+        encoding="utf-8",
+    )
+    assert any(message in error for error in validator.validate_report(report))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    (
+        (
+            "这个目标函数衡量模型输出与冻结训练目标之间的距离，数值越小表示本轮更新越接近期望漂移。",
+            "直观解释 · 这个目标函数衡量模型输出与冻结训练目标之间的距离。",
+            "natural prose",
+        ),
+        (
+            "</style>",
+            '.equation-explanation::before { content: "直观解释 · "; }</style>',
+            "CSS generated content",
+        ),
+    ),
+)
+def test_validator_rejects_canned_equation_explanation_labels(
+    tmp_path: Path, old: str, new: str, message: str
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / message.replace(" ", "-"))
+    html = report.read_text(encoding="utf-8").replace(
+        "</main>",
+        '<div class="equation-block"><div class="math-display">'
+        '<math display="block"><semantics><mi>L</mi>'
+        '<annotation encoding="application/x-tex">L</annotation>'
+        '</semantics></math></div><p class="equation-explanation">'
+        "这个目标函数衡量模型输出与冻结训练目标之间的距离，数值越小表示本轮更新越接近期望漂移。"
+        "</p></div></main>",
+    )
+    report.write_text(html.replace(old, new, 1), encoding="utf-8")
+    assert any(message in error for error in validator.validate_report(report))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    (
+        (
+            '<ul class="paper-facts" data-paper-facts>',
+            "<table data-paper-facts>",
+            "vertical list, not a table",
+        ),
+        (
+            'data-paper-field="title"',
+            'data-unknown-field="title"',
+            "missing field: title",
+        ),
+        (
+            "data-author-homepage",
+            "data-missing-author-homepage",
+            "principal-author homepage",
+        ),
+        (
+            "data-contact-homepage",
+            "data-missing-contact-homepage",
+            "paper-contact homepage",
+        ),
+        (
+            "data-lab-homepage",
+            "data-missing-lab-homepage",
+            "lab/research-group homepage",
+        ),
+        (
+            "<h2>基本信息</h2>",
+            "<h2>基本信息</h2><p>页码约定：物理页码；SHA-256: deadbeef；extracted-v2 原始视觉资产 157 个。</p>",
+            "extraction bookkeeping",
+        ),
+    ),
+)
+def test_validator_keeps_basic_information_reader_facing(
+    tmp_path: Path, old: str, new: str, message: str
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / message.replace(" ", "-"))
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(old, new, 1),
+        encoding="utf-8",
+    )
+    assert any(message in error for error in validator.validate_report(report))
+
+
+@pytest.mark.unit
+def test_validator_rejects_removed_navigation_controls(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "removed-controls")
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            '<div class="outline-links">',
+            '<div class="outline-links"><button data-lens="evidence">证据</button>'
+            '<a data-trace="C1" href="#C1">C1</a><div data-evidence-index>索引</div>',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    errors = validator.validate_report(report)
+    assert sum("not allowed" in error for error in errors) == 3
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        '<em class="title-focus"></em>',
+        '</h1><em class="title-focus">精读</em><h1>',
+    ),
+)
+def test_validator_requires_nonempty_title_focus_inside_h1(
+    tmp_path: Path, replacement: str
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    html = report.read_text(encoding="utf-8").replace(
+        '<em class="title-focus">精读</em>', replacement
+    )
+    report.write_text(html, encoding="utf-8")
+    assert any("title focus" in error for error in validator.validate_report(report))
+
+
+@pytest.mark.unit
+def test_validator_rejects_legacy_inline_math_markup(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    html = report.read_text(encoding="utf-8").replace(
+        "</main>", "<p><em>q=f#p<sub>ε</sub></em> and <code>φ</code></p></main>"
+    )
+    report.write_text(html, encoding="utf-8")
+    errors = validator.validate_report(report)
+    assert any("legacy inline math" in error for error in errors)
+    assert any("math-like code" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_validator_allows_semantic_non_math_sub_and_sup(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "semantic-script")
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "</main>",
+            "<p>H<sub>2</sub>O、CO<sub>2</sub> 与 21<sup>st</sup> 都是语义标记。</p></main>",
+        ),
+        encoding="utf-8",
+    )
+    assert validator.validate_report(report) == []
+
+
+@pytest.mark.unit
+def test_validator_allows_explicit_semantic_script_and_affiliation_fallback(
+    tmp_path: Path,
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "marked-fallback")
+    html = report.read_text(encoding="utf-8")
+    html = html.replace(
+        '<a data-lab-homepage href="https://example.test/lab">测试实验室（测试大学）</a>',
+        "<a data-institution-homepage "
+        'data-affiliation-fallback="no-authoritative-lab-homepage" '
+        'href="https://example.test/institution">测试大学（未找到权威实验室主页）</a>',
+    )
+    html = html.replace(
+        "</main>",
+        "<p>脚注<sup data-semantic-script>†</sup>与 N"
+        "<sub data-semantic-script>2</sub> 是显式语义标记。</p></main>",
+    )
+    report.write_text(html, encoding="utf-8")
+    assert validator.validate_report(report) == []
+
+
+@pytest.mark.unit
+def test_validator_rejects_unmarked_institution_affiliation_fallback(
+    tmp_path: Path,
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "unmarked-fallback")
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            '<a data-lab-homepage href="https://example.test/lab">测试实验室（测试大学）</a>',
+            "<a data-institution-homepage "
+            'href="https://example.test/institution">测试大学</a>',
+        ),
+        encoding="utf-8",
+    )
+    assert any(
+        "explicitly marked institution fallback" in error
+        for error in validator.validate_report(report)
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "fragment",
+    (
+        "x<sub>1</sub>",
+        "x<sup>2</sup>",
+        "q<sub>theta</sub>",
+        "log<sub>2</sub>",
+        "V<sub>p</sub>",
+        "2<sup>3</sup>",
+        "β<sub>1</sub>",
+        "x<sub>i=1</sub>",
+        "(x+y)<sup>2</sup>",
+        "x<sup>i/2</sup>",
+    ),
+)
+def test_validator_rejects_obvious_ascii_math_sub_and_sup(
+    tmp_path: Path, fragment: str
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / re.sub(r"\W+", "-", fragment))
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "</main>", f"<p>旧式近似：{fragment}</p></main>"
+        ),
+        encoding="utf-8",
+    )
+    assert any(
+        "legacy inline math" in error for error in validator.validate_report(report)
+    )
+
+
+@pytest.mark.unit
+def test_validator_rejects_unsafe_mathml_markup(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    unsafe_math = (
+        '<span class="math-inline"><math xmlns="http://www.w3.org/1998/Math/MathML" '
+        'display="inline"><semantics><mrow style="position:fixed"><mtext '
+        'href="javascript:alert(1)">x</mtext></mrow><annotation '
+        'encoding="application/x-tex">x</annotation></semantics></math></span>'
+    )
+    html = report.read_text(encoding="utf-8").replace(
+        "</main>", f"{unsafe_math}</main>"
+    )
+    report.write_text(html, encoding="utf-8")
+    errors = validator.validate_report(report)
+    assert any("unsafe MathML" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_validator_rejects_an_extra_inline_script_from_math_markup(
+    tmp_path: Path,
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    html = report.read_text(encoding="utf-8").replace(
+        "</main>",
+        "<math><mtext></math><script>globalThis.__unexpectedMathScript=1</script>"
+        "<math><mtext>x</mtext></math></main>",
+    )
+    report.write_text(html, encoding="utf-8")
+    errors = validator.validate_report(report)
+    assert any("exactly one inline script" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_validator_reports_broken_assets_and_inaccessible_visuals(
+    tmp_path: Path,
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    text = report.read_text(encoding="utf-8")
+    text = text.replace('src="assets/figure.png"', 'src="assets/missing.png"')
+    text = text.replace('data-lightbox tabindex="0" role="button"', "data-lightbox")
+    report.write_text(text, encoding="utf-8")
+    errors = validator.validate_report(report)
+    assert any("assets/missing.png" in error for error in errors)
+    assert any("tabindex" in error for error in errors)
+    assert any('role="button"' in error for error in errors)
+
+
+@pytest.mark.unit
+def test_validator_rejects_unwrapped_visuals(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    html = report.read_text(encoding="utf-8").replace(
+        "</main>",
+        '<img src="assets/figure.png" alt="standalone">'
+        '<svg viewBox="0 0 10 10" role="img" aria-label="standalone SVG"></svg>'
+        "</main>",
+    )
+    report.write_text(html, encoding="utf-8")
+    errors = validator.validate_report(report)
+    assert sum("inside a lightbox figure" in error for error in errors) == 2
+
+
+@pytest.mark.unit
+def test_validator_rejects_network_srcset_and_svg_image_assets(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    html = report.read_text(encoding="utf-8")
+    html = html.replace(
+        'src="assets/figure.png"',
+        'src="assets/figure.png" srcset="https://example.test/large.png 2x"',
+    ).replace(
+        "</main>",
+        """<figure data-lightbox tabindex="0" role="button" aria-label="SVG, enlarge">
+          <svg viewBox="0 0 10 10" role="img" aria-label="SVG image test">
+            <image href="https://example.test/inside-svg.png" width="10" height="10"></image>
+            <use href="https://example.test/remote-symbol.svg#mark"></use>
+            <filter><feImage xlink:href="https://example.test/filter.png"></feImage></filter>
+          </svg><figcaption>network test</figcaption>
+        </figure></main>""",
+    )
+    report.write_text(html, encoding="utf-8")
+    errors = validator.validate_report(report)
+    assert any("large.png" in error for error in errors)
+    assert any("inside-svg.png" in error for error in errors)
+    assert any("remote-symbol.svg" in error for error in errors)
+    assert any("filter.png" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_validator_accepts_and_checks_fragment_svg_use(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    local_use = """<figure data-lightbox tabindex="0" role="button" aria-label="SVG use">
+      <svg viewBox="0 0 10 10" role="img" aria-label="Local SVG use">
+        <defs><path id="local-shape" d="M0 0h5v5z"></path></defs>
+        <use href="#local-shape"></use>
+      </svg><figcaption>local reference</figcaption>
+    </figure>"""
+    report.write_text(
+        report.read_text(encoding="utf-8").replace("</main>", f"{local_use}</main>"),
+        encoding="utf-8",
+    )
+    assert validator.validate_report(report) == []
+    report.write_text(
+        report.read_text(encoding="utf-8").replace("#local-shape", "#missing-shape"),
+        encoding="utf-8",
+    )
+    assert any("#missing-shape" in error for error in validator.validate_report(report))
+
+
+@pytest.mark.unit
+def test_validator_checks_local_srcset_candidates(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    html = report.read_text(encoding="utf-8").replace(
+        'src="assets/figure.png"',
+        'src="assets/figure.png" srcset="assets/figure.png 1x, assets/missing-2x.png 2x"',
+    )
+    report.write_text(html, encoding="utf-8")
+    errors = validator.validate_report(report)
+    assert any("assets/missing-2x.png" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_validator_checks_local_hyperlinks_and_unsafe_schemes(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    html = report.read_text(encoding="utf-8").replace(
+        "</main>",
+        '<a href="notes/missing.md">missing</a>'
+        '<a href="../escape.txt">escape</a>'
+        '<a href="javascript:alert(1)">unsafe</a>'
+        '<a href="https://example.test/allowed">external</a>'
+        "</main>",
+    )
+    report.write_text(html, encoding="utf-8")
+    errors = validator.validate_report(report)
+    assert any("notes/missing.md" in error for error in errors)
+    assert any("../escape.txt" in error for error in errors)
+    assert any("javascript" in error for error in errors)
+    assert not any("example.test/allowed" in error for error in errors)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("paper_type", "first_section", "second_section"),
+    [
+        ("theoretical", "theoretical-framework", "theoretical-analysis"),
+        ("survey", "taxonomy", "open-problems"),
+        ("systems", "system-design", "performance-evaluation"),
+    ],
+)
+def test_validator_accepts_each_paper_type(
+    tmp_path: Path, paper_type: str, first_section: str, second_section: str
+) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / paper_type, paper_type=paper_type)
+    html = report.read_text(encoding="utf-8")
+    html = html.replace("technical-method", first_section).replace(
+        "experimental-results", second_section
+    )
+    report.write_text(html, encoding="utf-8")
+    assert validator.validate_report(report) == []
+
+
+@pytest.mark.unit
+def test_validator_rejects_generic_hybrid_paper_type(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "hybrid", paper_type="hybrid")
+    errors = validator.validate_report(report)
+    assert any("data-paper-type" in error for error in errors)
+
+
+@pytest.mark.unit
+def test_validator_rejects_active_embeds_and_fetch_surfaces(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "active-content")
+    html = report.read_text(encoding="utf-8")
+    html = html.replace(
+        "</head>",
+        '<link rel="preload" href="https://example.test/preload.js">'
+        '<meta http-equiv="refresh" content="0;url=https://example.test/refresh">'
+        "</head>",
+    ).replace(
+        "</main>",
+        '<iframe src="https://example.test/frame.html"></iframe>'
+        '<embed src="https://example.test/embed.bin">'
+        '<track src="https://example.test/captions.vtt">'
+        '<input type="image" src="https://example.test/button.png">'
+        '<figure data-lightbox tabindex="0" role="button" aria-label="active SVG">'
+        '<svg viewBox="0 0 10 10" role="img" aria-label="active SVG">'
+        '<script href="https://example.test/svg-script.js"></script>'
+        "</svg><figcaption>active content</figcaption></figure>"
+        "<p onclick=\"fetch('https://example.test/event')\">event</p>"
+        "</main>",
+    )
+    report.write_text(html, encoding="utf-8")
+    errors = validator.validate_report(report)
+    for fragment in (
+        "link elements",
+        "meta refresh",
+        "frame.html",
+        "embed.bin",
+        "captions.vtt",
+        "button.png",
+        "svg-script.js",
+        "input type=image",
+        "inline event handlers",
+    ):
+        assert any(fragment in error for error in errors), fragment
+
+
+@pytest.mark.unit
+def test_validator_surfaces_independent_contract_violations(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    report = write_valid_report(tmp_path / "report")
+    html = report.read_text(encoding="utf-8")
+    for old, new in CONTRACT_CORRUPTIONS:
+        html = html.replace(old, new)
+    html = html.replace('href="#E1"', 'href="#missing"', 1)
+    html = html.replace('data-supports="E1"', 'data-supports="E404"', 1)
+    report.write_text(html, encoding="utf-8")
+    errors = validator.validate_report(report)
+    for fragment in EXPECTED_CONTRACT_ERRORS:
+        assert any(fragment in error for error in errors), fragment
+
+
+@pytest.mark.unit
+def test_validator_handles_a_missing_report(tmp_path: Path) -> None:
+    validator = load_script("validate_report")
+    assert validator.validate_report(tmp_path / "missing.html") == [
+        f"report does not exist: {tmp_path / 'missing.html'}"
+    ]
+
+
+@pytest.mark.integration
+def test_validator_cli_uses_a_nonzero_exit_for_contract_failures(
+    tmp_path: Path,
+) -> None:
+    report = write_valid_report(tmp_path / "report")
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "assets/figure.png", "assets/gone.png"
+        ),
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPTS_DIR / "validate_report.py"), str(report)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 1
+    assert "assets/gone.png" in completed.stdout

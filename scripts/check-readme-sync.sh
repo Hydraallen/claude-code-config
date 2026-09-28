@@ -1,28 +1,20 @@
 #!/usr/bin/env bash
-# Lightweight check that README.md and README.zh-CN.md stay structurally in sync.
+# Check the shared entry points and structure without a GNU grep dependency.
 set -euo pipefail
-
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EN="$DIR/README.md"
-ZH="$DIR/README.zh-CN.md"
-
-ok=true
-compare() {
-    local label="$1" en_count="$2" zh_count="$3"
-    if [[ "$en_count" != "$zh_count" ]]; then
-        echo "MISMATCH $label: EN=$en_count ZH=$zh_count"
-        ok=false
-    else
-        echo "OK       $label: $en_count"
-    fi
-}
-
-compare "Headings"    "$(grep -c '^#' "$EN")" "$(grep -c '^#' "$ZH")"
-compare "Code blocks" "$(grep -c '^\`\`\`' "$EN")" "$(grep -c '^\`\`\`' "$ZH")"
-compare "Table rows"  "$(grep -c '^|' "$EN")" "$(grep -c '^|' "$ZH")"
-# ERE, not -oP: BSD grep on macOS has no -P, so the old PCRE version errored out
-# and `wc -l` counted the empty output as 0 for both files — meaning this check
-# passed unconditionally on every Mac. [^]]+ / [^)]+ stand in for the lazy quantifiers.
-compare "Links"       "$(grep -oE '\[[^]]+\]\([^)]+\)' "$EN" | wc -l)" "$(grep -oE '\[[^]]+\]\([^)]+\)' "$ZH" | wc -l)"
-
-$ok && echo "All checks passed." || { echo "Structural differences found."; exit 1; }
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python3 - "$repo_dir" <<'PY'
+from pathlib import Path
+import re
+import sys
+root = Path(sys.argv[1])
+en, zh = ((root / name).read_text(encoding="utf-8") for name in ("README.md", "README.zh-CN.md"))
+for label, pattern in (("headings", r"^#+ "), ("code fences", r"^```"), ("table rows", r"^\|")):
+    counts = [len(re.findall(pattern, text, re.M)) for text in (en, zh)]
+    if counts[0] != counts[1]:
+        sys.exit(f"{label} differ: {counts}")
+links = [re.findall(r"\]\(([^)]+)\)", text) for text in (en, zh)]
+normalize = lambda targets: [p.replace(".zh-CN.md", ".md") for p in targets]
+if normalize(links[0]) != normalize(links[1]):
+    sys.exit("README link targets differ")
+print("README structure and entry points match.")
+PY
