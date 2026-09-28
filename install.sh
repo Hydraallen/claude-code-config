@@ -371,10 +371,19 @@ detect_script_dir() {
             exit 1
         fi
 
-        if ! retry 5 3 "Download source tarball" bash -c "$download_cmd | tar xz -C '$tmpdir' --strip-components=1"; then
+        if ! retry 5 3 "Download source tarball" bash -c "$download_cmd > '$tmpdir/.source.tar.gz' && tar xzf '$tmpdir/.source.tar.gz' -C '$tmpdir' --strip-components=1"; then
             error "Failed to download source after retries. Cannot continue in remote mode."
             exit 1
         fi
+        # GitHub archives carry the commit id in a pax header; recorded in
+        # agent-config/selection.json as the installed repository revision.
+        if command -v git &>/dev/null; then
+            # get-tar-commit-id stops after the header, so gzip may exit on
+            # SIGPIPE; keep the output regardless of the pipeline status.
+            SOURCE_REVISION="$(gzip -dc "$tmpdir/.source.tar.gz" 2>/dev/null | git get-tar-commit-id 2>/dev/null || true)"
+            [[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]] || SOURCE_REVISION=""
+        fi
+        rm -f "$tmpdir/.source.tar.gz"
 
         SCRIPT_DIR="$tmpdir"
         ok "Source downloaded to temporary directory"
@@ -4607,7 +4616,7 @@ install_plugins() {
 # always get cleaned. The selection-driven reconciliation is a separate thing —
 # see prune_unlisted_plugins() — and only runs when plugins were selected.
 prune_retired_plugins() {
-    command -v claude &>/dev/null || return
+    command -v claude &>/dev/null || return 0
     local list_json="$HOME/.claude/plugins/installed_plugins.json"
     local pkg mkt
     for pkg in "${RETIRED_PLUGINS[@]}"; do
@@ -4941,6 +4950,371 @@ update_installed_plugins() {
     done < <(jq -r '.plugins | keys[]' "$list_json" 2>/dev/null)
 }
 
+# ============================================================
+# Selection record: ~/.claude/agent-config/selection.json
+#
+# The agent-guided path (INSTALL.md, skills/edit-config) keeps its per-target
+# selection record here. The script installer writes the same record so that
+# edit-config can take over later: the repository object (url / revision /
+# update policy, see INSTALL.md#repository-source), the selected catalog IDs
+# and one entry per item with its status. File ownership stays in
+# agent-config/files.json (managed_files.py); this file never claims it.
+#
+# Menu IDs that have no catalog.md row (fork-only or script-only items such
+# as the model backends) are listed under script_installer.script_only.
+# Records written by the agent path (items without "source": "script") are
+# never removed by the script.
+# ============================================================
+
+# Map a menu ID to its catalog.md ID(s) (space-separated), or nothing for a
+# script-only item. scripts/check-catalog-sync.sh verifies this table against
+# catalog.md; install.ps1 carries the same table (Get-CatalogIdForMenuId).
+catalog_id_for_menu_id() {
+    case "$1" in
+        claude-md)                   echo "instructions" ;;
+        settings)                    echo "settings permissions" ;;
+        rules-writing-style)         echo "rules-writing-style" ;;
+        statusline)                  echo "statusline" ;;
+        lessons)                     echo "lessons" ;;
+        rules-python)                echo "rules-python" ;;
+        rules-ts)                    echo "rules-typescript" ;;
+        rules-go)                    echo "rules-golang" ;;
+        review-code-review)          echo "claude-pr-review" ;;
+        review-adversarial)          echo "adversarial-review" ;;
+        review-codex)                echo "codex-in-claude" ;;
+        plug-andrej-karpathy-skills) echo "karpathy" ;;
+        plug-superpowers)            echo "superpowers" ;;
+        skill-mattpocock)            echo "matt-workflow" ;;
+        plug-feature-dev)            echo "feature-dev" ;;
+        plug-ralph-loop)             echo "ralph-loop" ;;
+        plug-commit-commands)        echo "commit-commands" ;;
+        plug-code-simplifier)        echo "code-simplifier" ;;
+        plug-everything-claude-code) echo "ecc" ;;
+        skill-update-config)         echo "update-config" ;;
+        skill-neat-freak)            echo "neat-freak" ;;
+        plug-context7)               echo "context7" ;;
+        plug-playwright)             echo "playwright" ;;
+        plug-document-skills)        echo "documents" ;;
+        plug-example-skills)         echo "examples" ;;
+        skill-humanizer)             echo "humanizer" ;;
+        skill-humanizer-zh)          echo "humanizer-zh" ;;
+        lieflat-charts)              echo "lieflat-charts" ;;
+        plug-frontend-slides)        echo "frontend-slides" ;;
+        plug-ppt-master)             echo "ppt-master" ;;
+        skill-storage-analyzer)      echo "storage-analyzer" ;;
+        skill-paper-reading)         echo "paper-reading" ;;
+        skill-cheatsheet-creator)    echo "cheatsheet-creator" ;;
+        ai-research)                 echo "ai-research" ;;
+        researchstudio-idea)         echo "researchstudio-idea" ;;
+        deepxiv-cli|deepxiv-trending-digest|deepxiv-baseline-table) echo "$1" ;;
+        mcp)                         echo "playwright-mcp" ;;
+        mcp-lark)                    echo "lark" ;;
+        # Script-only: search agent, shell wrapper, co-author, model backends.
+        *)                           echo "" ;;
+    esac
+}
+
+# Repository identity of the source this run installs from, per
+# INSTALL.md#repository-source. Sets SOURCE_REPO_URL, SOURCE_REVISION and
+# SOURCE_UPDATE_JSON. SOURCE_REVISION may already hold the tarball commit
+# (remote mode, set by detect_script_dir).
+SOURCE_REVISION="${SOURCE_REVISION:-}"
+SOURCE_REPO_URL=""
+SOURCE_UPDATE_JSON=""
+resolve_source_identity() {
+    local canonical="${REPO_URL}.git"
+    if $REMOTE_MODE; then
+        SOURCE_REPO_URL="$canonical"
+        local version="${VERSION:-$REPO_BRANCH}"
+        if [[ "$version" =~ ^v[0-9] && -n "$SOURCE_REVISION" ]]; then
+            SOURCE_UPDATE_JSON="$(jq -cn --arg r "$SOURCE_REVISION" '{kind:"pinned",ref:$r}')"
+        else
+            SOURCE_UPDATE_JSON="$(jq -cn --arg r "$version" '{kind:"branch",ref:$r}')"
+        fi
+        return 0
+    fi
+    # Local checkout: a clean branch with a known origin tracks that branch;
+    # a detached HEAD is pinned; anything else (no git, local edits) is local.
+    local head="" branch="" origin="" dirty=""
+    if command -v git &>/dev/null && git -C "$SCRIPT_DIR" rev-parse --git-dir &>/dev/null; then
+        head="$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null)" || head=""
+        branch="$(git -C "$SCRIPT_DIR" symbolic-ref --short -q HEAD 2>/dev/null)" || branch=""
+        origin="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null)" || origin=""
+        dirty="$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null | head -1)"
+    fi
+    # Never record credentials embedded in a remote URL.
+    origin="$(sed -E 's#^(https?://)[^/@]+@#\1#' <<< "$origin")"
+    SOURCE_REVISION="$head"
+    SOURCE_REPO_URL="${origin:-}"
+    if [[ -z "$head" || -n "$dirty" || -z "$origin" ]]; then
+        SOURCE_UPDATE_JSON="$(jq -cn --arg p "$SCRIPT_DIR" '{kind:"local",path:$p}')"
+    elif [[ -z "$branch" ]]; then
+        SOURCE_UPDATE_JSON="$(jq -cn --arg r "$head" '{kind:"pinned",ref:$r}')"
+    else
+        SOURCE_UPDATE_JSON="$(jq -cn --arg r "$branch" '{kind:"branch",ref:$r}')"
+    fi
+}
+
+# Effective plugin selection of this run as a "|a|b|" set string.
+_effective_plugin_set() {
+    local json p set="|"
+    json="$(_effective_selected_plugins_json)"
+    while IFS= read -r p; do
+        [[ -n "$p" ]] && set+="$p|"
+    done < <(jq -r '.[]' <<< "$json" 2>/dev/null)
+    echo "$set"
+}
+
+# Effective local-skill selection of this run as a "|a|b|" set string.
+_effective_skill_set() {
+    local set="|" s opt skip
+    $INSTALL_SKILLS || { echo "$set"; return; }
+    if [[ ${#SELECTED_SKILLS[@]} -gt 0 ]]; then
+        for s in "${SELECTED_SKILLS[@]}"; do set+="$s|"; done
+    else
+        for s in "${SCRIPT_OWNED_SKILLS[@]}"; do
+            skip=false
+            for opt in "${SCRIPT_OPT_IN_SKILLS[@]}"; do [[ "$opt" == "$s" ]] && skip=true; done
+            $skip || set+="$s|"
+        done
+    fi
+    echo "$set"
+}
+
+_in_list() {
+    local needle="$1" x; shift
+    for x in "$@"; do [[ "$x" == "$needle" ]] && return 0; done
+    return 1
+}
+
+# 0 when menu item $1 was part of this run's effective selection. $2/$3 are
+# the plugin and skill set strings.
+menu_id_selected_this_run() {
+    local id="$1" plugins="$2" skills="$3" pkg
+    case "$id" in
+        claude-md)           $INSTALL_CLAUDE_MD ;;
+        settings)            $INSTALL_SETTINGS ;;
+        rules-writing-style) $INSTALL_RULES && $INSTALL_WRITING_STYLE ;;
+        statusline)          $INSTALL_STATUSLINE ;;
+        lessons)             $INSTALL_LESSONS ;;
+        agents)              $INSTALL_AGENTS ;;
+        shell-wrapper)       $INSTALL_SHELL_WRAPPER ;;
+        co-author)           $CO_AUTHOR ;;
+        backend-glm|backend-or|backend-gpt|backend-ccr)
+            $INSTALL_SHELL_WRAPPER && _in_list "${id#backend-}" ${SELECTED_PROFILES[@]+"${SELECTED_PROFILES[@]}"} ;;
+        rules-python|rules-ts|rules-go)
+            local lang
+            case "$id" in rules-python) lang=python ;; rules-ts) lang=typescript ;; *) lang=golang ;; esac
+            $INSTALL_RULES || return 1
+            if [[ ${#RULE_LANGS[@]} -gt 0 ]]; then _in_list "$lang" "${RULE_LANGS[@]}"
+            else ! $RULE_LANGS_EXPLICIT && ! $ONLY_MODE; fi ;;
+        review-code-review)  [[ "$plugins" == *"|code-review@claude-plugins-official|"* ]] ;;
+        review-codex)        [[ "$plugins" == *"|codex@openai-codex|"* ]] ;;
+        review-adversarial)  [[ "$skills" == *"|adversarial-review|"* ]] ;;
+        skill-humanizer)     [[ "$plugins" == *"|humanizer@humanizer|"* ]] ;;
+        skill-mattpocock)    $INSTALL_MATTPOCOCK ;;
+        skill-humanizer-zh)  is_upstream_skill_selected humanizer-zh ;;
+        skill-neat-freak)    is_upstream_skill_selected neat-freak ;;
+        lieflat-charts)      is_upstream_skill_selected lieflat-charts ;;
+        researchstudio-idea) is_upstream_skill_selected researchstudio-idea ;;
+        skill-*)             [[ "$skills" == *"|${id#skill-}|"* ]] ;;
+        ai-research)
+            for pkg in "${PLUGINS_AI_RESEARCH[@]}"; do [[ "$plugins" == *"|$pkg|"* ]] || return 1; done ;;
+        deepxiv-*)
+            $INSTALL_DEEPXIV || return 1
+            [[ ${#SELECTED_DEEPXIV_SKILLS[@]} -eq 0 ]] || _in_list "$id" "${SELECTED_DEEPXIV_SKILLS[@]}" ;;
+        mcp)                 $INSTALL_MCP ;;
+        mcp-lark)            $INSTALL_LARK ;;
+        plug-*)
+            pkg="$(plug_id_to_pkg "$id")"
+            [[ -n "$pkg" && "$plugins" == *"|$pkg|"* ]] ;;
+        *) return 1 ;;
+    esac
+}
+
+# Echo a JSON object describing item $1 after the run: status plus the native
+# selectors / skill paths / pinned upstream revision it covers.
+selection_item_json() {
+    local id="$1" status="installed" pkg name
+    local -a selectors=() paths=()
+    case "$id" in
+        claude-md)       [[ -f "$CLAUDE_DIR/CLAUDE.md" ]] || status="failed"; paths=("CLAUDE.md") ;;
+        settings)        [[ -f "$CLAUDE_DIR/settings.json" ]] || status="failed"; paths=("settings.json") ;;
+        rules-writing-style) [[ -f "$CLAUDE_DIR/rules/writing-style.md" ]] || status="failed"; paths=("rules/writing-style.md") ;;
+        statusline)      [[ -f "$CLAUDE_DIR/hooks/statusline.sh" ]] || status="failed"; paths=("hooks/statusline.sh") ;;
+        lessons)         [[ -f "$CLAUDE_DIR/lessons.md" ]] || status="failed"; paths=("lessons.md") ;;
+        rules-python)    [[ -d "$CLAUDE_DIR/rules/python" ]] || status="failed"; paths=("rules/python") ;;
+        rules-ts)        [[ -d "$CLAUDE_DIR/rules/typescript" ]] || status="failed"; paths=("rules/typescript") ;;
+        rules-go)        [[ -d "$CLAUDE_DIR/rules/golang" ]] || status="failed"; paths=("rules/golang") ;;
+        skill-mattpocock)
+            for name in "${MATTPOCOCK_SKILLS[@]}"; do
+                paths+=("skills/$name")
+                [[ -d "$CLAUDE_DIR/skills/$name" ]] || status="failed"
+            done ;;
+        skill-humanizer-zh|skill-neat-freak|lieflat-charts|researchstudio-idea)
+            local item="${id#skill-}"
+            for name in $(upstream_skill_field "$item" targets); do
+                paths+=("skills/$name")
+                [[ -d "$CLAUDE_DIR/skills/$name" ]] || status="failed"
+            done ;;
+        review-adversarial) [[ -d "$CLAUDE_DIR/skills/adversarial-review" ]] || status="failed"; paths=("skills/adversarial-review") ;;
+        skill-humanizer)  selectors=("humanizer@humanizer") ;;
+        skill-*)          [[ -d "$CLAUDE_DIR/skills/${id#skill-}" ]] || status="failed"; paths=("skills/${id#skill-}") ;;
+        deepxiv-*)        [[ -d "$CLAUDE_DIR/skills/$id" ]] || status="failed"; paths=("skills/$id") ;;
+        review-code-review) selectors=("code-review@claude-plugins-official") ;;
+        review-codex)     selectors=("codex@openai-codex") ;;
+        ai-research)      selectors=("${PLUGINS_AI_RESEARCH[@]}") ;;
+        plug-*)           selectors=("$(plug_id_to_pkg "$id")") ;;
+        mcp)              jq -e '.mcpServers.playwright' "$HOME/.claude.json" &>/dev/null || status="pending" ;;
+        mcp-lark)         jq -e '.mcpServers["lark-mcp"]' "$HOME/.claude.json" &>/dev/null || status="pending" ;;
+    esac
+    if [[ ${#selectors[@]} -gt 0 ]]; then
+        local ok_count=0
+        for pkg in "${selectors[@]}"; do plugin_is_installed "$pkg" && ok_count=$((ok_count + 1)); done
+        if (( ok_count == 0 )); then status="failed"
+        elif (( ok_count < ${#selectors[@]} )); then status="partial"; fi
+    fi
+    local rev=""
+    case "$id" in
+        skill-humanizer-zh|skill-neat-freak|lieflat-charts|researchstudio-idea)
+            rev="$(upstream_skill_field "${id#skill-}" rev)" ;;
+    esac
+    jq -cn --arg menu "$id" --arg status "$status" --arg rev "$rev" \
+        --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --argjson selectors "$(printf '%s\n' ${selectors[@]+"${selectors[@]}"} | jq -R 'select(length > 0)' | jq -cs .)" \
+        --argjson paths "$(printf '%s\n' ${paths[@]+"${paths[@]}"} | jq -R 'select(length > 0)' | jq -cs .)" \
+        '{source: "script", menu_id: $menu, status: $status, updated: $now}
+         + (if ($selectors | length) > 0 then {selectors: $selectors} else {} end)
+         + (if ($paths | length) > 0 then {paths: $paths} else {} end)
+         + (if $rev != "" then {upstream_revision: $rev} else {} end)'
+}
+
+# Catalog IDs that have a row in this source's catalog.md.
+_catalog_ids_in_source() {
+    local catalog="$SCRIPT_DIR/catalog.md"
+    [[ -f "$catalog" ]] || return 0
+    sed -nE 's/^\| ([a-z0-9][a-z0-9-]*) \|.*/\1/p' "$catalog"
+}
+
+write_selection_record() {
+    local dest_dir="$CLAUDE_DIR/agent-config" dest
+    dest="$dest_dir/selection.json"
+    if $DRY_RUN; then
+        info "Would record this selection in $dest (for edit-config)"
+        return 0
+    fi
+    if ! command -v jq &>/dev/null; then
+        warn "jq unavailable — selection record $dest not updated"
+        return 0
+    fi
+    if [[ -L "$dest" ]]; then
+        warn "Refusing to write the selection record through a symlink: $dest"
+        return 0
+    fi
+    resolve_source_identity
+
+    local catalog_set="|" c
+    while IFS= read -r c; do [[ -n "$c" ]] && catalog_set+="$c|"; done < <(_catalog_ids_in_source)
+
+    local plugins skills entry id _df _group cid
+    plugins="$(_effective_plugin_set)"
+    skills="$(_effective_skill_set)"
+    local items="{}" known="[]" script_only="[]"
+    while IFS='|' read -r id _df _group; do
+        local cids; cids="$(catalog_id_for_menu_id "$id")"
+        local in_catalog=false
+        for cid in $cids; do [[ "$catalog_set" == *"|$cid|"* ]] && in_catalog=true; done
+        if ! $in_catalog; then
+            if menu_id_selected_this_run "$id" "$plugins" "$skills"; then
+                script_only="$(jq -c --arg i "$id" '. + [$i]' <<< "$script_only")"
+            fi
+            continue
+        fi
+        local item_json=""
+        menu_id_selected_this_run "$id" "$plugins" "$skills" && item_json="$(selection_item_json "$id")"
+        for cid in $cids; do
+            [[ "$catalog_set" == *"|$cid|"* ]] || continue
+            known="$(jq -c --arg c "$cid" '. + [$c]' <<< "$known")"
+            [[ -n "$item_json" ]] && items="$(jq -c --arg c "$cid" --argjson v "$item_json" '.[$c] = $v' <<< "$items")"
+        done
+    done < <(menu_item_ids)
+
+    local existing="{}"
+    if [[ -f "$dest" ]]; then
+        if jq -e 'type == "object"' "$dest" &>/dev/null; then
+            existing="$(cat "$dest")"
+        else
+            warn "Existing $dest is not a JSON object; keeping it as ${dest}.invalid"
+            cp -f "$dest" "${dest}.invalid" 2>/dev/null || true
+        fi
+    fi
+
+    local mode="default"
+    if $ONLY_MODE; then mode="only"; elif $FULL_SELECTION; then mode="interactive"; elif $EXPLICIT_ALL; then mode="all"; fi
+
+    mkdir -p "$dest_dir" && chmod 700 "$dest_dir" 2>/dev/null || true
+    local tmp
+    tmp="$(mktemp "$dest_dir/.selection.json.XXXXXX")" || { warn "Could not write $dest"; return 0; }
+    if jq --argjson items "$items" --argjson known "$known" --argjson scriptOnly "$script_only" \
+          --arg mode "$mode" --arg url "$SOURCE_REPO_URL" --arg rev "$SOURCE_REVISION" \
+          --argjson update "${SOURCE_UPDATE_JSON:-null}" \
+          --arg version "$(get_source_version)" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+        . as $old
+        | ($old.items // {}) as $prev
+        # A full selection drops script-written records for known items that
+        # were not selected; agent-written records and --only runs keep them.
+        | (if $mode == "only" then $prev
+           else ($prev | with_entries(select(
+                    (.key as $k | ($known | index($k)) == null)
+                    or ((.value.source // "") != "script"))))
+           end) as $kept
+        | ($kept + $items) as $merged
+        | (if ($old.repository.url? // null) != null and ($old.repository.url != ($url | select(. != "") // null))
+             then {repository_previous: $old.repository} else {} end) as $prevRepo
+        | $old + $prevRepo + {
+            agent: "claude",
+            client: "claude-code",
+            repository: {
+                url: (if $url == "" then null else $url end),
+                revision: (if $rev == "" then null else $rev end),
+                update: $update
+            },
+            selected: ($merged | keys),
+            items: $merged,
+            script_installer: {
+                name: "install.sh",
+                version: $version,
+                mode: $mode,
+                updated: $now,
+                script_only: (if $mode == "only"
+                              then ((($old.script_installer.script_only // []) + $scriptOnly) | unique)
+                              else $scriptOnly end)
+            }
+          }' <<< "$existing" > "$tmp" && jq empty "$tmp" 2>/dev/null; then
+        chmod 600 "$tmp" 2>/dev/null || true
+        mv -f "$tmp" "$dest"
+        ok "Selection recorded for edit-config: $dest"
+    else
+        rm -f "$tmp"
+        warn "Could not update the selection record $dest"
+    fi
+}
+
+# --uninstall: drop the records this script wrote; agent-written ones stay.
+clear_script_selection_records() {
+    local dest="$CLAUDE_DIR/agent-config/selection.json" tmp
+    [[ -f "$dest" && ! -L "$dest" ]] || return 0
+    command -v jq &>/dev/null || return 0
+    tmp="$(mktemp "$CLAUDE_DIR/agent-config/.selection.json.XXXXXX")" || return 0
+    if jq '.items = ((.items // {}) | with_entries(select((.value.source // "") != "script")))
+           | .selected = (.items | keys) | del(.script_installer)' "$dest" > "$tmp" 2>/dev/null; then
+        chmod 600 "$tmp" 2>/dev/null || true
+        mv -f "$tmp" "$dest" && ok "Removed script-installer entries from $dest"
+    else
+        rm -f "$tmp"
+    fi
+}
+
 # --- Uninstall ----------------------------------------------------------
 
 uninstall() {
@@ -4999,11 +5373,11 @@ uninstall() {
     local up_item up_name
     while IFS= read -r up_item; do
         for up_name in $(upstream_skill_field "$up_item" targets); do
-            remove_script_managed_skill "$up_name"
+            remove_script_managed_skill "$up_name" || true
         done
     done < <(upstream_skill_items)
-    cleanup_legacy_vendored_skill humanizer "$LEGACY_HUMANIZER_SHA256"
-    cleanup_legacy_vendored_skill humanizer-zh "$LEGACY_HUMANIZER_ZH_SHA256"
+    cleanup_legacy_vendored_skill humanizer "$LEGACY_HUMANIZER_SHA256" || true
+    cleanup_legacy_vendored_skill humanizer-zh "$LEGACY_HUMANIZER_ZH_SHA256" || true
 
     # Only remove agents that ship with this repo
     if [[ -d "$SCRIPT_DIR/agents" ]]; then
@@ -5093,6 +5467,7 @@ uninstall() {
         warn "Claude CLI not found — cannot uninstall plugins or MCP servers"
     fi
 
+    clear_script_selection_records || true
     rm -f "$VERSION_STAMP_FILE"
     echo ""
     ok "Uninstall complete."
@@ -5942,7 +6317,7 @@ main() {
     $INSTALL_SETTINGS && install_settings
     $INSTALL_RULES && install_rules
     $INSTALL_SKILLS && install_skills
-    install_upstream_skills
+    install_upstream_skills || true
     $INSTALL_AGENTS && install_agents
     install_scripts
     # image-gen is always-installed (no flag gate). Runs after install_scripts
@@ -5956,7 +6331,7 @@ main() {
     $INSTALL_LESSONS && install_lessons
     $INSTALL_STATUSLINE && install_statusline
     { $INSTALL_MCP || $INSTALL_LARK; } && install_mcp
-    prune_retired_plugins
+    prune_retired_plugins || true
     if $INSTALL_PLUGINS && ! $ONLY_MODE && [[ "$PLUGIN_PRUNE_SCOPE" == "all" ]] && ! $DRY_RUN; then
         info "This run aligns your installed plugins to this run's selection — anything not selected is uninstalled. Preview it any time with: $(basename "$0") --dry-run"
     fi
@@ -5969,16 +6344,19 @@ main() {
     # before update_installed_plugins() so we never spend NET_TIMEOUT refreshing
     # a catalog we are about to delete.
     # --only is additive and skips reconciliation entirely.
+    # (`|| true` keeps the old `a && f` semantics: these helpers return
+    # non-zero on their early-exit paths, which must not trip errexit.)
     if $INSTALL_PLUGINS && ! $ONLY_MODE; then
-        prune_unlisted_plugins
-        prune_unlisted_marketplaces
-        sync_enabled_plugins_settings
+        prune_unlisted_plugins || true
+        prune_unlisted_marketplaces || true
+        sync_enabled_plugins_settings || true
     fi
     # Always refresh marketplaces and update installed plugins, even when no
     # plugins were selected this run — keeps third-party plugins current.
     update_installed_plugins
     $INSTALL_SHELL_WRAPPER && install_shell_wrapper
     $INSTALL_DEEPXIV && install_deepxiv
+    write_selection_record || warn "Could not update agent-config/selection.json"
 
     # Stamp version (skip only on critical warnings — non-critical like plugin failures are OK).
     # A partial --only run does not claim the whole configuration version.
