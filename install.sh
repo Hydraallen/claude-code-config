@@ -2104,8 +2104,11 @@ _install_settings_from() {
     # env: incoming as defaults, existing overrides
     ($base.env // {}) * ($over.env // {}) as $env |
 
-    # permissions.allow: union
-    (($base.permissions.allow // []) + ($over.permissions.allow // []) | unique) as $allow |
+    # permissions.allow: union, minus MCP rules Claude Code rejects (a glob
+    # before the literal mcp__<server>__ prefix, e.g. mcp__* from older installs)
+    (($base.permissions.allow // []) + ($over.permissions.allow // []) | unique
+      | map(select((type == "string" and startswith("mcp__") and test("\\*")
+                    and (test("^mcp__[^*]+__") | not)) | not))) as $allow |
 
     # enabledPlugins:
     # When $apply_sel is true, apply the selection filter ONLY to keys the installer

@@ -2,6 +2,17 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.2.3] - 2026-09-28
+
+### Features
+- **重新安装时会从 `permissions.allow` 移除无效的 MCP 通配符。** install.sh 与 install.ps1 的 settings 合并会丢弃以 `mcp__` 开头、且在字面前缀 `mcp__<server>__` 之前出现 `*` 的 allow 规则，例如 `mcp__*`、`mcp__git*`。`mcp__github`、`mcp__github__*` 等有效规则以及非 MCP 规则保持不变。
+
+### Design Rationale
+- 模板早已删除 `mcp__*`，但合并对模板与现有 allow 数组取并集，已有该条目的安装一直保留它。Claude Code 启动时因此显示 "Settings Warning"（"Wildcard tool name \"mcp__*\" is not supported in allow rules"）。Claude Code 原本就跳过该规则，移除后放行的工具不变。
+
+### Notes & Caveats
+- 只过滤 allow 规则。deny 与 ask 规则允许任意位置使用通配符，不受影响。
+
 ## [4.2.2] - 2026-09-28
 
 ### Features

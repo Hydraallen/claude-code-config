@@ -1204,7 +1204,9 @@ function Install-Settings {
         # permissions.allow: union
         $baseAllow = if ($incoming.permissions -and $incoming.permissions.allow) { @($incoming.permissions.allow) } else { @() }
         $overAllow = if ($existing.permissions -and $existing.permissions.allow) { @($existing.permissions.allow) } else { @() }
-        $mergedAllow = @($baseAllow + $overAllow | Select-Object -Unique)
+        # Drop MCP rules Claude Code rejects: a glob before the literal mcp__<server>__ prefix (e.g. mcp__* from older installs)
+        $mergedAllow = @($baseAllow + $overAllow | Select-Object -Unique |
+            Where-Object { -not ($_ -is [string] -and $_.StartsWith('mcp__') -and $_.Contains('*') -and $_ -notmatch '^mcp__[^*]+__') })
 
         # enabledPlugins: if plugins were interacted with this run, apply the selection
         # filter to the catalogue (source keys ∪ selected keys — so plugins picked in

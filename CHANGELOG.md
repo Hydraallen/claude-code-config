@@ -1,5 +1,16 @@
 # Changelog
 
+## [4.2.3] - 2026-09-28
+
+### Features
+- **Re-installs now remove invalid MCP wildcards from `permissions.allow`.** The settings merge (install.sh and install.ps1) drops any allow rule that starts with `mcp__` and has a `*` before a literal `mcp__<server>__` prefix, such as `mcp__*` or `mcp__git*`. Valid rules such as `mcp__github`, `mcp__github__*` and non-MCP rules are kept.
+
+### Design Rationale
+- The template dropped `mcp__*` long ago, but the merge takes the union of the template and existing allow arrays, so installs that already had it kept it. Claude Code then showed a "Settings Warning" at startup ("Wildcard tool name \"mcp__*\" is not supported in allow rules"). Claude Code already skipped the rule, so removing it does not change which tools are allowed.
+
+### Notes & Caveats
+- Only allow rules are filtered. Deny and ask rules accept wildcards anywhere and are not touched.
+
 ## [4.2.2] - 2026-09-28
 
 ### Features
