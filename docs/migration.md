@@ -138,9 +138,10 @@ Codex 关闭 `desktop.external-agent-import-sync-enabled`。旧 `model_instructi
 
 - 插件 `github@claude-plugins-official`、`claude-mem@thedotmack`、`pua@pua-skills`；
 - marketplace `thedotmack`、`pua-skills`；
-- 指向 `api.githubcopilot.com/mcp/` 的旧 user scope `github` MCP。
+- 指向 `api.githubcopilot.com/mcp/` 的旧 user scope `github` MCP；
+- 自 4.2.1 起，还清理这些插件卸载后留下的数据：退役 marketplace 的插件缓存 `~/.claude/plugins/cache/<marketplace>/`、未注册的残留克隆 `plugins/marketplaces/<marketplace>/`、插件数据目录 `plugins/data/<插件>-<marketplace>/`、超过 60 分钟未改动的 `plugins/cache/temp_git_*` 临时克隆、`~/.claude.json` 中 `skillUsage` / `pluginUsage` 里属于退役插件的使用记录（修改前备份为 `~/.claude.json.<时间戳>.bak`），以及 claude-mem 的数据目录 `~/.claude-mem`。只要仍有已安装插件使用对应插件或 marketplace，就全部保留；`--uninstall` 同样执行这一步，`--dry-run` 会逐项列出并给出大小。
 
-**仍在使用 claude-mem 的用户请注意**：升级到 4.2.0 后运行任一脚本安装器会卸载 claude-mem 插件。脚本不会删除 claude-mem 的数据目录（如 `~/.claude-mem`），但插件本身及其 hooks 不再运行，记忆不再注入会话。需要保留插件时，不要运行脚本安装器，或在运行后自行重新安装并接受下次运行会再次卸载。
+**仍在使用 claude-mem 的用户请注意**：升级到 4.2.0 后运行任一脚本安装器会卸载 claude-mem 插件，插件本身及其 hooks 不再运行，记忆不再注入会话。从 4.2.1 起，同一次运行还会**删除 claude-mem 的数据目录 `~/.claude-mem`**（前提是任何 `claude-mem@*` 插件都已不再安装，且没有 claude-mem 进程在运行；有进程在运行时保留目录并提示退出后重跑）。要保留这些数据，先备份 `~/.claude-mem`，或运行安装器时设置 `ACCC_KEEP_CLAUDE_MEM_DATA=1`。需要保留插件时，不要运行脚本安装器，或在运行后自行重新安装并接受下次运行会再次卸载。
 
 agent 路径中，用户明确要求卸载时，逐项核实来源、创建归属和本地修改，使用原生插件/MCP 卸载或受控文件移除；保留未授权删除的数据库、凭据、个人记忆和定制内容。
 

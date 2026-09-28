@@ -4395,7 +4395,9 @@ Options:
 
 Only an interactive run removes unchecked items. -All, -Only and the
 non-interactive default are additive and remove nothing, except that every run
-removes retired items (github plugin + GitHub MCP, claude-mem, PUA).
+removes retired items (github plugin + GitHub MCP, claude-mem, PUA) and their
+leftovers (plugin caches/data, ~\.claude-mem, ~\.claude.json usage records;
+set `$env:ACCC_KEEP_CLAUDE_MEM_DATA=1 to keep ~\.claude-mem).
 -All installs every item except the opt-in storage-analyzer skill.
 
 Examples:

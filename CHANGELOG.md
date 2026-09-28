@@ -1,5 +1,34 @@
 # Changelog
 
+## [4.2.1] - 2026-09-28
+
+### Features
+- **The retired-item sweep now also removes what retired plugins leave behind.** `prune_retired_leftovers` (install.sh) / `Remove-RetiredLeftovers` (install.ps1) runs on every run right after the retired-plugin uninstall (`--all`, `--only` and runs without a terminal included) and again at the end of `--uninstall`. It does not need the `claude` CLI. It removes:
+  - the plugin cache of each retired marketplace (`~/.claude/plugins/cache/thedotmack/` held every old claude-mem version, about 1.4 GB on one machine; also `pua-skills`, `claude-health`, `everything-claude-code`);
+  - a stale clone `~/.claude/plugins/marketplaces/<retired>/` that is no longer registered in `known_marketplaces.json`;
+  - the data dir `~/.claude/plugins/data/<plugin>-<marketplace>/` of each retired plugin (for example `claude-mem-thedotmack/`);
+  - Claude Code's leftover temp clones `~/.claude/plugins/cache/temp_git_*`, once nothing inside has changed for 60 minutes;
+  - usage records in `~/.claude.json` whose key names a retired plugin: `skillUsage["claude-mem:smart-explore"]`, `pluginUsage["claude-mem@thedotmack"]`, `@thedotmack` / `@pua-skills` keys and the like;
+  - claude-mem's data directory `~/.claude-mem`.
+- `--dry-run` / `-DryRun` lists every path with its size and every `~/.claude.json` record. A real run ends with one summary line (`Retired leftovers: removed N path(s), freed ~X`).
+- `ACCC_KEEP_CLAUDE_MEM_DATA=1` keeps `~/.claude-mem`.
+
+### Design Rationale
+- `claude plugin uninstall` and `marketplace remove` do not delete caches, data dirs or usage records. So after the 4.2.0 tombstones ran, the retired plugins were gone, but gigabytes of cache and the claude-mem database stayed on disk. The sweep runs on every run for the same reason the tombstones do: many machines only ever get unattended or `--only` runs.
+- Every deletion requires both conditions: the item is retired, and no installed plugin still uses it. A retired marketplace's cache and a retired plugin's data dir are kept while any `*@<marketplace>` / that `plugin@marketplace` key is still in `installed_plugins.json`. `~/.claude-mem` is kept while any `claude-mem@*` plugin is installed. If `installed_plugins.json` exists but cannot be parsed, the sweep deletes nothing. In a dry run, retired plugins that the tombstone sweep would uninstall first count as gone, so the preview matches a real run.
+- A marketplace clone that is still registered is left to `claude plugin marketplace remove`. Deleting the directory by hand would leave `known_marketplaces.json` pointing at a missing clone.
+- A `temp_git_*` clone is judged by the newest mtime anywhere inside it, not just by the top-level directory. A clone being written by another session is therefore never removed.
+- `~/.claude-mem` is removed because retiring claude-mem was meant to remove its data too. The sweep checks for running claude-mem processes (`pgrep -f claude-mem`, else `ps`; on Windows, the process command lines). If any are running, or if the check fails, it keeps the directory and prints the command to re-run. It never kills processes.
+- `~/.claude.json` is edited narrowly. Only the top-level `skillUsage` and `pluginUsage` maps are touched, and only keys that are an exact retired `plugin@marketplace`, start with `<retired plugin>:`, or end with `@<retired marketplace>`. A prefix is skipped while any installed plugin has the same name. Projects, history, auth, `mcpServers` and every other field are left alone. The edit goes to a temp file in the same directory, is validated, and replaces the original only if the original's checksum has not changed meanwhile (Claude Code rewrites this file while running). A timestamped backup `~/.claude.json.<timestamp>.bak` is written only when a record is removed. install.sh uses jq, with python3 as a fallback. install.ps1 edits a System.Text.Json DOM, because `ConvertFrom-Json` rewrites date-like strings.
+
+### Notes & Caveats
+- **This deletes claude-mem's memory database.** Back up `~/.claude-mem`, or set `ACCC_KEEP_CLAUDE_MEM_DATA=1`, before running the installer if you want to keep it. This also applies if you use claude-mem outside Claude Code, as long as no claude-mem process is running at the time.
+- Neither installer honours `CLAUDE_CONFIG_DIR` (both use `~/.claude` and `~/.claude.json`), so neither does this sweep.
+- install.ps1 cleans `~/.claude.json` only under PowerShell 7. Windows PowerShell 5.1 skips that one step with a notice. Symlinks and junctions are deleted as links, never followed.
+- `~/.claude/skills/learned` and `~/.claude/skills/synced` are deliberately not touched. `learned` belongs to the ECC continuous-learning hook, and `synced` holds skills synced from claude.ai.
+- The checksum check leaves a small window: a Claude Code write that lands between the check and the rename is lost. The backup covers that case.
+- Tests: `tests/test_retired_leftovers.py` (sources install.sh in a throwaway HOME with stubbed `claude` / `pgrep`, plus full `--only` and `--uninstall` runs) and `tests/install_ps1_retired_leftovers.ps1` (run through `tests/test_install_ps1_retired_leftovers.py` when `pwsh` is installed).
+
 ## [4.2.0] - 2026-09-28
 
 ### Features

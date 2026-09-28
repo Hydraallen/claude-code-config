@@ -66,7 +66,7 @@ Launches a two-level interactive selector: 47 items in 11 groups, 29 of them on 
 
 `--all`, `--only` and a run without a terminal (for example `curl | bash` in CI) are additive: they install what they select and remove nothing. Removals cannot be undone, so preview with `--dry-run`, which lists every removal and every backup.
 
-**Every run, additive ones included, removes retired items:** the github plugin, the old user-scope GitHub MCP server (only when it points at `api.githubcopilot.com/mcp/`), and the claude-mem and PUA plugins with their marketplaces. If you still use claude-mem, read the [migration note](docs/migration.md#removed-integrations) before upgrading. Each run records its selection in `~/.claude/agent-config/selection.json`, so `edit-config` can take over later.
+**Every run, additive ones included, removes retired items:** the github plugin, the old user-scope GitHub MCP server (only when it points at `api.githubcopilot.com/mcp/`), and the claude-mem and PUA plugins with their marketplaces, plus what those leave behind: their plugin caches and data directories, stale `plugins/cache/temp_git_*` clones older than an hour, their usage records in `~/.claude.json` (backed up first) and claude-mem's data directory `~/.claude-mem` (kept while a claude-mem process is running, or with `ACCC_KEEP_CLAUDE_MEM_DATA=1`). If you still use claude-mem, read the [migration note](docs/migration.md#removed-integrations) before upgrading. Each run records its selection in `~/.claude/agent-config/selection.json`, so `edit-config` can take over later.
 
 ### Option B — agent-guided setup (Claude or Codex)
 

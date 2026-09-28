@@ -66,7 +66,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 
 `--all`、`--only` 以及没有终端的运行（例如 CI 里的 `curl | bash`）都是增量的：只安装选中的内容，不删除任何东西。删除不可撤销，建议先用 `--dry-run` 预览，它会列出每一项删除和备份。
 
-**每次运行（包括增量运行）都会清理已退役的条目：** github 插件、旧的 user scope GitHub MCP 服务（仅当它指向 `api.githubcopilot.com/mcp/`），以及 claude-mem、PUA 插件和它们的 marketplace。仍在使用 claude-mem 的话，升级前请先读[迁移说明](docs/migration.md#removed-integrations)。每次运行都会把选择记录到 `~/.claude/agent-config/selection.json`，之后可以交给 `edit-config` 接管。
+**每次运行（包括增量运行）都会清理已退役的条目：** github 插件、旧的 user scope GitHub MCP 服务（仅当它指向 `api.githubcopilot.com/mcp/`），以及 claude-mem、PUA 插件和它们的 marketplace，外加它们留下的内容：插件缓存和数据目录、超过一小时的 `plugins/cache/temp_git_*` 残留克隆、`~/.claude.json` 中的使用记录（先备份）以及 claude-mem 的数据目录 `~/.claude-mem`（有 claude-mem 进程运行或设置了 `ACCC_KEEP_CLAUDE_MEM_DATA=1` 时保留）。仍在使用 claude-mem 的话，升级前请先读[迁移说明](docs/migration.md#removed-integrations)。每次运行都会把选择记录到 `~/.claude/agent-config/selection.json`，之后可以交给 `edit-config` 接管。
 
 ### 方式 B —— agent 引导安装（Claude 或 Codex）
 
