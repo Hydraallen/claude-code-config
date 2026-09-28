@@ -28,7 +28,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Hydraallen/claude-code-confi
 irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex
 ```
 
-Launches a two-level interactive selector: 47 items in 11 groups, 29 of them on by default. On Windows, `install.ps1` offers 40 items in 10 groups; the model backends, shell wrapper, co-author and Matt skills are macOS/Linux only for now. Flags (PowerShell spelling in parentheses):
+Launches a two-level interactive selector: 48 items in 11 groups, 30 of them on by default. On Windows, `install.ps1` offers 41 items in 10 groups; the model backends, shell wrapper, co-author and Matt skills are macOS/Linux only for now. Flags (PowerShell spelling in parentheses):
 
 - `--all` (`-All`): skip the menu and install every item except the opt-in storage-analyzer. Additive: nothing is removed.
 - `--only <ids>` (`-Only`): install just the listed menu items, comma-separated. Additive: nothing is removed, plugins are not reconciled, `enabledPlugins` is not rebuilt and the version stamp is not written.
@@ -41,7 +41,7 @@ Launches a two-level interactive selector: 47 items in 11 groups, 29 of them on 
     [2/4]  Model Backends        GLM, OpenRouter, ChatGPT (CLIProxyAPI), CCR
     [3/3]  Language Rules        Python / TypeScript / Go
     [1/3]  Review                code-review (adversarial-review / Codex opt-in)
-    [9/10] Workflow              karpathy, superpowers, mattpocock, ecc, update-config, neat-freak...
+    [10/11] Workflow             karpathy, superpowers, mattpocock, ecc, update-config, edit-config, neat-freak...
     [2/2]  Integrations          context7, playwright
     [3/5]  Design & Content      document-skills, example-skills, humanizer, humanizer-zh, lieflat-charts
     [0/2]  Slides                frontend-slides, ppt-master
@@ -51,7 +51,7 @@ Launches a two-level interactive selector: 47 items in 11 groups, 29 of them on 
 ```
 
 - **Main menu**: ↑↓ navigate groups, **Enter or →** open a group's sub-menu, **q** quit. Arrow to *Submit* and press Enter to install.
-- **Sub-menu**: ↑↓ navigate items, **Space** toggle, **← or Esc** back to main menu.
+- **Sub-menu**: ↑↓ navigate items, **Space** or **Enter** toggle, **← or Esc** back to main menu.
 - Shortcuts (any level): **a** all on, **n** all off, **d** defaults; in sub-menus these only affect that group.
 - The Review group's `adversarial-review` and `codex` are mutually exclusive — selecting one deselects the other.
 

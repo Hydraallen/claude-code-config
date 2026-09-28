@@ -171,11 +171,30 @@ the profile pins it to `""`. Three details follow from that:
 
 | Slot | Model | Context / output |
 |---|---|---|
-| `opus`, `sonnet` | `deepseek/deepseek-v4-pro` | 1,048,576 / 393,216 |
-| `haiku`, `fable` | `deepseek/deepseek-v4-flash` | 1,048,576 / 384,000 |
+| `opus`, `sonnet` | `deepseek/deepseek-v4-pro@preset/ds-preset` | 1,048,576 / 393,216 |
+| `haiku`, `fable` | `deepseek/deepseek-v4-flash@preset/ds-preset` | 1,048,576 / 384,000 |
 
 `fable` is Claude Code's background slot (compact, session titles, quota
 probes), so it is pointed at the cheaper model.
+
+> **Required — create the `ds-preset` preset.** Every slot appends
+> `@preset/ds-preset`, an OpenRouter preset that only sets provider routing. It
+> must exist in your account, or every slot fails with a not-found error. Create
+> it at openrouter.ai → Presets → New Preset: slug `ds-preset`, Models left empty,
+> Include Provider Preferences → `ignore`: StreamLake. Leave `only` completely
+> empty: an `only` list with nothing ticked is sent as `[]` and every request
+> fails with "No allowed providers are specified". Leave Parameters, Tools,
+> Caching and Reasoning unticked; Claude Code sends its own `max_tokens` and
+> thinking settings. To skip the preset, drop the `@preset/ds-preset` suffix.
+>
+> Why: OpenRouter routed `deepseek-v4-pro` to StreamLake, which returned the
+> whole reply as reasoning (`native_tokens_reasoning` equal to
+> `native_tokens_completion`). Tool calls arrived as raw DeepSeek
+> `<｜DSML｜tool_calls>` markup inside the thinking block, not as `tool_use`, so
+> Claude Code printed "Thought for Ns" and stopped. The preset's `only` list set
+> to DeepSeek alone works only when Settings → Privacy allows providers that
+> train on paid requests; otherwise every request is rejected with "Paid model
+> training violation".
 
 > **Caveat — one context limit, all slots.** `CLAUDE_CODE_MAX_CONTEXT_TOKENS`
 > is a single client-wide value. It is set to `1000000` because both DeepSeek V4
@@ -207,10 +226,10 @@ OpenRouter's own documentation says the native Anthropic endpoint
 and that "Claude Code expects Anthropic request semantics, so non-Anthropic
 models aren't supported through the native endpoint". That is a
 *no-guarantee*, not a hard API-level rejection, and no public report of DeepSeek
-succeeding or failing through this endpoint exists either way. **This profile
-has never been exercised against a live OpenRouter key** — in particular
-`tool_use` round-trips through DeepSeek are unverified. If it misbehaves, check
-tool calls first.
+succeeding or failing through this endpoint exists either way. Through
+StreamLake, `tool_use` round-trips failed as described above; other providers
+are unverified. If it misbehaves, check tool calls and the serving provider
+(OpenRouter → Logs) first.
 
 There is no 5h quota bar for this backend — see
 [Quota in the statusline](#quota-in-the-statusline) below.

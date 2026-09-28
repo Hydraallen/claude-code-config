@@ -28,7 +28,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Hydraallen/claude-code-confi
 irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex
 ```
 
-启动两级交互菜单：11 个分组共 47 项，其中 29 项默认开启。Windows 上的 `install.ps1` 提供 10 个分组共 40 项；模型后端、shell wrapper、co-author 与 Matt skills 目前只支持 macOS / Linux。参数（括号内为 PowerShell 写法）：
+启动两级交互菜单：11 个分组共 48 项，其中 30 项默认开启。Windows 上的 `install.ps1` 提供 10 个分组共 41 项；模型后端、shell wrapper、co-author 与 Matt skills 目前只支持 macOS / Linux。参数（括号内为 PowerShell 写法）：
 
 - `--all`（`-All`）：跳过菜单，安装除可选 storage-analyzer 之外的全部条目。增量安装：不删除任何内容。
 - `--only <ids>`（`-Only`）：只安装列出的菜单项，逗号分隔。增量安装：不删除其他内容、不对账插件、不重建 `enabledPlugins`、不写版本戳。
@@ -41,7 +41,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
     [2/4]  Model Backends        GLM、OpenRouter、ChatGPT（CLIProxyAPI）、CCR
     [3/3]  Language Rules        Python / TypeScript / Go
     [1/3]  Review                code-review（adversarial-review / Codex 需手动勾选）
-    [9/10] Workflow              karpathy、superpowers、mattpocock、ecc、update-config、neat-freak...
+    [10/11] Workflow             karpathy、superpowers、mattpocock、ecc、update-config、edit-config、neat-freak...
     [2/2]  Integrations          context7、playwright
     [3/5]  Design & Content      document-skills、example-skills、humanizer、humanizer-zh、lieflat-charts
     [0/2]  Slides                frontend-slides、ppt-master
@@ -51,7 +51,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 ```
 
 - **主菜单**：↑↓ 切换分组，**Enter 或 →** 进入子菜单，**q** 退出。移到 *Submit* 按 Enter 开始安装。
-- **子菜单**：↑↓ 切换条目，**空格** 勾选，**← 或 Esc** 返回主菜单。
+- **子菜单**：↑↓ 切换条目，**空格** 或 **Enter** 勾选，**← 或 Esc** 返回主菜单。
 - 快捷键（任意层级）：**a** 全选，**n** 全不选，**d** 恢复默认；在子菜单中只作用于当前分组。
 - Review 分组中 `adversarial-review` 与 `codex` 互斥——选中一个会取消另一个。
 

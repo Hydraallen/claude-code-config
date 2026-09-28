@@ -576,10 +576,10 @@ REVIEW_CODEX=false
 SELECTED_SKILLS=()
 # Repository skills this script installer owns. --all installs exactly these,
 # and unselected-cleanup / --uninstall only ever remove these. skills/ also
-# holds skills that only the agent-guided path manages (edit-config), which
-# the script must never copy or delete. humanizer/humanizer-zh are no longer
+# holds skills that only the agent-guided path manages, which the script must
+# never copy or delete. humanizer/humanizer-zh are no longer
 # bundled: humanizer is a plugin and humanizer-zh a pinned upstream skill.
-SCRIPT_OWNED_SKILLS=("paper-reading" "cheatsheet-creator" "update-config" "adversarial-review" "storage-analyzer")
+SCRIPT_OWNED_SKILLS=("paper-reading" "cheatsheet-creator" "update-config" "edit-config" "adversarial-review" "storage-analyzer")
 # Script-owned skills that are opt-in only: never installed by --all or the
 # non-interactive default run, only when picked explicitly.
 SCRIPT_OPT_IN_SKILLS=("storage-analyzer")
@@ -594,6 +594,7 @@ SELECTED_PLUGINS=()
 # recorded (read by load_previous_deselected for the initial menu state).
 MENU_DESELECTED_IDS=()
 PREV_DESELECTED_IDS=""
+PREV_PENDING_IDS=""
 SELECTED_DEEPXIV_SKILLS=()
 SELECTED_PROFILES=()
 DEEPXIV_KNOWN_SKILLS=("deepxiv-cli" "deepxiv-trending-digest" "deepxiv-baseline-table")
@@ -1095,6 +1096,7 @@ commit-commands|git commit / push / PR workflow|1|plug-commit-commands
 code-simplifier|Code simplification & cleanup|1|plug-code-simplifier
 ecc|Everything Claude Code: TDD, security, database, Go/Python/Spring Boot|1|plug-everything-claude-code
 update-config|Configure Claude Code via settings.json (skill)|1|skill-update-config
+edit-config|Inspect/change this repo's configuration; CLAUDE.md routes to it (skill)|1|skill-edit-config
 neat-freak|Knowledge, docs & workspace closeout (KKKKhazix/khazix-skills, pinned; needs python3)|0|skill-neat-freak")
 
     # Group 4: Integrations
@@ -1273,6 +1275,7 @@ apply_menu_id() {
         # AI Research: one item, six category plugins
         ai-research)            INSTALL_PLUGINS=true; SELECTED_PLUGINS+=("${PLUGINS_AI_RESEARCH[@]}") ;;
         skill-update-config)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("update-config") ;;
+        skill-edit-config)      INSTALL_SKILLS=true; SELECTED_SKILLS+=("edit-config") ;;
         skill-mattpocock)       INSTALL_MATTPOCOCK=true ;;
         # DeepXiv
         deepxiv-cli)            INSTALL_DEEPXIV=true; SELECTED_DEEPXIV_SKILLS+=("deepxiv-cli") ;;
@@ -1320,7 +1323,7 @@ _interactive_menu_tui() {
         printf '\033[?1049l' 2>/dev/null
         [[ -n "$saved_stty" ]] && stty "$saved_stty" <&3 2>/dev/null || stty echo <&3 2>/dev/null || true
         tput cnorm 2>/dev/null || printf '\033[?25h'
-        exec 3<&- 2>/dev/null || true
+        { exec 3<&-; } 2>/dev/null || true
     }
     trap '_menu_cleanup; exit 0' INT TERM
     # Also clean up on unexpected exit (e.g. set -e) to restore terminal.
@@ -1462,7 +1465,7 @@ _interactive_menu_tui() {
         buf+='\033[K\n'
         buf+='  \033[1;37m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\033[K\n'
         buf+='\033[K\n'
-        buf+='  \033[2m↑/↓ Navigate   Space Toggle   ←/Esc/Enter Back\033[0m\033[K\n'
+        buf+='  \033[2m↑/↓ Navigate   Space/Enter Toggle   ←/Esc Back\033[0m\033[K\n'
         buf+='  \033[2ma All   n None   d Defaults\033[0m\033[K\n'
         buf+='\033[K\n'
 
@@ -5443,6 +5446,7 @@ catalog_id_for_menu_id() {
         plug-code-simplifier)        echo "code-simplifier" ;;
         plug-everything-claude-code) echo "ecc" ;;
         skill-update-config)         echo "update-config" ;;
+        skill-edit-config)           echo "edit-config" ;;
         skill-neat-freak)            echo "neat-freak" ;;
         plug-context7)               echo "context7" ;;
         plug-playwright)             echo "playwright" ;;
@@ -5988,14 +5992,19 @@ mcp_is_ours() {
 
 # --- Detection for the initial menu state ---------------------------------
 
-# Read script_installer.deselected from the previous selection record.
+# Read script_installer.deselected and the script items still pending from the
+# previous selection record.
 load_previous_deselected() {
     PREV_DESELECTED_IDS=" "
+    PREV_PENDING_IDS=" "
     local f="$CLAUDE_DIR/agent-config/selection.json" id
     [[ -f "$f" && ! -L "$f" ]] && command -v jq &>/dev/null || return 0
     while IFS= read -r id; do
         [[ -n "$id" ]] && PREV_DESELECTED_IDS+="$id "
     done < <(jq -r '(.script_installer.deselected // [])[]? | strings' "$f" 2>/dev/null)
+    while IFS= read -r id; do
+        [[ -n "$id" ]] && PREV_PENDING_IDS+="$id "
+    done < <(jq -r '(.items // {})[]? | objects | select(.source == "script" and .status == "pending") | .menu_id | strings' "$f" 2>/dev/null)
     return 0
 }
 
@@ -6066,6 +6075,8 @@ menu_initial_state() {
         echo 1
     elif $prev_off; then
         echo 0
+    elif [[ "${PREV_PENDING_IDS:- }" == *" $id "* ]]; then
+        echo 1
     else
         echo "$default"
     fi
@@ -6342,7 +6353,7 @@ uninstall() {
     rm -rf "$CLAUDE_DIR/rules" && ok "Removed rules/"
 
     # Only remove the skills this script installer owns. Skills managed by the
-    # agent-guided path (edit-config, storage-analyzer, ...) and user-authored
+    # agent-guided path (recorded in agent-config/files.json) and user-authored
     # skills are left alone; image-gen is governed by its manifest below.
     local skill
     for skill in "${SCRIPT_OWNED_SKILLS[@]}"; do

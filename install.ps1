@@ -582,6 +582,7 @@ function Get-MenuGroups {
             @{ Label = "code-simplifier"; Desc = "Code simplification & cleanup";     Default = $true;  Id = "plug-code-simplifier" }
             @{ Label = "ecc"; Desc = "Everything Claude Code: TDD, security, database, Go/Python/Spring Boot"; Default = $true; Id = "plug-everything-claude-code" }
             @{ Label = "update-config";   Desc = "Configure Claude Code via settings.json (skill)"; Default = $true; Id = "skill-update-config" }
+            @{ Label = "edit-config";     Desc = "Inspect/change this repo's configuration; CLAUDE.md routes to it (skill)"; Default = $true; Id = "skill-edit-config" }
             @{ Label = "neat-freak";      Desc = "Knowledge, docs & workspace closeout (KKKKhazix/khazix-skills, pinned; needs Python)"; Default = $false; Id = "skill-neat-freak" }
         )}
         @{ Label = "Integrations"; Hint = "external tools & services"; Items = @(
@@ -705,6 +706,7 @@ function ConvertTo-MenuSelection {
             "researchstudio-idea"  { $result.UpstreamSkills += "researchstudio-idea" }
             "ai-research"          { $result.Plugins = $true; $result.SelectedPlugins += $PLUGINS_AI_RESEARCH }
             "skill-update-config"  { $result.Skills = $true; $result.SelectedSkills += "update-config" }
+            "skill-edit-config"    { $result.Skills = $true; $result.SelectedSkills += "edit-config" }
             "deepxiv-cli"          { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-cli" }
             "deepxiv-trending-digest" { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-trending-digest" }
             "deepxiv-baseline-table"  { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-baseline-table" }
@@ -743,6 +745,7 @@ function Show-InteractiveMenu {
     # anything not installed, unless the previous interactive run recorded the
     # item as unchecked (mirrors interactive_menu in install.sh).
     $script:PrevDeselectedIds = @(Get-PreviousDeselectedIds)
+    $script:PrevPendingIds = @(Get-PreviousPendingIds)
     $selected = @()
     for ($i = 0; $i -lt $n; $i++) { $selected += (Get-MenuInitialState -Id $allItems[$i].Id -Default ([bool]$allItems[$i].Default)) }
 
@@ -862,7 +865,7 @@ function Show-InteractiveMenu {
                             if ($groups[$subG].Hint) { Write-Host "  ($($groups[$subG].Hint))" -ForegroundColor DarkGray } else { Write-Host "" }
                             Write-Host "  =========================================" -ForegroundColor White
                             Write-Host ""
-                            Write-Host "  " -NoNewline; Write-Host "Up/Down move  Space toggle  Left/Esc back  Enter on [Back] to return" -ForegroundColor DarkGray
+                            Write-Host "  " -NoNewline; Write-Host "Up/Down move  Space/Enter toggle  Left/Esc back  Enter on [Back] to return" -ForegroundColor DarkGray
                             Write-Host ""
 
                             for ($j = 0; $j -lt $subN; $j++) {
@@ -1377,10 +1380,10 @@ function Install-Rules {
 
 # Repository skills this script installer owns. -All installs exactly these,
 # and unselected-cleanup / -Uninstall only ever remove these. skills\ also
-# holds skills that only the agent-guided path manages (edit-config), which the
-# script must never copy or delete. humanizer is now a plugin and humanizer-zh
+# holds skills that only the agent-guided path manages, which the script must
+# never copy or delete. humanizer is now a plugin and humanizer-zh
 # a pinned upstream skill (see Install-UpstreamSkills).
-$SCRIPT_OWNED_SKILLS = @("paper-reading", "cheatsheet-creator", "update-config", "adversarial-review", "storage-analyzer")
+$SCRIPT_OWNED_SKILLS = @("paper-reading", "cheatsheet-creator", "update-config", "edit-config", "adversarial-review", "storage-analyzer")
 # Opt-in only: never installed by -All or the non-interactive default run.
 $SCRIPT_OPT_IN_SKILLS = @("storage-analyzer")
 
@@ -3568,6 +3571,7 @@ $CATALOG_ID_FOR_MENU_ID = @{
     "plug-andrej-karpathy-skills" = @("karpathy"); "plug-superpowers" = @("superpowers"); "skill-mattpocock" = @("matt-workflow")
     "plug-feature-dev" = @("feature-dev"); "plug-ralph-loop" = @("ralph-loop"); "plug-commit-commands" = @("commit-commands")
     "plug-code-simplifier" = @("code-simplifier"); "plug-everything-claude-code" = @("ecc"); "skill-update-config" = @("update-config")
+    "skill-edit-config" = @("edit-config")
     "skill-neat-freak" = @("neat-freak"); "plug-context7" = @("context7"); "plug-playwright" = @("playwright")
     "plug-document-skills" = @("documents"); "plug-example-skills" = @("examples"); "skill-humanizer" = @("humanizer")
     "skill-humanizer-zh" = @("humanizer-zh"); "lieflat-charts" = @("lieflat-charts"); "plug-frontend-slides" = @("frontend-slides")
@@ -3834,6 +3838,7 @@ $OWNED_MANIFEST_REL = "agent-config\script-owned.tsv"
 $script:DeselectBackupDir = $null
 $script:MenuDeselectedIds = @()
 $script:PrevDeselectedIds = @()
+$script:PrevPendingIds = @()
 # Kept when unchecked, so a previous "unchecked" record overrides the file.
 $KEPT_ON_DESELECT_IDS = @("claude-md", "settings")
 
@@ -4023,6 +4028,16 @@ function Get-PreviousDeselectedIds {
     return @($sel.script_installer.deselected | Where-Object { $_ -is [string] })
 }
 
+# Menu IDs of script-written items the previous run left pending.
+function Get-PreviousPendingIds {
+    Set-StrictMode -Off   # dynamic JSON properties; scoped to this function
+    $sel = Get-JsonFileObject -Path (Join-Path $CLAUDE_DIR "agent-config\selection.json")
+    if ($null -eq $sel -or -not $sel.PSObject.Properties['items'] -or $null -eq $sel.items) { return @() }
+    return @($sel.items.PSObject.Properties | ForEach-Object { $_.Value } |
+        Where-Object { $_ -and $_.source -eq "script" -and $_.status -eq "pending" -and $_.menu_id -is [string] } |
+        ForEach-Object { $_.menu_id })
+}
+
 function Test-ScriptSkillPresent {
     param([string]$Name)
     return ((Test-Path -LiteralPath (Join-Path (Join-Path $CLAUDE_DIR "skills") $Name) -PathType Container) -and
@@ -4081,6 +4096,7 @@ function Get-MenuInitialState {
     if ($prevOff -and ($KEPT_ON_DESELECT_IDS -contains $Id)) { return $false }
     if (Test-MenuItemInstalled -Id $Id) { return $true }
     if ($prevOff) { return $false }
+    if ($script:PrevPendingIds -contains $Id) { return $true }
     return $Default
 }
 
@@ -4245,7 +4261,7 @@ function Invoke-Uninstall {
     # image-gen ownership manifest is the sole authority for image-gen (handled
     # below); everything else is preserved when no inventory exists.
     # Only the skills this script installer owns; agent-path skills
-    # (edit-config, ...) and user skills are left alone.
+    # (recorded in agent-config\files.json) and user skills are left alone.
     foreach ($skill in $SCRIPT_OWNED_SKILLS) {
         if (Test-AgentManagedElsewhere -Target "skills/$skill") { continue }
         $sp = Join-Path $CLAUDE_DIR "skills\$skill"

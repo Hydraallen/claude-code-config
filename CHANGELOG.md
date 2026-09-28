@@ -1,5 +1,26 @@
 # Changelog
 
+## [4.2.2] - 2026-09-28
+
+### Features
+- **Every OpenRouter profile slot now carries the preset suffix `@preset/ds-preset`**: `deepseek/deepseek-v4-pro@preset/ds-preset` for `opus` / `sonnet`, `deepseek/deepseek-v4-flash@preset/ds-preset` for `haiku` / `fable`. The preset must exist in your OpenRouter account and only sets provider routing: slug `ds-preset`, Models empty, Provider Preferences → `ignore`: StreamLake, `only` empty. Setup steps are in [docs/BACKENDS.md](docs/BACKENDS.md).
+- **edit-config is now a script installer item** (`skill-edit-config`, Workflow group, on by default) in both install.sh and install.ps1. The CLAUDE.md template tells Claude to invoke `edit-config`, but the script installers never copied `skills/edit-config`, so script installs answered `Skill(edit-config)` with "Unknown skill". install.sh now has 48 menu items (30 on by default); install.ps1 has 41.
+- **Re-run menu keeps pending items checked.** An item that the previous run selected but left `pending` in selection.json (Lark MCP skipped because no App ID/Secret was entered, or an MCP server skipped because the `claude` CLI was missing) now starts checked. Before, it started at its default (off for Lark); submitting the menu unchanged then recorded it under `script_installer.deselected` and dropped its record.
+- **Sub-menu key hint corrected** (install.sh): it read `←/Esc/Enter Back`, but Enter on an item toggles it. Space followed by Enter therefore unchecked the item that had just been checked. The hint now reads `Space/Enter Toggle   ←/Esc Back`; install.ps1 and the READMEs say the same.
+- install.sh no longer sends its own stderr to `/dev/null` for the rest of the run after the interactive menu closes (`exec 3<&- 2>/dev/null` in the menu cleanup applied the redirect to the whole shell). Error output of `claude`, `npx` and `git` after the menu is visible again.
+
+### Design Rationale
+- OpenRouter routed `deepseek-v4-pro` to StreamLake, which returned the whole reply as reasoning. Tool calls arrived as raw DeepSeek `<｜DSML｜tool_calls>` markup inside the thinking block, so Claude Code showed "Thought for Ns" and no answer. Claude Code talks to OpenRouter's Anthropic-compatible endpoint and cannot send a per-request `provider` field; a preset is how provider routing is applied to it.
+- The preset ignores StreamLake and does not restrict to the DeepSeek provider alone. DeepSeek trains on paid requests, so an `only: DeepSeek` preset is rejected ("Paid model training violation") unless Settings → Privacy allows that.
+- edit-config gets its own default-on menu item. It is not installed implicitly with CLAUDE.md, because the agent path does not install it with the global instructions either. Existing script installs get it on their next interactive or `--all` run unless they uncheck it. A copy recorded by the agent path in `agent-config/files.json` is left to that path.
+- Only `pending` records carry over. `failed` or `partial` records keep the old behaviour, so the detected installed state still decides.
+
+### Notes & Caveats
+- **Breaking for OpenRouter users without the preset:** after re-installing, `cl_or` requests on every slot fail with a not-found error until you create `ds-preset`, or drop the `@preset/ds-preset` suffix (a later re-install resets that hand edit, with a backup and a warning).
+- The `<model>@preset/<slug>` model id through the Anthropic-compatible endpoint was checked with curl for both models: each returned a thinking block followed by a proper `tool_use` block. A preset whose `only` list is ticked but empty rejects every request with "No allowed providers are specified". A full Claude Code session through it has not been verified yet.
+- `scripts/check-catalog-sync.sh` no longer lists `edit-config` as agent-only.
+- Enter still toggles items in the sub-menu; only the hint changed.
+
 ## [4.2.1] - 2026-09-28
 
 ### Features

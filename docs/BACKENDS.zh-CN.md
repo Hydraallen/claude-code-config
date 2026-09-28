@@ -149,10 +149,25 @@ OpenRouter 用 `Authorization: Bearer` 鉴权，而 Claude Code 只在 `ANTHROPI
 
 | 槽位 | 模型 | 上下文 / 输出 |
 |---|---|---|
-| `opus`、`sonnet` | `deepseek/deepseek-v4-pro` | 1,048,576 / 393,216 |
-| `haiku`、`fable` | `deepseek/deepseek-v4-flash` | 1,048,576 / 384,000 |
+| `opus`、`sonnet` | `deepseek/deepseek-v4-pro@preset/ds-preset` | 1,048,576 / 393,216 |
+| `haiku`、`fable` | `deepseek/deepseek-v4-flash@preset/ds-preset` | 1,048,576 / 384,000 |
 
 `fable` 是 Claude Code 的后台槽位（compact、会话标题、额度探测），所以指向更便宜的那个。
+
+> **必需 —— 创建 `ds-preset` preset。** 所有槽位都带 `@preset/ds-preset` 后缀，这是一个只设置
+> provider 路由的 OpenRouter preset。账号里必须有它，否则所有槽位返回 not found。创建位置：
+> openrouter.ai → Presets → New Preset：slug `ds-preset`，Models 留空，勾选 Include Provider
+> Preferences → `ignore`：StreamLake。`only` 必须完全留空：`only` 里一个都不勾会以 `[]`
+> 发出，所有请求都会报 "No allowed providers are specified"。Parameters、Tools、Caching、
+> Reasoning 不要勾，Claude Code 会自己发送 `max_tokens` 和 thinking 设置。不想用 preset
+> 就去掉 `@preset/ds-preset` 后缀。
+>
+> 原因：OpenRouter 把 `deepseek-v4-pro` 路由到 StreamLake，它把整条回复都作为 reasoning
+> 返回（`native_tokens_reasoning` 等于 `native_tokens_completion`）。工具调用以 DeepSeek
+> 原始的 `<｜DSML｜tool_calls>` 标记出现在 thinking 块里，没有成为 `tool_use`，所以
+> Claude Code 只显示 "Thought for Ns" 就结束。preset 的 `only` 只选 DeepSeek 需要在
+> Settings → Privacy 允许会用付费请求训练的 provider，否则所有请求都会以
+> "Paid model training violation" 被拒绝。
 
 > **注意 —— 一个上下文上限，管所有槽位。** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 是客户端
 > 全局的单一值。这里设为 `1000000`，是因为两个 DeepSeek V4 模型都接受约 1M。如果你把
@@ -181,9 +196,9 @@ OpenRouter 官方文档写的是：其原生 Anthropic 端点
 
 以及 "Claude Code expects Anthropic request semantics, so non-Anthropic models
 aren't supported through the native endpoint"。这是**不保证**，不是 API 层的硬拒绝；
-而且目前也不存在任何"DeepSeek 走该端点成功或失败"的公开报告。**本 profile 从未用真实的
-OpenRouter key 跑过** —— 尤其是 DeepSeek 的 `tool_use` 往返完全未经验证。如果它表现异常，
-先查工具调用。
+而且目前也不存在任何"DeepSeek 走该端点成功或失败"的公开报告。经 StreamLake 时
+`tool_use` 往返会按上文所述失败；其他 provider 未经验证。如果它表现异常，先查工具调用和
+实际服务的 provider（OpenRouter → Logs）。
 
 这个后端没有 5h 额度条，见下方[状态栏里的额度](#状态栏里的额度)。
 

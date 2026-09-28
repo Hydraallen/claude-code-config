@@ -2,6 +2,27 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.2.2] - 2026-09-28
+
+### Features
+- **OpenRouter profile 的所有槽位都加上 preset 后缀 `@preset/ds-preset`**：`opus` / `sonnet` 为 `deepseek/deepseek-v4-pro@preset/ds-preset`，`haiku` / `fable` 为 `deepseek/deepseek-v4-flash@preset/ds-preset`。OpenRouter 账号里必须先有这个只设置 provider 路由的 preset：slug `ds-preset`，Models 留空，Provider Preferences → `ignore`：StreamLake，`only` 留空。创建步骤见 [docs/BACKENDS.zh-CN.md](docs/BACKENDS.zh-CN.md)。
+- **edit-config 成为脚本安装器菜单项**（`skill-edit-config`，Workflow 分组，默认开启），install.sh 与 install.ps1 均已加入。CLAUDE.md 模板要求 Claude 调用 `edit-config`，但脚本安装器此前从不复制 `skills/edit-config`，脚本安装后 `Skill(edit-config)` 返回 "Unknown skill"。install.sh 现有 48 个菜单项（30 项默认开启），install.ps1 有 41 项。
+- **重跑时 pending 项保持勾选**：上次运行已选但在 selection.json 中为 `pending` 的项（未输入 App ID/Secret 而跳过的 Lark MCP，或因缺少 `claude` CLI 而跳过的 MCP 服务器）现在初始为勾选。此前它回到默认值（Lark 为关闭），原样提交菜单会把它记入 `script_installer.deselected` 并删除其记录。
+- **修正子菜单按键提示**（install.sh）：原提示为 `←/Esc/Enter Back`，但在条目上按 Enter 会切换勾选，因此先按空格再按 Enter 会取消刚勾选的项。提示改为 `Space/Enter Toggle   ←/Esc Back`；install.ps1 与两份 README 同步。
+- 交互菜单关闭后，install.sh 不再在剩余运行中把自身 stderr 重定向到 `/dev/null`（菜单清理中的 `exec 3<&- 2>/dev/null` 把重定向作用到了整个 shell）。菜单之后 `claude`、`npx`、`git` 的错误输出恢复可见。
+
+### Design Rationale
+- OpenRouter 把 `deepseek-v4-pro` 路由到 StreamLake，它把整条回复都作为 reasoning 返回；工具调用以 DeepSeek 原始的 `<｜DSML｜tool_calls>` 标记出现在 thinking 块里，Claude Code 只显示 "Thought for Ns"，没有正文。Claude Code 走 OpenRouter 的 Anthropic 兼容端点，不能在单次请求里带 `provider` 字段，所以用 preset 来指定 provider 路由。
+- preset 采用 ignore StreamLake，而不是只允许 DeepSeek provider。DeepSeek 会用付费请求训练模型，除非在 Settings → Privacy 中允许，否则 `only: DeepSeek` 的 preset 会被拒绝（"Paid model training violation"）。
+- edit-config 使用独立的默认开启菜单项，而不随 CLAUDE.md 隐式安装，与 agent 路径安装全局指令时不补装它的规则一致。已有脚本安装在下一次交互或 `--all` 运行时获得它，除非取消勾选。agent 路径在 `agent-config/files.json` 中记录的副本仍由该路径管理。
+- 只有 `pending` 记录会沿用勾选；`failed`、`partial` 记录保持原行为，仍以检测到的安装状态为准。
+
+### Notes & Caveats
+- **对没有创建 preset 的 OpenRouter 用户是破坏性变更**：重装后，`cl_or` 在所有槽位上的请求都会返回 not found，直到创建 `ds-preset`，或去掉 `@preset/ds-preset` 后缀（之后重装会重置这个手改，并备份、警告）。
+- `<模型>@preset/<slug>` 模型 id 经 Anthropic 兼容端点已用 curl 对两个模型验证：都先返回 thinking 块，再返回正确的 `tool_use` 块；`only` 已勾选启用但列表为空的 preset 会以 "No allowed providers are specified" 拒绝所有请求；完整的 Claude Code 会话尚未验证。
+- `scripts/check-catalog-sync.sh` 不再把 `edit-config` 列为 agent-only。
+- 子菜单中 Enter 仍切换勾选，只修改了提示。
+
 ## [4.2.1] - 2026-09-28
 
 ### Features
