@@ -4,36 +4,27 @@
 
 当前仓库是统一维护的依据。v4.0.0 将统一开发线提升到 main，旧 main 保存为 archive/legacy-claude，其他分支统一以 archive/legacy- 前缀暂存。实际源码、平台配方和 catalog 可按 [MAINTAIN.md](../MAINTAIN.md) 演进，无需再与历史分支同步。
 
-<a id="repository-identity"></a>
-## v4.0.0 仓库名称与主线迁移
+**Fork 说明**：本文件描述的是上游 Mizoreww/awesome-agent-config 的历史；本仓库 Hydraallen/claude-code-config 是它的 fork，在 4.2.0 合并了上游 4.1.0。与上游不同，本 fork 继续支持脚本安装器 `install.sh` / `install.ps1`，保留 Lark / 飞书 MCP，并按下方各节处理脚本路径上的迁移。上游的归档分支与 tag 属于上游仓库，不在本 fork 中发布。
 
-正式来源为 `https://github.com/Mizoreww/awesome-agent-config.git` 的 `main`。旧名称 `Mizoreww/awesome-claude-code-config` 与新名称指向同一仓库；两者的 HTTPS、`git@github.com:` 和 `ssh://git@github.com/` URL（有无 `.git` 后缀）视为同一来源。只识别此明确的 owner/repository 改名，不把其他 fork 或重定向自动视为相同来源。
+<a id="repository-identity"></a>
+## 仓库来源（fork）
+
+本 fork 的正式来源为 `https://github.com/Hydraallen/claude-code-config.git` 的 `main`。它的 HTTPS、`git@github.com:` 和 `ssh://git@github.com/` URL（有无 `.git` 后缀）视为同一来源。edit-config、update-config、脚本安装器写入的 selection.json 以及模板都指向这里。
+
+上游 `Mizoreww/awesome-agent-config` 及其旧名 `Mizoreww/awesome-claude-code-config` 是**不同的来源**，不作为本 fork 的别名。记录指向上游的安装，按冲突来源处理：
 
 | 已有来源策略 | 处理方式 |
 | --- | --- |
-| 此仓库的 `branch: main` | 继续跟踪统一主线；先说明 v4 的安装流程与退役条目，沿用已选内容 |
-| 此仓库的 `default-branch` | 查询远端默认分支，确认解析到 main 后继续，保留 default-branch 策略 |
-| `branch: agent-config-for-agents`、`codex` 或其他分支 | 保留记录；用户明确要求迁移至 main 后才切换，开发分支不会自动跟随 main |
-| 固定 tag / commit、本地目录、其他 fork | 保留原策略；使用既有明确迁移授权，否则先由用户选择 |
+| 本 fork 的 `branch: main` 或 `default-branch`（远端默认分支解析为 main） | 继续跟踪；先说明本版本的安装流程与退役条目，沿用已选内容 |
+| 上游 Mizoreww 仓库（任一名称、任一分支） | 保留记录与现状；说明两者差异（脚本安装器、fork 条目、Lark 保留、Matt 精选子集等），用户明确选择迁移到本 fork 后才切换 |
+| 本 fork 的其他分支、固定 tag / commit、本地目录或其他 fork | 保留原策略；已有明确迁移授权时沿用，否则先由用户选择 |
 | 缺少来源字段 | 使用 edit-config 的明确来源补齐；不据此认领已有文件或扩大安装范围 |
 
-查询始终只读。获授权的安装或更新完成后，记录规范 URL、实际 SHA 和已确定的更新策略，保留此前的 URL、revision、策略、选择、文件归属、hash 和备份。仓库改名本身不改变分支策略；新版来源不会自动卸载退役项或扩大整包成员。
+查询始终只读。获授权的安装或更新完成后，记录规范 URL、实际 SHA 和已确定的更新策略；切换来源时在 `repository_previous` 中保留此前的 URL、revision 与策略，并保留选择、文件归属、hash 和备份。新版来源不会自动扩大整包成员；本 fork 的脚本安装器会主动卸载[已退役的集成](#removed-integrations)，agent 路径则只在用户要求时卸载。
 
-从开发版迁移时可以直接对 agent 说：“将这个仓库管理的配置更新源迁移到 Mizoreww/awesome-agent-config 的 main，沿用我之前的选择与定制，再按当前 INSTALL.md 更新。”未安装新版 edit-config 时，从该 main 的 skills/edit-config/SKILL.md 读取同一流程，先说明变更范围再执行。旧版 `install.sh` / `install.ps1` 的菜单和参数已退役；v4 的兼容入口仅提示对话安装并以状态码 2 退出。
+从上游迁移时可以直接对 agent 说：“将这个配置的更新源迁移到 Hydraallen/claude-code-config 的 main，沿用我之前的选择与定制，再按当前 INSTALL.md 更新。”未安装本 fork 的 edit-config 时，从该 main 的 skills/edit-config/SKILL.md 读取同一流程，先说明变更范围再执行。脚本用户也可以直接重跑 `install.sh` / `install.ps1`；它会把 selection.json 的 `repository` 改为本 fork，并把旧值保存在 `repository_previous`。
 
-旧 main 的发布前 SHA 为 `d65cbda0058be09e4771f4603ccf45b3a589583b`。统一版本发布在 `main`，其他分支按以下名称保留提交历史；历史 tags/releases 保留，安装和维护不读取归档分支。
-
-| 原分支 | 归档分支 |
-| --- | --- |
-| main（旧 Claude 版本） | archive/legacy-claude |
-| codex | archive/legacy-codex |
-| codex-dev | archive/legacy-codex-dev |
-| dev | archive/legacy-dev |
-| chore/yolo-trigger | archive/legacy-chore-yolo-trigger |
-| fix/windows-statusline-emoji | archive/legacy-fix-windows-statusline-emoji |
-| agent-config-for-agents（发布时的开发快照） | archive/legacy-agent-config-for-agents |
-
-归档分支用于历史查阅，后续开发与发布使用 main。旧 branch 策略即使因平台重定向找到归档分支，也不据此改写用户记录或宣称已迁移至 main；按上表中的来源策略处理。
+上游 v4.0.0 把 `install.sh` / `install.ps1` 改为只提示对话安装并以状态码 2 退出；**本 fork 没有采用这一改动**，两个脚本仍是完整的安装器，与 agent 引导安装并列受支持。上游的分支归档（archive/legacy-*）只存在于上游仓库，本 fork 的开发与发布只使用 main。
 
 ## 本地 skill 覆盖
 
@@ -92,7 +83,7 @@ Codex 关闭 `desktop.external-agent-import-sync-enabled`。旧 `model_instructi
 
 现有同内容文件可以复用；不同内容的 AGENTS/CLAUDE、skills、hooks 或配置先备份并准备具体合并。旧版 marker、npx lock 和导入 cache 仅作为识别线索，不自动证明新工具拥有删除权。数据库和真实 lessons 不搬移、不清空。
 
-旧 install.sh/install.ps1 现在只显示对话安装入口，返回退出码 2 表示需要迁移；原 `--all`、`--force` 等参数不会安装、覆盖或卸载。使用同一份当前仓库的 INSTALL.md 继续，无需安装一个安装 skill 或返回旧分支。
+在本 fork 中，`install.sh` / `install.ps1` 仍是受支持的安装器（交互菜单、`--all`、`--only`、`--list-ids`、`--dry-run`、`--uninstall` 等）；agent 引导安装使用同一份当前仓库的 INSTALL.md。两条路径共用 `agent-config/selection.json`：脚本写入的条目带 `"source": "script"`，完整选择只替换脚本自己写入的条目，agent 写入的条目保留。
 
 文件归属、hash 和备份由 `agent-config/files.json` 保存；agent 的选择/原生操作记录由 `agent-config/selection.json` 保存。失败或中断后先恢复/核实真实状态，避免把计划当成成功。卸载只处理明确选择且归属可靠的内容。
 
@@ -100,7 +91,21 @@ Codex 关闭 `desktop.external-agent-import-sync-enabled`。旧 `model_instructi
 
 ## 条目退役与改名
 
-活动目录现为 39 个 ID。更新遇到目录中消失的已选 ID 时，保留其现状与记录并提示处理方式，用户明确要求后才迁移或卸载。以后每次改名、替换或退役在此追加映射。
+上游 4.1.0 的活动目录为 39 个 ID；本 fork 加入 fork 条目后共 55 个（其中 50 个提供 Claude 渠道）。agent 路径更新遇到目录中消失的已选 ID 时，保留其现状与记录并提示处理方式，用户明确要求后才迁移或卸载；脚本安装器对下面列为“主动卸载”的项目例外。以后每次改名、替换或退役在此追加映射。
+
+<a id="script-menu-ids"></a>
+### 脚本菜单 ID 变化（4.2.0）
+
+| 旧菜单 ID | 新菜单 ID / 处理 |
+| --- | --- |
+| `plug-github` | 删除；每次运行卸载 github 插件，并移除指向 `api.githubcopilot.com/mcp/` 的旧 user scope `github` MCP |
+| `plug-claude-mem` | 删除；每次运行卸载 claude-mem 插件与 thedotmack marketplace |
+| `plug-pua` | 删除；每次运行卸载 pua 插件与 pua-skills marketplace |
+| `plug-tokenization`、`plug-fine-tuning`、`plug-post-training`、`plug-inference-serving`、`plug-distributed-training`、`plug-optimization` | 合并为 `ai-research`（6 个插件一次安装） |
+| `rules-common` | 由 `rules-writing-style` 取代（默认开启）；已有 `rules/common/` 只警告不删除 |
+| PowerShell `hooks`（StatusLine） | 改为 `statusline`；旧 ID 仍被接受 |
+
+新增的默认关闭项：`skill-neat-freak`、`lieflat-charts`、`skill-storage-analyzer`（Storage 分组，`--all` 不包含）、`researchstudio-idea`、`ai-research`。前四个需要 python3 3.8+ 与 git。`scripts/cleanup-claude-data.sh --include-mem` 仍被接受，但已无作用。
 
 <a id="github-mcp"></a>
 ### GitHub MCP 退役
@@ -109,7 +114,9 @@ Codex 关闭 `desktop.external-agent-import-sync-enabled`。旧 `model_instructi
 
 已有 `github` 选择保留实际状态、来源与归属记录，标记退役。仓库目录的移除不自动卸载用户机器上的服务、插件或共享连接。用户明确要求卸载已安装 MCP 时，核对目标 agent、scope、实际服务名、URL/启动命令与归属，使用该 agent 的原生 MCP 移除能力，仅处理所选注册；现有不同来源或经过修改的配置保留并说明处理状态。
 
-若旧选择实际由插件或共享 connector 提供，先说明其来源，只有明确选择卸载该插件时才处理。保留 GitHub 凭据、PAT 环境变量、`gh` 登录状态和账号级共享连接；Git/gh 工作流、代码审查 skills 及 GitHub 上游源码地址继续使用。
+若旧选择实际由插件或共享 connector 提供，先说明其来源，只有明确选择卸载该插件时才处理。
+
+**Fork 脚本路径**：`install.sh` / `install.ps1` 每次运行（包括 `--only`）都会卸载 `github@claude-plugins-official`，并在 user scope 的 `github` MCP 指向 `api.githubcopilot.com/mcp/` 时移除它；指向其他地址的同名服务保留。菜单项 `plug-github` 已删除，settings 模板的 `enabledPlugins` 不再包含 github。保留 GitHub 凭据、PAT 环境变量、`gh` 登录状态和账号级共享连接；Git/gh 工作流、代码审查 skills 及 GitHub 上游源码地址继续使用。
 
 <a id="codex-agent-presets"></a>
 ### Codex 自定义子 agent 预设退役
@@ -121,16 +128,28 @@ Codex 关闭 `desktop.external-agent-import-sync-enabled`。旧 `model_instructi
 用户明确要求卸载已安装预设时，先核实归属、本地修改和备份：从 config.toml 局部移除属于这些预设的 `agents.explorer`、`agents.reviewer`、`agents.docs_researcher` 注册，确认没有其他注册引用后，再受控移除未修改的自管 `agents/explorer.toml`、`agents/reviewer.toml`、`agents/docs-researcher.toml`。外部或已修改的对象保留并说明处理状态。共享的 `max_threads` / `max_depth` 仅在记录能证明由这些预设写入、当前值未修改且没有其他依赖时恢复原值；没有可核实原值则保留。不能删除整个 `[agents]`、整个 agents 目录或关闭原生多 agent 功能。
 
 <a id="removed-integrations"></a>
-### Lark、Claude-Mem 与 PUA 退役
+### Claude-Mem、PUA 与 GitHub MCP 退役（Lark 在本 fork 保留）
 
-2026-09-13 按作者要求移除 `lark`（Lark / Feishu MCP）、`claude-mem`、`pua`（pua / pua-en / pua-ja）的活动条目、安装配方及相关模板。新安装不再提供这些内容。旧记录中的 ID 标记为退役，查询仍可报告实际状态；普通更新不重新安装或升级这些项目。
+2026-09-13 上游按作者要求移除 `claude-mem`、`pua`（pua / pua-en / pua-ja）以及 `lark`（Lark / Feishu MCP）的活动条目、安装配方及相关模板；2026-09-17 又移除 GitHub MCP（见[上节](#github-mcp)）。新安装不再提供 claude-mem、PUA 与 GitHub MCP。旧记录中的这些 ID 标记为退役，查询仍可报告实际状态；普通更新不重新安装或升级它们。
 
-仓库移除不自动卸载用户已有内容。用户明确要求卸载时，逐项核实来源、创建归属和本地修改，使用原生插件/MCP 卸载或受控文件移除；保留未授权删除的数据库、凭据、个人记忆和定制内容。
+**Fork 说明：Lark 保留。** 本 fork 保留 `lark`：脚本菜单 `mcp-lark`（默认关闭）、[mcp/](../mcp/README.md)、[LARK-MCP 指南](LARK-MCP.zh-CN.md) 不变，agent 路径的配方见 [Claude 操作说明](../platforms/claude/README.md#mcp)。已有的 `lark` 记录继续有效，不需要迁移。
+
+**Fork 脚本路径主动卸载。** agent 路径只在用户明确要求时卸载；脚本安装器则在每次运行（包括 `--only`）时主动清理：
+
+- 插件 `github@claude-plugins-official`、`claude-mem@thedotmack`、`pua@pua-skills`；
+- marketplace `thedotmack`、`pua-skills`；
+- 指向 `api.githubcopilot.com/mcp/` 的旧 user scope `github` MCP。
+
+**仍在使用 claude-mem 的用户请注意**：升级到 4.2.0 后运行任一脚本安装器会卸载 claude-mem 插件。脚本不会删除 claude-mem 的数据目录（如 `~/.claude-mem`），但插件本身及其 hooks 不再运行，记忆不再注入会话。需要保留插件时，不要运行脚本安装器，或在运行后自行重新安装并接受下次运行会再次卸载。
+
+agent 路径中，用户明确要求卸载时，逐项核实来源、创建归属和本地修改，使用原生插件/MCP 卸载或受控文件移除；保留未授权删除的数据库、凭据、个人记忆和定制内容。
 
 <a id="common-rules"></a>
 ### rules-common → rules-writing-style
 
 原 Common rules 的 agents、coding-style、git-workflow、hooks、patterns、performance、security、testing 八个文件全部退役。新 `rules-writing-style` 只安装 `rules/writing-style.md`，包含完整英文写作要求及示例；Python / TypeScript / Go 规则仍独立可选，已解除对 Common 文件的引用。
+
+**Fork 脚本路径**：脚本安装器默认安装 `rules/writing-style.md`（菜单 `rules-writing-style`，默认开启），不再安装 Common rules。已有的 `~/.claude/rules/common/` 只会收到一条警告，不会被删除，请自行检查后移除。
 
 旧 `rules-common` 选择不自动视作已安装新规则。用户选择替换后，先部署并验证新文件，再按明确移除请求处理上述旧文件。文件工具若记录的是整个 `rules/common` 目录，先检查所有权、hash 与实际成员；已有定制或额外文件时保留并准备逐文件处理，不能直接删除整个用户目录。不要从其他渠道重新安装旧 Common rules。
 
@@ -139,9 +158,16 @@ Codex 关闭 `desktop.external-agent-import-sync-enabled`。旧 `model_instructi
 
 旧 catalog ID `update-config`、Claude `skills/update-config` 与 Codex `skills/update`（调用名 update_config）统一为共享 `skills/edit-config` 和 catalog ID `edit-config`。两端的全局模板均把配置查询、增删改、修复与更新路由到它；查询只读。模板提供缺少 skill 时读取同一分支工作流的入口，不暗中补装。
 
-新 skill 明确跟踪 `https://github.com/Mizoreww/awesome-agent-config.git` 的 `main` 分支。来源匹配、仓库改名与旧开发分支的处理遵循[主线迁移](#repository-identity)；缺失来源时使用此明确来源，但不认领既有安装。
+本 fork 的 edit-config 明确跟踪 `https://github.com/Hydraallen/claude-code-config.git` 的 `main` 分支，上游 Mizoreww 仓库视为不同来源。来源匹配与迁移遵循[仓库来源](#repository-identity)；缺失来源时使用此明确来源，但不认领既有安装。
+
+**Fork 说明：update-config 保留。** 本 fork 的 `update-config` 仍是活动条目（catalog ID 与脚本菜单 `skill-update-config`），用途是检查本 fork main 的 VERSION 后重跑脚本安装器；edit-config 负责逐项查询与增删改。两者共用 selection.json。因此本 fork 中 `update-config` 记录不按下面的步骤迁移为 edit-config；只有指向上游、调用名为 update_config 的 Codex 旧入口才按下文处理。
 
 用户请求迁移旧更新入口后，先验证共享 skill，保留原选择、来源历史、文件归属和定制，再更新选择 ID 及全局指令中的旧调用名。旧目录仅在归属明确、未修改且移除已获授权时清理；其他副本标记待处理，不作为新入口继续推荐。新的仓库来源不重置其他已安装项的版本或状态。
+
+<a id="humanizer"></a>
+### humanizer / humanizer-zh 安装方式变化（fork 4.2.0）
+
+脚本路径不再复制本仓库内置的 humanizer 副本：`skill-humanizer` 改为安装上游插件 `humanizer@humanizer`（marketplace blader/humanizer，需要 Claude Code ≥ 2.1.142），调用名变为 `/humanizer:humanizer`；`skill-humanizer-zh` 改为从 op7418/Humanizer-zh 的固定提交 `91f3d39` 安装。旧的内置副本只在内容与已知发布版本的 hash 完全一致时删除，改动过或自建的副本保留，并在输出中说明。依赖旧调用名 `/humanizer` 的提示词或自定义指令需要改为新调用名。
 
 <a id="handoff"></a>
 ### handoff → matt-workflow 成员
@@ -164,6 +190,8 @@ Codex 旧六组共 24 项，仍属于待迁移的部分范围。新整包增加 
 源码切换原生插件时，先在隔离目录验证新包；核对旧副本的归属、本地修改及调用名变化，再按明确迁移选择处理重复副本。外部或已修改目录先保留，切换完成前不把两个提供方都记作活动成功。
 
 原记录中的本地修改、外部安装和部分失败状态一并保留；只有全部所选成员验证完成才标记整包完成。明确请求卸载时逐组件检查创建归属，不因为合并 ID 获得外部内容的删除权。
+
+**Fork 脚本路径**：原来的六个菜单 ID（`plug-tokenization` 等）合并为一个菜单项 `ai-research`（默认关闭），一次安装六个分类插件。已经装过的单组插件属于安装器目录，完整选择时若未勾选 `ai-research` 会按插件对账规则卸载；需要保留时勾选 `ai-research` 或使用 `--only`（不对账）。
 
 ## 支持边界
 
