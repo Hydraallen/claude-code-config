@@ -928,11 +928,22 @@ function Merge-JsonDeep {
 
 # Compose the incoming settings from the shared templates under
 # platforms\claude\templates (the same fragments the agent-guided path merges
-# one by one) plus the fork's plugins.json. Returns a PSCustomObject.
+# one by one) plus the fork's plugins.json. statusline.json and
+# lessons-hooks.json are only included when that item is selected, so the
+# composed object never carries a statusLine or SessionStart hook the user did
+# not ask for (mirrors compose_settings_template in install.sh).
+# Returns a PSCustomObject.
 function Get-ComposedSettingsTemplate {
+    param(
+        [bool]$WithStatusLine = $true,
+        [bool]$WithLessons = $true
+    )
     $t = Get-ClaudeTemplatesDir
     $composed = [PSCustomObject]@{}
-    foreach ($name in @("settings.json", "permissions.json", "plugins.json", "statusline.json", "lessons-hooks.json")) {
+    $names = @("settings.json", "permissions.json", "plugins.json")
+    if ($WithStatusLine) { $names += "statusline.json" }
+    if ($WithLessons) { $names += "lessons-hooks.json" }
+    foreach ($name in $names) {
         $path = Join-Path $t $name
         if (-not (Test-Path $path)) { throw "Settings template missing: $path" }
         $part = Get-Content $path -Raw | ConvertFrom-Json
@@ -957,7 +968,9 @@ function Install-Settings {
     param(
         [bool]$InstallPlugins = $false,
         [string[]]$SelectedPluginsList = @(),
-        [string[]]$PluginGroups = @()
+        [string[]]$PluginGroups = @(),
+        [bool]$InstallStatusLine = $true,
+        [bool]$InstallLessons = $true
     )
     Write-Info "Installing settings.json..."
     $target = Join-Path $CLAUDE_DIR "settings.json"
@@ -973,9 +986,13 @@ function Install-Settings {
     if (-not (Test-Path $target)) {
         if ($DryRun) {
             Write-Info "Would copy: settings.json -> $target"
+            if (-not $InstallStatusLine) { Write-Info "  - statusLine: skipped (not selected)" }
+            if (-not $InstallLessons) { Write-Info "  - hooks.SessionStart: skipped (not selected)" }
         } else {
             try {
-                Get-ComposedSettingsTemplate | ConvertTo-Json -Depth 20 | Set-Content $target -Encoding UTF8
+                # statusLine / SessionStart are left out of the composed object
+                # when their item is not selected.
+                Get-ComposedSettingsTemplate -WithStatusLine $InstallStatusLine -WithLessons $InstallLessons | ConvertTo-Json -Depth 20 | Set-Content $target -Encoding UTF8
             } catch {
                 Write-Err "Could not compose settings.json: $_"
                 $script:InstallCritical++
@@ -1022,8 +1039,16 @@ function Install-Settings {
         } else {
             Write-Info "  - enabledPlugins: union (existing preserved on conflict)"
         }
-        Write-Info "  - hooks.SessionStart: deduplicated by matcher"
-        Write-Info "  - statusLine: incoming takes priority"
+        if ($InstallLessons) {
+            Write-Info "  - hooks.SessionStart: deduplicated by matcher"
+        } else {
+            Write-Info "  - hooks.SessionStart: skipped (not selected)"
+        }
+        if ($InstallStatusLine) {
+            Write-Info "  - statusLine: incoming takes priority"
+        } else {
+            Write-Info "  - statusLine: skipped (not selected)"
+        }
         return
     }
 
@@ -1044,7 +1069,7 @@ function Install-Settings {
         Set-StrictMode -Off
 
         $existing = Get-Content $target -Raw | ConvertFrom-Json
-        $incoming = Get-ComposedSettingsTemplate
+        $incoming = Get-ComposedSettingsTemplate -WithStatusLine $InstallStatusLine -WithLessons $InstallLessons
 
         # Helper: convert PSCustomObject to ordered hashtable
         $toHt = {
@@ -1110,17 +1135,25 @@ function Install-Settings {
         # Strip tombstoned (removed) plugins so they don't linger enabled after upgrade.
         foreach ($r in $PLUGINS_REMOVED) { if ($mergedPlugins.Contains($r)) { [void]$mergedPlugins.Remove($r) } }
 
-        # hooks.SessionStart: deduplicate by matcher (last wins)
-        $sessionHooks = [ordered]@{}
-        if ($incoming.hooks -and $incoming.hooks.SessionStart) {
-            foreach ($h in @($incoming.hooks.SessionStart)) { if ($h.matcher) { $sessionHooks[$h.matcher] = $h } }
-        }
-        if ($existing.hooks -and $existing.hooks.SessionStart) {
-            foreach ($h in @($existing.hooks.SessionStart)) {
-                if ($h.matcher -and -not (Test-LessonsHookEntry -Entry $h)) { $sessionHooks[$h.matcher] = $h }
+        # hooks.SessionStart: when Lessons is selected, deduplicate by matcher
+        # (last wins) with the template's lessons hook replacing an older
+        # installer-managed copy. When it is not selected, the user's existing
+        # SessionStart entries are kept verbatim (mirrors install.sh).
+        $mergedSessionHooks = $null
+        if ($InstallLessons) {
+            $sessionHooks = [ordered]@{}
+            if ($incoming.hooks -and $incoming.hooks.SessionStart) {
+                foreach ($h in @($incoming.hooks.SessionStart)) { if ($h.matcher) { $sessionHooks[$h.matcher] = $h } }
             }
+            if ($existing.hooks -and $existing.hooks.SessionStart) {
+                foreach ($h in @($existing.hooks.SessionStart)) {
+                    if ($h.matcher -and -not (Test-LessonsHookEntry -Entry $h)) { $sessionHooks[$h.matcher] = $h }
+                }
+            }
+            $mergedSessionHooks = @($sessionHooks.Values)
+        } elseif ($existing.hooks -and $existing.hooks.SessionStart) {
+            $mergedSessionHooks = @($existing.hooks.SessionStart)
         }
-        $mergedSessionHooks = @($sessionHooks.Values)
 
         # Build merged result as hashtable (avoids PSCustomObject assignment issues)
         $merged = & $mergeHt $incoming $existing
@@ -1128,13 +1161,24 @@ function Install-Settings {
         # Override with merged fields
         $merged["env"] = [PSCustomObject]$mergedEnv
         $merged["enabledPlugins"] = [PSCustomObject]$mergedPlugins
-        $merged["statusLine"] = $incoming.statusLine
+        # statusLine: incoming when selected, otherwise preserve the existing one
+        # (and never add a key the user did not have).
+        $statusLine = if ($InstallStatusLine) { $incoming.statusLine } else { $existing.statusLine }
+        if ($null -ne $statusLine) {
+            $merged["statusLine"] = $statusLine
+        } elseif ($merged.Contains("statusLine")) {
+            [void]$merged.Remove("statusLine")
+        }
         $mergedPerms = & $mergeHt $incoming.permissions $existing.permissions
         $mergedPerms["allow"] = $mergedAllow
         $merged["permissions"] = [PSCustomObject]$mergedPerms
         $mergedHooks = & $mergeHt $incoming.hooks $existing.hooks
-        $mergedHooks["SessionStart"] = $mergedSessionHooks
-        $merged["hooks"] = [PSCustomObject]$mergedHooks
+        if ($null -ne $mergedSessionHooks) {
+            $mergedHooks["SessionStart"] = $mergedSessionHooks
+        }
+        if ($mergedHooks.Count -gt 0) {
+            $merged["hooks"] = [PSCustomObject]$mergedHooks
+        }
 
         [PSCustomObject]$merged | ConvertTo-Json -Depth 10 | Set-Content $target -Encoding UTF8
 
@@ -3855,7 +3899,7 @@ function Main {
 
     if ($doClaudeMd) { Install-ClaudeMd -ReviewAdversarial $reviewAdversarial -ReviewCodex $reviewCodex }
     # -Only never disables plugins that were simply not listed.
-    if ($doSettings) { Install-Settings -InstallPlugins ($doPlugins -and -not $onlyMode) -SelectedPluginsList $selectedPlugins -PluginGroups $pluginGroups }
+    if ($doSettings) { Install-Settings -InstallPlugins ($doPlugins -and -not $onlyMode) -SelectedPluginsList $selectedPlugins -PluginGroups $pluginGroups -InstallStatusLine $doHooks -InstallLessons $doLessons }
     if ($doRules) { Install-Rules -Langs $ruleLangs -LangsExplicit $ruleLangsExplicit -WritingStyle $doWritingStyle -Additive $onlyMode }
     Remove-RetiredSkills
     Remove-RetiredEnabledPlugins
