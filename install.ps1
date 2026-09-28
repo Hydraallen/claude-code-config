@@ -239,6 +239,7 @@ $PLUGINS_ESSENTIAL = @(
     "code-simplifier@claude-plugins-official"
     "ralph-loop@claude-plugins-official"
     "example-skills@anthropic-agent-skills"
+    "humanizer@humanizer"
 )
 
 # Optional plugins: default OFF, installed only via explicit -All or manual opt-in
@@ -295,7 +296,8 @@ $RETIRED_GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/"
 $MARKETPLACE_LIST = @(
     @{ Name = "anthropic-agent-skills"; Repo = "anthropics/skills" }
     @{ Name = "ecc"; Repo = "affaan-m/everything-claude-code" }
-    @{ Name = "ai-research-skills"; Repo = "zechenzhangAGI/AI-research-SKILLs" }
+    @{ Name = "ai-research-skills"; Repo = "Orchestra-Research/AI-research-SKILLs" }
+    @{ Name = "humanizer"; Repo = "blader/humanizer" }
     @{ Name = "claude-plugins-official"; Repo = "anthropics/claude-plugins-official" }
     @{ Name = "openai-codex"; Repo = "openai/codex-plugin-cc" }
     @{ Name = "frontend-slides"; Repo = "zarazhangrui/frontend-slides" }
@@ -482,6 +484,7 @@ function Show-InteractiveMenu {
             @{ Label = "code-simplifier"; Desc = "Code simplification & cleanup";     Default = $true;  Id = "plug-code-simplifier" }
             @{ Label = "ecc"; Desc = "Everything Claude Code: TDD, security, database, Go/Python/Spring Boot"; Default = $true; Id = "plug-everything-claude-code" }
             @{ Label = "update-config";   Desc = "Configure Claude Code via settings.json (skill)"; Default = $true; Id = "skill-update-config" }
+            @{ Label = "neat-freak";      Desc = "Knowledge, docs & workspace closeout (KKKKhazix/khazix-skills, pinned; needs Python)"; Default = $false; Id = "skill-neat-freak" }
         )}
         @{ Label = "Integrations"; Hint = "external tools & services"; Items = @(
             @{ Label = "context7";        Desc = "Real-time library documentation";   Default = $true;  Id = "plug-context7" }
@@ -490,22 +493,22 @@ function Show-InteractiveMenu {
         @{ Label = "Design & Content"; Hint = "documents, UI, creative artifacts, humanization"; Items = @(
             @{ Label = "document-skills"; Desc = "Document processing (PDF, DOCX, PPTX, XLSX)"; Default = $true; Id = "plug-document-skills" }
             @{ Label = "example-skills";  Desc = "Frontend/design/canvas/algorithmic-art skills"; Default = $true;  Id = "plug-example-skills" }
-            @{ Label = "humanizer";       Desc = "Remove AI writing patterns (English, blader) (skill)"; Default = $true; Id = "skill-humanizer" }
-            @{ Label = "humanizer-zh";    Desc = "Remove AI writing patterns (Chinese, op7418) (skill)"; Default = $false; Id = "skill-humanizer-zh" }
+            @{ Label = "humanizer";       Desc = "Remove AI writing patterns (English, blader); humanizer@humanizer plugin, /humanizer:humanizer"; Default = $true; Id = "skill-humanizer" }
+            @{ Label = "humanizer-zh";    Desc = "Remove AI writing patterns (Chinese, op7418; pinned upstream; needs Python)"; Default = $false; Id = "skill-humanizer-zh" }
+            @{ Label = "lieflat-charts";  Desc = "HTML chart & report templates (larashero3, PolyForm-NC | noncommercial; needs Python)"; Default = $false; Id = "lieflat-charts" }
         )}
         @{ Label = "Slides"; Hint = "AI slide / PPTX generation | default off"; Items = @(
             @{ Label = "frontend-slides"; Desc = "HTML slide generator with PPT conversion (zarazhangrui)"; Default = $false; Id = "plug-frontend-slides" }
             @{ Label = "ppt-master";      Desc = "Editable PPTX from PDF/DOCX/URL/Markdown; needs pip install (hugohe3)"; Default = $false; Id = "plug-ppt-master" }
         )}
-        @{ Label = "Academic Research"; Hint = "training/inference plugins + paper-reading & DeepXiv skills"; Items = @(
+        @{ Label = "Storage"; Hint = "disk usage analysis | default off"; Items = @(
+            @{ Label = "storage-analyzer"; Desc = "Read-only disk usage analysis with interactive report (skill)"; Default = $false; Id = "skill-storage-analyzer" }
+        )}
+        @{ Label = "Academic Research"; Hint = "paper reading, AI Research bundle, ResearchStudio & DeepXiv skills"; Items = @(
             @{ Label = "paper-reading";   Desc = "Research paper summarization (skill)"; Default = $true; Id = "skill-paper-reading" }
             @{ Label = "cheatsheet-creator"; Desc = "Exam cheatsheet from lectures/homework/past exams (skill)"; Default = $true; Id = "skill-cheatsheet-creator" }
-            @{ Label = "tokenization";    Desc = "Tokenizer training & usage";        Default = $false; Id = "plug-tokenization" }
-            @{ Label = "fine-tuning";     Desc = "Model fine-tuning";                 Default = $false; Id = "plug-fine-tuning" }
-            @{ Label = "post-training";   Desc = "Post-training (RLHF, DPO, GRPO)";  Default = $false; Id = "plug-post-training" }
-            @{ Label = "inference-serving"; Desc = "Inference serving (vLLM, SGLang, TensorRT)"; Default = $false; Id = "plug-inference-serving" }
-            @{ Label = "distributed-training"; Desc = "Distributed training (DeepSpeed, FSDP, Megatron)"; Default = $false; Id = "plug-distributed-training" }
-            @{ Label = "optimization";    Desc = "Quantization & optimization (GPTQ, AWQ, Flash Attn)"; Default = $false; Id = "plug-optimization" }
+            @{ Label = "AI Research bundle"; Desc = "6 plugins / 31 skills: tokenization, fine-tuning, post-training, inference, distributed, optimization"; Default = $false; Id = "ai-research" }
+            @{ Label = "ResearchStudio Idea"; Desc = "idea_spark, paper_search, scoop_check (microsoft/ResearchStudio, pinned; needs Python)"; Default = $false; Id = "researchstudio-idea" }
             @{ Label = "deepxiv-cli";      Desc = "arXiv/PMC paper search & reading CLI skill"; Default = $false; Id = "deepxiv-cli" }
             @{ Label = "deepxiv-trending-digest"; Desc = "Trending paper digest generation"; Default = $false; Id = "deepxiv-trending-digest" }
             @{ Label = "deepxiv-baseline-table"; Desc = "Baseline comparison table from papers"; Default = $false; Id = "deepxiv-baseline-table" }
@@ -724,12 +727,6 @@ function Show-InteractiveMenu {
         "plug-code-simplifier" = "code-simplifier@claude-plugins-official"
         "plug-ralph-loop" = "ralph-loop@claude-plugins-official"
         "plug-example-skills" = "example-skills@anthropic-agent-skills"
-        "plug-tokenization" = "tokenization@ai-research-skills"
-        "plug-fine-tuning" = "fine-tuning@ai-research-skills"
-        "plug-post-training" = "post-training@ai-research-skills"
-        "plug-inference-serving" = "inference-serving@ai-research-skills"
-        "plug-distributed-training" = "distributed-training@ai-research-skills"
-        "plug-optimization" = "optimization@ai-research-skills"
         "review-code-review" = "code-review@claude-plugins-official"
     }
 
@@ -753,6 +750,8 @@ function Show-InteractiveMenu {
         Lark               = $false
         DeepXiv            = $false
         DeepXivSkills      = @()
+        UpstreamSkills     = @()
+        FullSelection      = $true
         ReviewAdversarial  = $false
         ReviewCodex        = $false
         ReviewCodeReview   = $false
@@ -777,8 +776,13 @@ function Show-InteractiveMenu {
             "review-codex"       { $result.ReviewCodex = $true; $result.Plugins = $true; $result.SelectedPlugins += "codex@openai-codex" }
             "skill-paper-reading"  { $result.Skills = $true; $result.SelectedSkills += "paper-reading" }
             "skill-cheatsheet-creator" { $result.Skills = $true; $result.SelectedSkills += "cheatsheet-creator" }
-            "skill-humanizer"      { $result.Skills = $true; $result.SelectedSkills += "humanizer" }
-            "skill-humanizer-zh"   { $result.Skills = $true; $result.SelectedSkills += "humanizer-zh" }
+            "skill-storage-analyzer" { $result.Skills = $true; $result.SelectedSkills += "storage-analyzer" }
+            "skill-humanizer"      { $result.Plugins = $true; $result.SelectedPlugins += "humanizer@humanizer" }
+            "skill-humanizer-zh"   { $result.UpstreamSkills += "humanizer-zh" }
+            "skill-neat-freak"     { $result.UpstreamSkills += "neat-freak" }
+            "lieflat-charts"       { $result.UpstreamSkills += "lieflat-charts" }
+            "researchstudio-idea"  { $result.UpstreamSkills += "researchstudio-idea" }
+            "ai-research"          { $result.Plugins = $true; $result.SelectedPlugins += $PLUGINS_AI_RESEARCH }
             "skill-update-config"  { $result.Skills = $true; $result.SelectedSkills += "update-config" }
             "deepxiv-cli"          { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-cli" }
             "deepxiv-trending-digest" { $result.DeepXiv = $true; $result.DeepXivSkills += "deepxiv-trending-digest" }
@@ -1195,12 +1199,15 @@ function Install-Rules {
 
 # Repository skills this script installer owns. -All installs exactly these,
 # and unselected-cleanup / -Uninstall only ever remove these. skills\ also
-# holds skills that only the agent-guided path manages (edit-config,
-# storage-analyzer), which the script must never copy or delete implicitly.
-$SCRIPT_OWNED_SKILLS = @("paper-reading", "cheatsheet-creator", "update-config", "humanizer", "humanizer-zh", "adversarial-review")
+# holds skills that only the agent-guided path manages (edit-config), which the
+# script must never copy or delete. humanizer is now a plugin and humanizer-zh
+# a pinned upstream skill (see Install-UpstreamSkills).
+$SCRIPT_OWNED_SKILLS = @("paper-reading", "cheatsheet-creator", "update-config", "adversarial-review", "storage-analyzer")
+# Opt-in only: never installed by -All or the non-interactive default run.
+$SCRIPT_OPT_IN_SKILLS = @("storage-analyzer")
 
 function Install-Skills {
-    param([string[]]$SelectedSkills = @())
+    param([string[]]$SelectedSkills = @(), [bool]$FullSelection = $false)
     Write-Info "Installing custom skills..."
     $skillsDir = Join-Path $CLAUDE_DIR "skills"
     if (-not $DryRun) { New-Item -ItemType Directory -Path $skillsDir -Force | Out-Null }
@@ -1223,9 +1230,11 @@ function Install-Skills {
         foreach ($skill in $SelectedSkills) {
             $src = Get-SkillSourceDir -Name $skill
             $dst = Join-Path $skillsDir $skill
-            if (Test-Path $src) {
+            if (Test-AgentManagedElsewhere -Target "skills/$skill") {
+                Write-Info "Skill $skill is managed by edit-config (agent-config\files.json) - left unchanged"
+            } elseif (Test-Path $src) {
                 if ($DryRun) {
-                    Write-Info "Would copy: skills\$skill\ -> $dst"
+                    Write-Info "Would copy: $($src.Substring($script:SCRIPT_DIR.Length).TrimStart('\','/'))\ -> $dst"
                 } else {
                     if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
                     Copy-Item $src $dst -Recurse -Force
@@ -1236,13 +1245,18 @@ function Install-Skills {
             }
         }
     } else {
-        # --All mode: install every script-owned skill
+        # --All mode: install every script-owned skill except the opt-in ones
         foreach ($skill in $SCRIPT_OWNED_SKILLS) {
+            if ($SCRIPT_OPT_IN_SKILLS -contains $skill) { continue }
             $src = Get-SkillSourceDir -Name $skill
             if (-not (Test-Path $src)) { Write-Warn "Skill not found: $skill"; continue }
+            if (Test-AgentManagedElsewhere -Target "skills/$skill") {
+                Write-Info "Skill $skill is managed by edit-config (agent-config\files.json) - left unchanged"
+                continue
+            }
             $dst = Join-Path $skillsDir $skill
             if ($DryRun) {
-                Write-Info "Would copy: skills\$skill\ -> $dst"
+                Write-Info "Would copy: $($src.Substring($script:SCRIPT_DIR.Length).TrimStart('\','/'))\ -> $dst"
             } else {
                 if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
                 Copy-Item $src $dst -Recurse -Force
@@ -1252,10 +1266,11 @@ function Install-Skills {
     }
 
     # Clean up installer-managed skills that were NOT selected (from previous installs)
-    # Only runs in interactive mode where specific skills were selected
-    if ($SelectedSkills.Count -gt 0) {
+    # Only runs for a full (interactive) selection; -Only is additive.
+    if ($FullSelection -and $SelectedSkills.Count -gt 0) {
         foreach ($known in $SCRIPT_OWNED_SKILLS) {
             if ($SelectedSkills -contains $known) { continue }
+            if (Test-AgentManagedElsewhere -Target "skills/$known") { continue }
             $removePath = Join-Path $skillsDir $known
             if (Test-Path $removePath) {
                 if ($DryRun) {
@@ -2113,6 +2128,314 @@ function Install-ImageGen {
     Write-Ok "image-gen: ownership manifest written ($manifest)"
 }
 
+# --- Pinned third-party skills ---------------------------------------------
+# humanizer-zh, neat-freak, lieflat-charts and ResearchStudio Idea are NOT
+# vendored. Each is fetched at the revision pinned in platforms\sources.md,
+# staged like the agent-guided recipe (scripts\stage_lieflat.py,
+# scripts\adapt_researchstudio.py) and published through
+# scripts\managed_files.py, which records it in agent-config\files.json so
+# ownership is content-verified and edit-config can take it over. Records this
+# script writes carry an origin starting with $SCRIPT_ORIGIN_PREFIX; only those
+# are ever removed. Mirrors the install.sh section of the same name.
+
+$SCRIPT_ORIGIN_PREFIX = "script-installer:"
+$AGENT_FILES_JSON_REL = "agent-config/files.json"
+
+$UPSTREAM_SKILL_ITEMS = @(
+    @{ Item = "humanizer-zh"; Url = "https://github.com/op7418/Humanizer-zh"; Rev = "91f3d394db8419c20d67ebe22a96cf8fee0a404b"; Sparse = @(); Targets = @("humanizer-zh") }
+    @{ Item = "neat-freak"; Url = "https://github.com/KKKKhazix/khazix-skills"; Rev = "2b4a645cfdc894156ae347d897723562f719ce95"; Sparse = @("neat-freak"); Targets = @("neat-freak") }
+    @{ Item = "lieflat-charts"; Url = "https://github.com/larashero3-dotcom/lieflat-charts"; Rev = "eace082a317b696c5570c25826a53a7fa113e984"; Sparse = @("templates", "examples", "scripts", "agents"); Targets = @("lieflat-charts") }
+    @{ Item = "researchstudio-idea"; Url = "https://github.com/microsoft/ResearchStudio"; Rev = "0597891df1a153b8e4cbdc8c1c685f43a0a6abcf"; Sparse = @("ResearchStudio-Idea/skills/idea_spark", "ResearchStudio-Idea/skills/paper_search", "ResearchStudio-Idea/skills/scoop_check"); Targets = @("idea_spark", "paper_search", "scoop_check") }
+)
+
+# SKILL.md digests of the copies earlier releases bundled (SKILL.md only).
+$LEGACY_HUMANIZER_SHA256 = "a3163eb79525b9c4f12a201d5d271735f01d5593a41a616050427400982b8360"
+$LEGACY_HUMANIZER_ZH_SHA256 = "e0edbdbc9008644263d5573fb59beac95794e188fd99c35012bfd79e9ae4beeb"
+
+function Get-UpstreamSkillItem {
+    param([string]$Item)
+    foreach ($entry in $UPSTREAM_SKILL_ITEMS) { if ($entry.Item -eq $Item) { return $entry } }
+    return $null
+}
+
+# Run a native command, capturing stdout+stderr as text without letting
+# $ErrorActionPreference=Stop turn stderr output into a terminating error.
+function Invoke-NativeCapture {
+    param([string]$Exe, [string[]]$Arguments = @())
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $code = 1
+    $out = @()
+    try {
+        $out = @(& $Exe @Arguments 2>&1 | ForEach-Object { "$_" })
+        $code = $LASTEXITCODE
+    } catch {
+        $out = @("$_")
+        $code = 1
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    return [pscustomobject]@{ Code = $code; Output = ($out -join "`n") }
+}
+
+# The Python used for the managed-file helper as @(exe, args...), or $null.
+function Get-ManagedPython {
+    foreach ($cand in @(@("python3"), @("python"), @("py", "-3"))) {
+        if (-not (Get-Command $cand[0] -ErrorAction SilentlyContinue)) { continue }
+        $pre = @(); if ($cand.Count -gt 1) { $pre = @($cand[1..($cand.Count - 1)]) }
+        $r = Invoke-NativeCapture -Exe $cand[0] -Arguments ($pre + @("-c", "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)"))
+        if ($r.Code -eq 0) { return ,$cand }
+    }
+    return $null
+}
+
+function Invoke-ManagedPython {
+    param([string[]]$Py, [string[]]$Arguments)
+    $pre = @(); if ($Py.Count -gt 1) { $pre = @($Py[1..($Py.Count - 1)]) }
+    return (Invoke-NativeCapture -Exe $Py[0] -Arguments ($pre + $Arguments))
+}
+
+function Get-AgentFilesRecord {
+    param([string]$Target)
+    $f = Join-Path $CLAUDE_DIR "agent-config\files.json"
+    if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { return $null }
+    try { $state = Get-Content -LiteralPath $f -Raw | ConvertFrom-Json } catch { return $null }
+    if (-not $state.PSObject.Properties['files']) { return $null }
+    $p = $state.files.PSObject.Properties[$Target]
+    if (-not $p) { return $null }
+    return $p.Value
+}
+
+# True when agent-config\files.json records a copy at $Target written by this script.
+function Test-ScriptManagedCopy {
+    param([string]$Target)
+    $r = Get-AgentFilesRecord -Target $Target
+    if (-not $r) { return $false }
+    $origin = if ($r.PSObject.Properties['origin']) { [string]$r.origin } else { "" }
+    return ($r.kind -eq "copy" -and $origin.StartsWith($SCRIPT_ORIGIN_PREFIX))
+}
+
+# True when agent-config\files.json records $Target but not as written by this
+# script: edit-config owns it, so the script leaves it alone.
+function Test-AgentManagedElsewhere {
+    param([string]$Target)
+    $r = Get-AgentFilesRecord -Target $Target
+    if (-not $r) { return $false }
+    $origin = if ($r.PSObject.Properties['origin']) { [string]$r.origin } else { "" }
+    return (-not $origin.StartsWith($SCRIPT_ORIGIN_PREFIX))
+}
+
+# Remove skills\$Name when it is provably the unmodified legacy bundled copy:
+# exactly one file, SKILL.md, with digest $Expected. Anything else is kept.
+function Remove-LegacyVendoredSkill {
+    param([string]$Name, [string]$Expected)
+    $dir = Join-Path (Join-Path $CLAUDE_DIR "skills") $Name
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return }
+    if (Test-AgentManagedElsewhere -Target "skills/$Name") { return }
+    if (Test-ScriptManagedCopy -Target "skills/$Name") { return }
+    $entries = @(Get-ChildItem -LiteralPath $dir -Recurse -Force)
+    $skillFile = Join-Path $dir "SKILL.md"
+    $digest = ""
+    if ($entries.Count -eq 1 -and (Test-Path -LiteralPath $skillFile -PathType Leaf)) {
+        try { $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $skillFile).Hash.ToLowerInvariant() } catch { $digest = "" }
+    }
+    if ($digest -ne $Expected) {
+        Write-Info "Keeping ${dir}: it differs from the copy earlier releases installed (modified or your own)"
+        return
+    }
+    if ($DryRun) { Write-Info "Would remove legacy bundled skill: $Name"; return }
+    try { Remove-Item -LiteralPath $dir -Recurse -Force; Write-Ok "Removed legacy bundled skill: $Name" }
+    catch { Write-Warn "Could not remove legacy bundled skill: $dir" }
+}
+
+# Fetch $Url at $Rev into the fresh directory $Dest (sparse, blobless; full
+# clone of the same revision as fallback). Returns $true when HEAD == $Rev.
+function Invoke-FetchPinnedSource {
+    param([string]$Url, [string]$Rev, [string]$Dest, [string[]]$Sparse = @())
+    $steps = @(
+        @("clone", "--quiet", "--depth=1", "--filter=blob:none", "--no-checkout", $Url, $Dest),
+        @("-C", $Dest, "fetch", "--quiet", "--depth=1", "origin", $Rev),
+        @("-C", $Dest, "sparse-checkout", "init", "--cone"),
+        (@("-C", $Dest, "sparse-checkout", "set") + $Sparse),
+        @("-C", $Dest, "checkout", "--quiet", "--detach", $Rev)
+    )
+    $sparseOk = $true
+    foreach ($s in $steps) {
+        if ((Invoke-NativeCapture -Exe "git" -Arguments $s).Code -ne 0) { $sparseOk = $false; break }
+    }
+    if (-not $sparseOk) {
+        if (Test-Path -LiteralPath $Dest) { Remove-Item -LiteralPath $Dest -Recurse -Force }
+        $ok = Invoke-Retry -MaxAttempts 3 -DelaySeconds 3 -Description "Clone $Url" -Action {
+            if (Test-Path -LiteralPath $Dest) { Remove-Item -LiteralPath $Dest -Recurse -Force }
+            if ((Invoke-NativeCapture -Exe "git" -Arguments @("clone", "--quiet", $Url, $Dest)).Code -ne 0) { throw "clone failed" }
+            if ((Invoke-NativeCapture -Exe "git" -Arguments @("-C", $Dest, "checkout", "--quiet", "--detach", $Rev)).Code -ne 0) { throw "checkout failed" }
+        }
+        if (-not $ok) { return $false }
+    }
+    $head = Invoke-NativeCapture -Exe "git" -Arguments @("-C", $Dest, "rev-parse", "HEAD")
+    return ($head.Code -eq 0 -and $head.Output.Trim() -eq $Rev)
+}
+
+# Stage $Item from $Checkout into the fresh directory $Stage (one complete
+# skill directory per target).
+function New-UpstreamSkillStage {
+    param([string]$Item, [string]$Checkout, [string]$Stage, [string[]]$Py)
+    New-Item -ItemType Directory -Path $Stage -Force | Out-Null
+    switch ($Item) {
+        "humanizer-zh" {
+            if (-not (Test-Path -LiteralPath (Join-Path $Checkout "SKILL.md"))) { Write-Err "humanizer-zh: SKILL.md missing upstream"; return $false }
+            $d = Join-Path $Stage "humanizer-zh"; New-Item -ItemType Directory -Path $d -Force | Out-Null
+            Copy-Item -LiteralPath (Join-Path $Checkout "SKILL.md") -Destination $d
+            if (Test-Path -LiteralPath (Join-Path $Checkout "LICENSE")) { Copy-Item -LiteralPath (Join-Path $Checkout "LICENSE") -Destination $d }
+        }
+        "neat-freak" {
+            $src = Join-Path $Checkout "neat-freak"
+            if (-not (Test-Path -LiteralPath (Join-Path $src "SKILL.md"))) { Write-Err "neat-freak: SKILL.md missing upstream"; return $false }
+            $d = Join-Path $Stage "neat-freak"
+            Copy-Item -LiteralPath $src -Destination $d -Recurse
+            # evals\ is upstream evaluation data, not runtime content.
+            $evals = Join-Path $d "evals"; if (Test-Path -LiteralPath $evals) { Remove-Item -LiteralPath $evals -Recurse -Force }
+            if (-not (Test-Path -LiteralPath (Join-Path $d "LICENSE")) -and (Test-Path -LiteralPath (Join-Path $Checkout "LICENSE"))) {
+                Copy-Item -LiteralPath (Join-Path $Checkout "LICENSE") -Destination (Join-Path $d "LICENSE")
+            }
+        }
+        "lieflat-charts" {
+            $r = Invoke-ManagedPython -Py $Py -Arguments @((Join-Path $script:SCRIPT_DIR "scripts\stage_lieflat.py"), $Checkout, (Join-Path $Stage "lieflat-charts"))
+            if ($r.Code -ne 0) { Write-Err "lieflat-charts: $($r.Output)"; return $false }
+        }
+        "researchstudio-idea" {
+            foreach ($name in @("idea_spark", "paper_search", "scoop_check")) {
+                $src = Join-Path $Checkout "ResearchStudio-Idea\skills\$name"
+                if (-not (Test-Path -LiteralPath (Join-Path $src "SKILL.md"))) { Write-Err "ResearchStudio: $name missing upstream"; return $false }
+                Copy-Item -LiteralPath $src -Destination (Join-Path $Stage $name) -Recurse
+            }
+            $r = Invoke-ManagedPython -Py $Py -Arguments @((Join-Path $script:SCRIPT_DIR "scripts\adapt_researchstudio.py"), "--stage", $Stage, "--agent", "claude", "--root", $CLAUDE_DIR)
+            if ($r.Code -ne 0) { Write-Err "ResearchStudio: $($r.Output)"; return $false }
+        }
+        default { return $false }
+    }
+    # Links/junctions are never deployed (managed_files.py refuses them too).
+    $links = @(Get-ChildItem -LiteralPath $Stage -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
+    if ($links.Count -gt 0) { Write-Err "${Item}: upstream source contains links; refusing to install"; return $false }
+    return $true
+}
+
+# True when every target of $Entry is an unmodified copy this script recorded
+# from exactly $Origin, so the fetch can be skipped.
+function Test-UpstreamItemCurrent {
+    param($Entry, [string]$Origin, [string[]]$Py)
+    $r = Invoke-ManagedPython -Py $Py -Arguments @((Join-Path $script:SCRIPT_DIR "scripts\managed_files.py"), "--root", $CLAUDE_DIR, "status")
+    if ($r.Code -ne 0) { return $false }
+    try { $status = $r.Output | ConvertFrom-Json } catch { return $false }
+    foreach ($name in $Entry.Targets) {
+        $rec = Get-AgentFilesRecord -Target "skills/$name"
+        if (-not $rec -or -not $rec.PSObject.Properties['origin'] -or [string]$rec.origin -ne $Origin) { return $false }
+        $match = @($status.files | Where-Object { $_.target -eq "skills/$name" -and $_.matches })
+        if ($match.Count -ne 1) { return $false }
+    }
+    return $true
+}
+
+# Remove skills\$Name through managed_files.py when this script recorded it.
+function Remove-ScriptManagedSkill {
+    param([string]$Name)
+    if (-not (Test-ScriptManagedCopy -Target "skills/$Name")) { return }
+    if ($DryRun) { Write-Info "Would remove unselected skill: $Name (installer-managed copy)"; return }
+    $py = Get-ManagedPython
+    if (-not $py) { Write-Warn "${Name}: python unavailable - cannot verify ownership; kept"; return }
+    $r = Invoke-ManagedPython -Py $py -Arguments @((Join-Path $script:SCRIPT_DIR "scripts\managed_files.py"), "--root", $CLAUDE_DIR, "remove", "skills/$Name")
+    if ($r.Code -eq 0) { Write-Ok "Removed skill: $Name (backup kept under $CLAUDE_DIR\agent-config\backups\)" }
+    else { Write-Warn "${Name}: $($r.Output -replace '^.*Preserved existing files: ', '')" }
+}
+
+# Install one pinned item. Optional add-on: failures are non-critical warnings.
+function Install-UpstreamSkillItem {
+    param([string]$Item)
+    $entry = Get-UpstreamSkillItem -Item $Item
+    if (-not $entry) { return }
+    $origin = "$SCRIPT_ORIGIN_PREFIX$($entry.Url)@$($entry.Rev)"
+    $short = $entry.Rev.Substring(0, 12)
+    Write-Info "Installing $Item from $($entry.Url -replace '^https://', '') @ $short..."
+    if ($Item -eq "lieflat-charts") {
+        Write-Warn "lieflat-charts is licensed under PolyForm Noncommercial 1.0.0 - noncommercial use only."
+        Write-Warn "  https://github.com/larashero3-dotcom/lieflat-charts/blob/$($entry.Rev)/LICENSE"
+    }
+    if ($Item -eq "humanizer-zh") { Remove-LegacyVendoredSkill -Name "humanizer-zh" -Expected $LEGACY_HUMANIZER_ZH_SHA256 }
+    foreach ($name in $entry.Targets) {
+        if (Test-AgentManagedElsewhere -Target "skills/$name") {
+            Write-Info "$name is managed by edit-config (agent-config\files.json) - leaving it to that path"
+            return
+        }
+    }
+    $py = Get-ManagedPython
+    if ($py -and (Test-UpstreamItemCurrent -Entry $entry -Origin $origin -Py $py)) {
+        Write-Ok "$Item already at $short (unmodified) - nothing to fetch"
+        return
+    }
+    if ($DryRun) {
+        $sp = if ($entry.Sparse.Count -gt 0) { " (sparse: $($entry.Sparse -join ' '))" } else { "" }
+        Write-Info "Would fetch $($entry.Url) @ $($entry.Rev)$sp"
+        foreach ($name in $entry.Targets) { Write-Info "Would install skill: $name -> $CLAUDE_DIR\skills\$name (recorded in $AGENT_FILES_JSON_REL)" }
+        return
+    }
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Write-Warn "${Item}: git not found - skipped (optional)"; $script:InstallWarnings++; return }
+    if (-not $py) { Write-Warn "${Item}: Python 3.8+ not found - skipped (optional; needed for staging and ownership records)"; $script:InstallWarnings++; return }
+
+    $work = Join-Path ([System.IO.Path]::GetTempPath()) ("accc-$Item-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $work -Force | Out-Null
+    try {
+        if (-not (Invoke-FetchPinnedSource -Url $entry.Url -Rev $entry.Rev -Dest (Join-Path $work "src") -Sparse $entry.Sparse)) {
+            Write-Warn "${Item}: could not fetch $($entry.Url) @ $($entry.Rev) - check network/proxy and re-run"
+            $script:InstallWarnings++
+            return
+        }
+        $stage = Join-Path $work "stage"
+        if (-not (New-UpstreamSkillStage -Item $Item -Checkout (Join-Path $work "src") -Stage $stage -Py $py)) {
+            Write-Warn "${Item}: staging failed (upstream layout changed?) - nothing was installed"
+            $script:InstallWarnings++
+            return
+        }
+        $failed = $false
+        foreach ($name in $entry.Targets) {
+            $r = Invoke-ManagedPython -Py $py -Arguments @((Join-Path $script:SCRIPT_DIR "scripts\managed_files.py"), "--root", $CLAUDE_DIR, "install", (Join-Path $stage $name), "skills/$name", "--item", $Item, "--origin", $origin)
+            if ($r.Code -ne 0) {
+                $failed = $true
+                Write-Warn "${name}: $($r.Output -replace '^.*Preserved existing files: ', '')"
+                Write-Warn "  Move $CLAUDE_DIR\skills\$name aside (or remove it) and re-run to install the pinned copy."
+                continue
+            }
+            $st = "installed"; try { $st = ($r.Output | ConvertFrom-Json).status } catch { }
+            switch ($st) {
+                "provided-externally" { Write-Info "${name}: identical copy already present (not taken over)" }
+                "already-managed" { Write-Ok "$name already up to date" }
+                default { Write-Ok "Skill installed: $name ($Item @ $short)" }
+            }
+        }
+        if ($failed) { $script:InstallWarnings++ }
+        elseif ($Item -eq "researchstudio-idea") { Write-Info "ResearchStudio: runtime dependencies/API keys are set up on first use (see each SKILL.md; its shell scripts need Git Bash)." }
+    } finally {
+        if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+# Install the selected pinned items and migrate legacy bundled copies. For a
+# full (interactive) selection, deselected items this script recorded are
+# removed. Mirrors install_upstream_skills() in install.sh.
+function Install-UpstreamSkills {
+    param([string[]]$Selected = @(), [bool]$HumanizerSelected = $false, [bool]$FullSelection = $false)
+    if ($HumanizerSelected -or $FullSelection) {
+        Remove-LegacyVendoredSkill -Name "humanizer" -Expected $LEGACY_HUMANIZER_SHA256
+    }
+    foreach ($entry in $UPSTREAM_SKILL_ITEMS) {
+        if ($Selected -contains $entry.Item) {
+            Install-UpstreamSkillItem -Item $entry.Item
+        } elseif ($FullSelection) {
+            if ($entry.Item -eq "humanizer-zh") { Remove-LegacyVendoredSkill -Name "humanizer-zh" -Expected $LEGACY_HUMANIZER_ZH_SHA256 }
+            foreach ($name in $entry.Targets) { Remove-ScriptManagedSkill -Name $name }
+        }
+    }
+}
+
 function Install-DeepXiv {
     param(
         [string[]]$SelectedDeepXivSkills = @()
@@ -2409,6 +2732,16 @@ function Install-Plugins {
 
     # Deduplicate
     $plugins = @($plugins | Select-Object -Unique)
+
+    # The upstream humanizer plugin needs Claude Code >= 2.1.142.
+    if ($plugins -contains "humanizer@humanizer") {
+        $verText = (& claude --version 2>$null | Select-Object -First 1)
+        $okVer = $false
+        if ("$verText" -match '(\d+)\.(\d+)\.(\d+)') {
+            $okVer = ([version]"$($Matches[1]).$($Matches[2]).$($Matches[3])") -ge ([version]"2.1.142")
+        }
+        if (-not $okVer) { Write-Warn "humanizer@humanizer needs Claude Code >= 2.1.142 ($verText found) - update Claude Code if /humanizer:humanizer does not load" }
+    }
 
     # Expose this run's selection so Remove-UnlistedPlugins can reconcile.
     $script:ResolvedPlugins = $plugins
@@ -2773,7 +3106,7 @@ function Invoke-Uninstall {
     Write-Host "  - $CLAUDE_DIR\CLAUDE.md"
     Write-Host "  - $CLAUDE_DIR\settings.json (backed up first)"
     Write-Host "  - $CLAUDE_DIR\rules\"
-    Write-Host "  - $CLAUDE_DIR\skills\ (installer-managed only)"
+    Write-Host "  - $CLAUDE_DIR\skills\ (installer-managed only; pinned upstream skills only when unmodified)"
     Write-Host "  - $CLAUDE_DIR\agents\ (installer-managed only)"
     Write-Host "  - $CLAUDE_DIR\skills\deepxiv-* (DeepXiv skills)"
     Write-Host "  - $CLAUDE_DIR\skills\image-gen\ (when installer-owned, via .image-gen-sinedied)"
@@ -2817,11 +3150,20 @@ function Invoke-Uninstall {
     # image-gen ownership manifest is the sole authority for image-gen (handled
     # below); everything else is preserved when no inventory exists.
     # Only the skills this script installer owns; agent-path skills
-    # (edit-config, storage-analyzer, ...) and user skills are left alone.
+    # (edit-config, ...) and user skills are left alone.
     foreach ($skill in $SCRIPT_OWNED_SKILLS) {
+        if (Test-AgentManagedElsewhere -Target "skills/$skill") { continue }
         $sp = Join-Path $CLAUDE_DIR "skills\$skill"
         if (Test-Path $sp) { Remove-Item $sp -Recurse -Force; Write-Ok "Removed skill: $skill" }
     }
+    # Pinned upstream skills: only unmodified copies this installer recorded in
+    # agent-config\files.json; legacy bundled humanizer copies only when they
+    # still match what earlier releases shipped.
+    foreach ($entry in $UPSTREAM_SKILL_ITEMS) {
+        foreach ($name in $entry.Targets) { Remove-ScriptManagedSkill -Name $name }
+    }
+    Remove-LegacyVendoredSkill -Name "humanizer" -Expected $LEGACY_HUMANIZER_SHA256
+    Remove-LegacyVendoredSkill -Name "humanizer-zh" -Expected $LEGACY_HUMANIZER_ZH_SHA256
 
     # Only remove agents that ship with this repo
     $agentsSrc = Join-Path $SCRIPT_DIR "agents"
@@ -3011,6 +3353,8 @@ function Main {
     $doLark = $false
     $doDeepXiv = $false
     $deepXivSkills = @()
+    $upstreamSkills = @()
+    $fullSelection = $false
     $ruleLangs = @()
     $ruleLangsExplicit = $false
     $pluginGroups = @()
@@ -3038,6 +3382,8 @@ function Main {
         $doLark = $true   # -All means everything; lark still self-skips without credentials
         $doDeepXiv = $true
         $deepXivSkills = @("deepxiv-cli", "deepxiv-trending-digest", "deepxiv-baseline-table")
+        # Pinned upstream skills (storage-analyzer stays opt-in).
+        $upstreamSkills = @($UPSTREAM_SKILL_ITEMS | ForEach-Object { $_.Item })
         $pluginGroups = @("all")
         # Both OFF so CLAUDE.md points at the code-reviewer agent: -All does not
         # install the codex CLI, and adversarial-review hard-requires `codex exec`.
@@ -3069,6 +3415,8 @@ function Main {
             $doLark = $menuResult.Lark
             $doDeepXiv = $menuResult.DeepXiv
             $deepXivSkills = $menuResult.DeepXivSkills
+            $upstreamSkills = $menuResult.UpstreamSkills
+            $fullSelection = $menuResult.FullSelection
             $ruleLangs = $menuResult.RuleLangs
             $ruleLangsExplicit = $menuResult.RuleLangsExplicit
             $pluginGroups = $menuResult.PluginGroups
@@ -3147,7 +3495,9 @@ function Main {
     if ($doRules) { Install-Rules -Langs $ruleLangs -LangsExplicit $ruleLangsExplicit -WritingStyle $doWritingStyle }
     Remove-RetiredSkills
     Remove-RetiredEnabledPlugins
-    if ($doSkills) { Install-Skills -SelectedSkills $selectedSkills }
+    if ($doSkills) { Install-Skills -SelectedSkills $selectedSkills -FullSelection $fullSelection }
+    $humanizerSelected = ($selectedPlugins -contains "humanizer@humanizer") -or ($doPlugins -and $pluginGroups.Count -gt 0)
+    Install-UpstreamSkills -Selected $upstreamSkills -HumanizerSelected $humanizerSelected -FullSelection $fullSelection
     if ($doAgents) { Install-Agents }
     Install-Scripts
     # image-gen is always-installed (no flag gate). Runs after Install-Scripts

@@ -21,6 +21,7 @@
     "codex@openai-codex": false,
     "health@claude-health": false,
     "frontend-slides@frontend-slides": false,
-    "ppt-master@ppt-master": false
+    "ppt-master@ppt-master": false,
+    "humanizer@humanizer": true
   }
 }

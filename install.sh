@@ -544,9 +544,18 @@ REVIEW_CODEX=false
 SELECTED_SKILLS=()
 # Repository skills this script installer owns. --all installs exactly these,
 # and unselected-cleanup / --uninstall only ever remove these. skills/ also
-# holds skills that only the agent-guided path manages (edit-config,
-# storage-analyzer), which the script must never copy or delete implicitly.
-SCRIPT_OWNED_SKILLS=("paper-reading" "cheatsheet-creator" "update-config" "humanizer" "humanizer-zh" "adversarial-review")
+# holds skills that only the agent-guided path manages (edit-config), which
+# the script must never copy or delete. humanizer/humanizer-zh are no longer
+# bundled: humanizer is a plugin and humanizer-zh a pinned upstream skill.
+SCRIPT_OWNED_SKILLS=("paper-reading" "cheatsheet-creator" "update-config" "adversarial-review" "storage-analyzer")
+# Script-owned skills that are opt-in only: never installed by --all or the
+# non-interactive default run, only when picked explicitly.
+SCRIPT_OPT_IN_SKILLS=("storage-analyzer")
+# Pinned third-party skill items selected this run (see UPSTREAM_SKILL_ITEMS).
+SELECTED_UPSTREAM_SKILLS=()
+# True when this run's selection is a complete menu selection (interactive
+# selector): only then are previously installed, now-deselected items removed.
+FULL_SELECTION=false
 SELECTED_PLUGINS=()
 SELECTED_DEEPXIV_SKILLS=()
 SELECTED_PROFILES=()
@@ -798,6 +807,7 @@ PLUGINS_ESSENTIAL=(
     "code-simplifier@claude-plugins-official"
     "ralph-loop@claude-plugins-official"
     "example-skills@anthropic-agent-skills"
+    "humanizer@humanizer"
 )
 
 # Optional plugins: default OFF, installed only via explicit --all or manual opt-in
@@ -1003,7 +1013,8 @@ ralph-loop|Automated iteration loop|1|plug-ralph-loop
 commit-commands|git commit / push / PR workflow|1|plug-commit-commands
 code-simplifier|Code simplification & cleanup|1|plug-code-simplifier
 ecc|Everything Claude Code: TDD, security, database, Go/Python/Spring Boot|1|plug-everything-claude-code
-update-config|Configure Claude Code via settings.json (skill)|1|skill-update-config")
+update-config|Configure Claude Code via settings.json (skill)|1|skill-update-config
+neat-freak|Knowledge, docs & workspace closeout (KKKKhazix/khazix-skills, pinned; needs python3)|0|skill-neat-freak")
 
     # Group 4: Integrations
     MENU_GROUP_LABELS+=("Integrations")
@@ -1016,8 +1027,9 @@ playwright|Browser automation & E2E testing|1|plug-playwright")
     MENU_GROUP_HINTS+=("documents, UI, creative artifacts, humanization")
     MENU_GROUP_ITEMS+=("document-skills|Document processing (PDF, DOCX, PPTX, XLSX)|1|plug-document-skills
 example-skills|Frontend/design/canvas/algorithmic-art skills|1|plug-example-skills
-humanizer|Remove AI writing patterns (English, blader) (skill)|1|skill-humanizer
-humanizer-zh|Remove AI writing patterns (Chinese, op7418) (skill)|0|skill-humanizer-zh")
+humanizer|Remove AI writing patterns (English, blader); humanizer@humanizer plugin, /humanizer:humanizer|1|skill-humanizer
+humanizer-zh|Remove AI writing patterns (Chinese, op7418; pinned upstream; needs python3)|0|skill-humanizer-zh
+lieflat-charts|HTML chart & report templates (larashero3, PolyForm-NC · noncommercial; needs python3)|0|lieflat-charts")
 
     # Group 6: Slides
     MENU_GROUP_LABELS+=("Slides")
@@ -1025,17 +1037,18 @@ humanizer-zh|Remove AI writing patterns (Chinese, op7418) (skill)|0|skill-humani
     MENU_GROUP_ITEMS+=("frontend-slides|HTML slide generator with PPT conversion (zarazhangrui)|0|plug-frontend-slides
 ppt-master|Editable PPTX from PDF/DOCX/URL/Markdown; needs pip install (hugohe3)|0|plug-ppt-master")
 
-    # Group 8: Academic Research (AI Research plugins + DeepXiv skills + paper-reading)
+    # Group 7: Storage
+    MENU_GROUP_LABELS+=("Storage")
+    MENU_GROUP_HINTS+=("disk usage analysis · default off")
+    MENU_GROUP_ITEMS+=("storage-analyzer|Read-only disk usage analysis with interactive report (skill)|0|skill-storage-analyzer")
+
+    # Group 8: Academic Research (AI Research bundle + ResearchStudio + DeepXiv + paper-reading)
     MENU_GROUP_LABELS+=("Academic Research")
-    MENU_GROUP_HINTS+=("training/inference plugins + paper-reading & DeepXiv skills")
+    MENU_GROUP_HINTS+=("paper reading, AI Research bundle, ResearchStudio & DeepXiv skills")
     MENU_GROUP_ITEMS+=("paper-reading|Research paper summarization (skill)|1|skill-paper-reading
 cheatsheet-creator|Exam cheatsheet from lectures/homework/past exams (skill)|1|skill-cheatsheet-creator
-tokenization|Tokenizer training & usage|0|plug-tokenization
-fine-tuning|Model fine-tuning|0|plug-fine-tuning
-post-training|Post-training (RLHF, DPO, GRPO)|0|plug-post-training
-inference-serving|Inference serving (vLLM, SGLang, TensorRT)|0|plug-inference-serving
-distributed-training|Distributed training (DeepSpeed, FSDP, Megatron)|0|plug-distributed-training
-optimization|Quantization & optimization (GPTQ, AWQ, Flash Attn)|0|plug-optimization
+AI Research bundle|6 plugins / 31 skills: tokenization, fine-tuning, post-training, inference, distributed, optimization|0|ai-research
+ResearchStudio Idea|idea_spark, paper_search, scoop_check (microsoft/ResearchStudio, pinned; needs python3)|0|researchstudio-idea
 deepxiv-cli|arXiv/PMC paper search & reading CLI skill|0|deepxiv-cli
 deepxiv-trending-digest|Trending paper digest generation|0|deepxiv-trending-digest
 deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-table")
@@ -1092,12 +1105,6 @@ plug_id_to_pkg() {
         plug-code-simplifier)   echo "code-simplifier@claude-plugins-official" ;;
         plug-ralph-loop)        echo "ralph-loop@claude-plugins-official" ;;
         plug-example-skills)    echo "example-skills@anthropic-agent-skills" ;;
-        plug-tokenization)      echo "tokenization@ai-research-skills" ;;
-        plug-fine-tuning)       echo "fine-tuning@ai-research-skills" ;;
-        plug-post-training)     echo "post-training@ai-research-skills" ;;
-        plug-inference-serving) echo "inference-serving@ai-research-skills" ;;
-        plug-distributed-training) echo "distributed-training@ai-research-skills" ;;
-        plug-optimization)      echo "optimization@ai-research-skills" ;;
         *) echo "" ;;
     esac
 }
@@ -1132,8 +1139,16 @@ apply_menu_id() {
         # Skills
         skill-paper-reading)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("paper-reading") ;;
         skill-cheatsheet-creator) INSTALL_SKILLS=true; SELECTED_SKILLS+=("cheatsheet-creator") ;;
-        skill-humanizer)        INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer") ;;
-        skill-humanizer-zh)     INSTALL_SKILLS=true; SELECTED_SKILLS+=("humanizer-zh") ;;
+        skill-storage-analyzer) INSTALL_SKILLS=true; SELECTED_SKILLS+=("storage-analyzer") ;;
+        # humanizer ships as the upstream humanizer@humanizer plugin
+        skill-humanizer)        INSTALL_PLUGINS=true; SELECTED_PLUGINS+=("humanizer@humanizer") ;;
+        # Pinned upstream skills (fetched, staged, recorded in agent-config/files.json)
+        skill-humanizer-zh)     SELECTED_UPSTREAM_SKILLS+=("humanizer-zh") ;;
+        skill-neat-freak)       SELECTED_UPSTREAM_SKILLS+=("neat-freak") ;;
+        lieflat-charts)         SELECTED_UPSTREAM_SKILLS+=("lieflat-charts") ;;
+        researchstudio-idea)    SELECTED_UPSTREAM_SKILLS+=("researchstudio-idea") ;;
+        # AI Research: one item, six category plugins
+        ai-research)            INSTALL_PLUGINS=true; SELECTED_PLUGINS+=("${PLUGINS_AI_RESEARCH[@]}") ;;
         skill-update-config)    INSTALL_SKILLS=true; SELECTED_SKILLS+=("update-config") ;;
         skill-mattpocock)       INSTALL_MATTPOCOCK=true ;;
         # DeepXiv
@@ -1522,6 +1537,7 @@ interactive_menu() {
 
     # Map selections to install flags
     INSTALL_ALL=false
+    FULL_SELECTION=true
     RULE_LANGS_EXPLICIT=true
     INSTALL_WRITING_STYLE=false
 
@@ -1665,6 +1681,15 @@ _effective_selected_plugins_json() {
         out+="]"
         echo "$out"
     fi
+}
+
+# 0 when the installed Claude Code CLI is at least $1.$2.$3.
+claude_version_at_least() {
+    local ver major minor patch
+    ver=$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) || return 1
+    [[ -z "$ver" ]] && return 1
+    IFS='.' read -r major minor patch <<< "$ver"
+    (( major > $1 || (major == $1 && minor > $2) || (major == $1 && minor == $2 && patch >= $3) ))
 }
 
 _supports_auto_mode() {
@@ -2096,13 +2121,15 @@ install_skills() {
         fi
     done
 
-    # If specific skills were selected (interactive mode), install only those
+    # If specific skills were selected (interactive mode / --only), install only those
     if [[ ${#SELECTED_SKILLS[@]} -gt 0 ]]; then
         for skill in "${SELECTED_SKILLS[@]}"; do
             local skill_dir; skill_dir="$(skill_source_dir "$skill")"
-            if [[ -d "$skill_dir" ]]; then
+            if is_agent_managed_elsewhere "skills/$skill"; then
+                info "Skill $skill is managed by edit-config (agent-config/files.json) — left unchanged"
+            elif [[ -d "$skill_dir" ]]; then
                 if $DRY_RUN; then
-                    info "Would copy: skills/$skill/ -> $CLAUDE_DIR/skills/$skill/"
+                    info "Would copy: ${skill_dir#"$SCRIPT_DIR"/}/ -> $CLAUDE_DIR/skills/$skill/"
                 else
                     rm -rf "$CLAUDE_DIR/skills/$skill"
                     cp -r "$skill_dir" "$CLAUDE_DIR/skills/$skill"
@@ -2113,17 +2140,26 @@ install_skills() {
             fi
         done
     else
-        # --all mode: install every script-owned skill
-        local skill
+        # --all mode: install every script-owned skill except the opt-in ones
+        local skill opt
         for skill in "${SCRIPT_OWNED_SKILLS[@]}"; do
+            local opt_in=false
+            for opt in "${SCRIPT_OPT_IN_SKILLS[@]}"; do
+                [[ "$opt" == "$skill" ]] && opt_in=true
+            done
+            $opt_in && continue
             local skill_dir; skill_dir="$(skill_source_dir "$skill")"
             if [[ ! -d "$skill_dir" ]]; then
                 warn "Skill not found: $skill"
                 continue
             fi
+            if is_agent_managed_elsewhere "skills/$skill"; then
+                info "Skill $skill is managed by edit-config (agent-config/files.json) — left unchanged"
+                continue
+            fi
 
             if $DRY_RUN; then
-                info "Would copy: skills/$skill/ -> $CLAUDE_DIR/skills/$skill/"
+                info "Would copy: ${skill_dir#"$SCRIPT_DIR"/}/ -> $CLAUDE_DIR/skills/$skill/"
             else
                 rm -rf "$CLAUDE_DIR/skills/$skill"
                 cp -r "$skill_dir" "$CLAUDE_DIR/skills/$skill"
@@ -2133,8 +2169,8 @@ install_skills() {
     fi
 
     # Clean up installer-managed skills that were NOT selected (from previous installs)
-    # Only runs in interactive mode where specific skills were selected
-    if [[ ${#SELECTED_SKILLS[@]} -gt 0 ]]; then
+    # Only runs for a full (interactive) selection; --only is additive.
+    if $FULL_SELECTION && [[ ${#SELECTED_SKILLS[@]} -gt 0 ]]; then
         for known in "${SCRIPT_OWNED_SKILLS[@]}"; do
             local keep=false
             for skill in "${SELECTED_SKILLS[@]}"; do
@@ -2143,7 +2179,8 @@ install_skills() {
                     break
                 fi
             done
-            if ! $keep && [[ -d "$CLAUDE_DIR/skills/$known" ]]; then
+            if ! $keep && [[ -d "$CLAUDE_DIR/skills/$known" ]] \
+               && ! is_agent_managed_elsewhere "skills/$known"; then
                 if $DRY_RUN; then
                     info "Would remove unselected skill: $known"
                 else
@@ -3637,6 +3674,356 @@ install_image_gen() {
     ok "image-gen: ownership manifest written ($manifest)"
 }
 
+# ============================================================
+# Pinned third-party skills (humanizer-zh, neat-freak, lieflat-charts,
+# ResearchStudio Idea).
+#
+# These are NOT vendored. Each is fetched from its upstream repository at the
+# revision pinned in platforms/sources.md, staged the same way the agent-guided
+# recipe does (scripts/stage_lieflat.py, scripts/adapt_researchstudio.py), and
+# published through scripts/managed_files.py. That records every copy in
+# ~/.claude/agent-config/files.json, so ownership is content-verified (an
+# existing, different or locally modified directory is preserved) and
+# edit-config can take the copies over later. Records written by this script
+# carry an origin starting with SCRIPT_ORIGIN_PREFIX; the script only ever
+# removes copies that carry it.
+# ============================================================
+
+SCRIPT_ORIGIN_PREFIX="script-installer:"
+
+# item|repository|revision|sparse directories (space-separated, may be empty)|target skill names
+UPSTREAM_SKILL_ITEMS=(
+    "humanizer-zh|https://github.com/op7418/Humanizer-zh|91f3d394db8419c20d67ebe22a96cf8fee0a404b||humanizer-zh"
+    "neat-freak|https://github.com/KKKKhazix/khazix-skills|2b4a645cfdc894156ae347d897723562f719ce95|neat-freak|neat-freak"
+    "lieflat-charts|https://github.com/larashero3-dotcom/lieflat-charts|eace082a317b696c5570c25826a53a7fa113e984|templates examples scripts agents|lieflat-charts"
+    "researchstudio-idea|https://github.com/microsoft/ResearchStudio|0597891df1a153b8e4cbdc8c1c685f43a0a6abcf|ResearchStudio-Idea/skills/idea_spark ResearchStudio-Idea/skills/paper_search ResearchStudio-Idea/skills/scoop_check|idea_spark paper_search scoop_check"
+)
+
+# Vendored copies shipped by earlier releases of this installer (SKILL.md only).
+# A directory holding exactly that one file with this digest is provably ours.
+LEGACY_HUMANIZER_SHA256="a3163eb79525b9c4f12a201d5d271735f01d5593a41a616050427400982b8360"
+LEGACY_HUMANIZER_ZH_SHA256="e0edbdbc9008644263d5573fb59beac95794e188fd99c35012bfd79e9ae4beeb"
+
+# Field accessors for UPSTREAM_SKILL_ITEMS. Echo nothing for an unknown item.
+upstream_skill_field() {
+    local item="$1" field="$2" entry _i _u _r _s _t
+    for entry in "${UPSTREAM_SKILL_ITEMS[@]}"; do
+        IFS='|' read -r _i _u _r _s _t <<< "$entry"
+        [[ "$_i" == "$item" ]] || continue
+        case "$field" in
+            url) echo "$_u" ;;
+            rev) echo "$_r" ;;
+            sparse) echo "$_s" ;;
+            targets) echo "$_t" ;;
+        esac
+        return 0
+    done
+    return 1
+}
+
+upstream_skill_items() {
+    local entry
+    for entry in "${UPSTREAM_SKILL_ITEMS[@]}"; do echo "${entry%%|*}"; done
+}
+
+is_upstream_skill_selected() {
+    local needle="$1" s
+    for s in ${SELECTED_UPSTREAM_SKILLS[@]+"${SELECTED_UPSTREAM_SKILLS[@]}"}; do
+        [[ "$s" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
+# The Python interpreter used for the managed-file helper, or empty.
+managed_python() {
+    local py
+    for py in python3 python; do
+        if command -v "$py" &>/dev/null && "$py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' 2>/dev/null; then
+            echo "$py"
+            return 0
+        fi
+    done
+    return 1
+}
+
+AGENT_FILES_JSON_REL="agent-config/files.json"
+
+# 0 when agent-config/files.json records a copy at $1 (relative path) written by
+# this script installer.
+is_script_managed_copy() {
+    local f="$CLAUDE_DIR/$AGENT_FILES_JSON_REL"
+    [[ -f "$f" ]] && command -v jq &>/dev/null || return 1
+    jq -e --arg t "$1" --arg p "$SCRIPT_ORIGIN_PREFIX" \
+        '(.files[$t] // null) as $r | $r != null and $r.kind == "copy" and (($r.origin // "") | startswith($p))' \
+        "$f" >/dev/null 2>&1
+}
+
+# 0 when agent-config/files.json records $1 but NOT as written by this script:
+# the agent-guided path (edit-config) owns it, so the script leaves it alone.
+is_agent_managed_elsewhere() {
+    local f="$CLAUDE_DIR/$AGENT_FILES_JSON_REL"
+    [[ -f "$f" ]] && command -v jq &>/dev/null || return 1
+    jq -e --arg t "$1" --arg p "$SCRIPT_ORIGIN_PREFIX" \
+        '(.files[$t] // null) as $r | $r != null and ((($r.origin // "") | startswith($p)) | not)' \
+        "$f" >/dev/null 2>&1
+}
+
+# Remove a legacy vendored copy of skills/$1 when it is provably the unmodified
+# file an earlier release of this installer shipped: the directory must hold
+# exactly SKILL.md, and its digest must match $2. Anything else is preserved.
+cleanup_legacy_vendored_skill() {
+    local name="$1" expected="$2" dir="$CLAUDE_DIR/skills/$1" digest entries
+    [[ -d "$dir" && ! -L "$dir" ]] || return 0
+    is_agent_managed_elsewhere "skills/$name" && return 0
+    is_script_managed_copy "skills/$name" && return 0
+    entries="$(find "$dir" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$entries" != "1" || ! -f "$dir/SKILL.md" ]] \
+       || ! digest="$(sha256_file "$dir/SKILL.md" 2>/dev/null)" || [[ "$digest" != "$expected" ]]; then
+        info "Keeping $dir: it differs from the copy earlier releases installed (modified or your own)"
+        return 0
+    fi
+    if $DRY_RUN; then
+        info "Would remove legacy bundled skill: $name"
+    elif rm -rf -- "$dir"; then
+        ok "Removed legacy bundled skill: $name"
+    else
+        warn "Could not remove legacy bundled skill: $dir"
+    fi
+}
+
+# Fetch $1 (repository URL) at revision $2 into a fresh directory $3, checking
+# out only the directories in $4 (cone mode also keeps every root file).
+# Blobless sparse clone first; a full clone of the same revision is the
+# fallback for remotes/git versions without partial clone.
+fetch_pinned_source() {
+    local url="$1" rev="$2" dest="$3" sparse="$4"
+    local -a dirs=()
+    [[ -n "$sparse" ]] && read -r -a dirs <<< "$sparse"
+    if git clone --quiet --depth=1 --filter=blob:none --no-checkout "$url" "$dest" >/dev/null 2>&1 \
+       && git -C "$dest" fetch --quiet --depth=1 origin "$rev" >/dev/null 2>&1 \
+       && git -C "$dest" sparse-checkout init --cone >/dev/null 2>&1 \
+       && git -C "$dest" sparse-checkout set ${dirs[@]+"${dirs[@]}"} >/dev/null 2>&1 \
+       && git -C "$dest" checkout --quiet --detach "$rev" >/dev/null 2>&1; then
+        :
+    else
+        rm -rf -- "$dest"
+        if ! retry 3 3 "Clone $url" bash -c 'rm -rf "$2" && git clone --quiet "$1" "$2" && git -C "$2" checkout --quiet --detach "$3"' _ "$url" "$dest" "$rev"; then
+            return 1
+        fi
+    fi
+    [[ "$(git -C "$dest" rev-parse HEAD 2>/dev/null)" == "$rev" ]]
+}
+
+# Stage item $1 from checkout $2 into the fresh directory $3, producing one
+# complete skill directory per target name ($3/<target>).
+stage_upstream_skill() {
+    local item="$1" checkout="$2" stage="$3" py
+    mkdir -p "$stage" || return 1
+    case "$item" in
+        humanizer-zh)
+            [[ -f "$checkout/SKILL.md" ]] || { error "humanizer-zh: SKILL.md missing upstream"; return 1; }
+            mkdir -p "$stage/humanizer-zh" && cp "$checkout/SKILL.md" "$stage/humanizer-zh/" || return 1
+            [[ -f "$checkout/LICENSE" ]] && { cp "$checkout/LICENSE" "$stage/humanizer-zh/" || return 1; }
+            ;;
+        neat-freak)
+            [[ -f "$checkout/neat-freak/SKILL.md" ]] || { error "neat-freak: SKILL.md missing upstream"; return 1; }
+            cp -R "$checkout/neat-freak" "$stage/neat-freak" || return 1
+            # evals/ is upstream evaluation data, not runtime content.
+            rm -rf -- "$stage/neat-freak/evals"
+            if [[ ! -e "$stage/neat-freak/LICENSE" && -f "$checkout/LICENSE" ]]; then
+                cp "$checkout/LICENSE" "$stage/neat-freak/LICENSE" || return 1
+            fi
+            ;;
+        lieflat-charts)
+            py="$(managed_python)" || return 1
+            "$py" "$SCRIPT_DIR/scripts/stage_lieflat.py" "$checkout" "$stage/lieflat-charts" >/dev/null || return 1
+            ;;
+        researchstudio-idea)
+            py="$(managed_python)" || return 1
+            local name
+            for name in idea_spark paper_search scoop_check; do
+                [[ -f "$checkout/ResearchStudio-Idea/skills/$name/SKILL.md" ]] || { error "ResearchStudio: $name missing upstream"; return 1; }
+                cp -R "$checkout/ResearchStudio-Idea/skills/$name" "$stage/$name" || return 1
+            done
+            "$py" "$SCRIPT_DIR/scripts/adapt_researchstudio.py" --stage "$stage" --agent claude --root "$CLAUDE_DIR" >/dev/null || return 1
+            ;;
+        *) return 1 ;;
+    esac
+    # Symbolic links are never deployed (managed_files.py refuses them too).
+    if [[ -n "$(find "$stage" -type l 2>/dev/null | head -1)" ]]; then
+        error "$item: upstream source contains symbolic links; refusing to install"
+        return 1
+    fi
+}
+
+# Publish $1 (staged directory) to skills/$2 through managed_files.py.
+# Echoes the helper's status word; returns non-zero when the existing content
+# was preserved or the helper failed.
+publish_managed_skill() {
+    local src="$1" name="$2" item="$3" origin="$4" py out
+    py="$(managed_python)" || return 1
+    if ! out="$("$py" "$SCRIPT_DIR/scripts/managed_files.py" --root "$CLAUDE_DIR" install "$src" "skills/$name" --item "$item" --origin "$origin" 2>&1)"; then
+        warn "$name: ${out##*Preserved existing files: }" >&2
+        return 1
+    fi
+    if command -v jq &>/dev/null; then
+        jq -r '.status // "installed"' <<< "$out" 2>/dev/null || echo "installed"
+    else
+        echo "installed"
+    fi
+}
+
+# Remove skills/$1 through managed_files.py when this script recorded it.
+remove_script_managed_skill() {
+    local name="$1" py out
+    is_script_managed_copy "skills/$name" || return 0
+    if $DRY_RUN; then
+        info "Would remove unselected skill: $name (installer-managed copy)"
+        return 0
+    fi
+    py="$(managed_python)" || { warn "$name: python3 unavailable — cannot verify ownership; kept"; return 0; }
+    if out="$("$py" "$SCRIPT_DIR/scripts/managed_files.py" --root "$CLAUDE_DIR" remove "skills/$name" 2>&1)"; then
+        ok "Removed skill: $name (backup kept under $CLAUDE_DIR/agent-config/backups/)"
+    else
+        warn "$name: ${out##*Preserved existing files: }"
+    fi
+}
+
+# 0 when every target of $1 is an unmodified copy this script recorded from
+# exactly origin $2 — the pinned revision is already installed, so the
+# network fetch can be skipped.
+upstream_item_current() {
+    local item="$1" origin="$2" py status name f="$CLAUDE_DIR/$AGENT_FILES_JSON_REL"
+    [[ -f "$f" ]] && command -v jq &>/dev/null || return 1
+    py="$(managed_python)" || return 1
+    status="$("$py" "$SCRIPT_DIR/scripts/managed_files.py" --root "$CLAUDE_DIR" status 2>/dev/null)" || return 1
+    for name in $(upstream_skill_field "$item" targets); do
+        jq -e --arg t "skills/$name" --arg o "$origin" '(.files[$t].origin // "") == $o' "$f" >/dev/null 2>&1 || return 1
+        jq -e --arg t "skills/$name" '[.files[] | select(.target == $t and .matches)] | length == 1' <<< "$status" >/dev/null 2>&1 || return 1
+    done
+}
+
+announce_lieflat_license() {
+    warn "lieflat-charts is licensed under PolyForm Noncommercial 1.0.0 — noncommercial use only."
+    warn "  https://github.com/larashero3-dotcom/lieflat-charts/blob/$(upstream_skill_field lieflat-charts rev)/LICENSE"
+}
+
+# Install one pinned upstream item. Optional add-on: failures are reported and
+# counted as non-critical warnings, never fatal.
+install_upstream_skill_item() {
+    local item="$1" url rev sparse targets name
+    url="$(upstream_skill_field "$item" url)" || return 1
+    rev="$(upstream_skill_field "$item" rev)"
+    sparse="$(upstream_skill_field "$item" sparse)"
+    targets="$(upstream_skill_field "$item" targets)"
+    local origin="${SCRIPT_ORIGIN_PREFIX}${url}@${rev}"
+
+    info "Installing $item from ${url#https://} @ ${rev:0:12}..."
+    [[ "$item" == "lieflat-charts" ]] && announce_lieflat_license
+    [[ "$item" == "humanizer-zh" ]] && cleanup_legacy_vendored_skill humanizer-zh "$LEGACY_HUMANIZER_ZH_SHA256"
+
+    local -a names=()
+    read -r -a names <<< "$targets"
+    for name in "${names[@]}"; do
+        if is_agent_managed_elsewhere "skills/$name"; then
+            info "$name is managed by edit-config (agent-config/files.json) — leaving it to that path"
+            return 0
+        fi
+    done
+
+    if upstream_item_current "$item" "$origin"; then
+        ok "$item already at ${rev:0:12} (unmodified) — nothing to fetch"
+        return 0
+    fi
+
+    if $DRY_RUN; then
+        info "Would fetch $url @ $rev${sparse:+ (sparse: $sparse)}"
+        for name in "${names[@]}"; do
+            info "Would install skill: $name -> $CLAUDE_DIR/skills/$name/ (recorded in $AGENT_FILES_JSON_REL)"
+        done
+        return 0
+    fi
+
+    if ! command -v git &>/dev/null; then
+        warn "$item: git not found — skipped (optional)"
+        (( INSTALL_WARNINGS++ )) || true
+        return 1
+    fi
+    if ! managed_python >/dev/null; then
+        warn "$item: python3 (3.8+) not found — skipped (optional; needed for staging and ownership records)"
+        (( INSTALL_WARNINGS++ )) || true
+        return 1
+    fi
+
+    local work
+    work="$(mktemp -d "${TMPDIR:-/tmp}/accc-${item}.XXXXXX")" || { warn "$item: cannot create a temporary directory"; (( INSTALL_WARNINGS++ )) || true; return 1; }
+    if ! fetch_pinned_source "$url" "$rev" "$work/src" "$sparse"; then
+        warn "$item: could not fetch $url @ $rev — check network/proxy and re-run"
+        (( INSTALL_WARNINGS++ )) || true
+        rm -rf -- "$work"
+        return 1
+    fi
+    if ! stage_upstream_skill "$item" "$work/src" "$work/stage"; then
+        warn "$item: staging failed (upstream layout changed?) — nothing was installed"
+        (( INSTALL_WARNINGS++ )) || true
+        rm -rf -- "$work"
+        return 1
+    fi
+
+    local status failed=false
+    for name in "${names[@]}"; do
+        if status="$(publish_managed_skill "$work/stage/$name" "$name" "$item" "$origin")"; then
+            case "$status" in
+                provided-externally) info "$name: identical copy already present (not taken over)" ;;
+                already-managed)     ok "$name already up to date" ;;
+                *)                   ok "Skill installed: $name ($item @ ${rev:0:12})" ;;
+            esac
+        else
+            failed=true
+            warn "  Move $CLAUDE_DIR/skills/$name aside (or remove it) and re-run to install the pinned copy."
+        fi
+    done
+    rm -rf -- "$work"
+    if $failed; then
+        (( INSTALL_WARNINGS++ )) || true
+        return 1
+    fi
+    if [[ "$item" == "researchstudio-idea" ]]; then
+        info "ResearchStudio: runtime dependencies/API keys are set up on first use (see each SKILL.md)."
+    fi
+}
+
+# Install the selected pinned items and migrate legacy copies. In an
+# interactive run (a full selection), previously installed items that were
+# deselected are removed — only copies this script recorded, unmodified.
+install_upstream_skills() {
+    # Legacy bundled humanizer: replaced by the humanizer@humanizer plugin.
+    # Removed when humanizer is selected this run, or when a full selection
+    # deselected it (matching the old unselected-skill cleanup).
+    local humanizer_selected=false p
+    for p in ${SELECTED_PLUGINS[@]+"${SELECTED_PLUGINS[@]}"}; do
+        [[ "$p" == "humanizer@humanizer" ]] && humanizer_selected=true
+    done
+    if [[ ${#PLUGIN_GROUPS[@]} -gt 0 ]] && $INSTALL_PLUGINS; then
+        humanizer_selected=true   # essential / all both include it
+    fi
+    if $humanizer_selected || $FULL_SELECTION; then
+        cleanup_legacy_vendored_skill humanizer "$LEGACY_HUMANIZER_SHA256"
+    fi
+
+    local item name
+    while IFS= read -r item; do
+        if is_upstream_skill_selected "$item"; then
+            install_upstream_skill_item "$item" || true
+        elif $FULL_SELECTION; then
+            [[ "$item" == "humanizer-zh" ]] && cleanup_legacy_vendored_skill humanizer-zh "$LEGACY_HUMANIZER_ZH_SHA256"
+            for name in $(upstream_skill_field "$item" targets); do
+                remove_script_managed_skill "$name"
+            done
+        fi
+    done < <(upstream_skill_items)
+}
+
 install_deepxiv() {
     local repo_url="https://github.com/DeepXiv/deepxiv_sdk"
     info "Installing DeepXiv skills from github.com/DeepXiv/deepxiv_sdk..."
@@ -4017,6 +4404,11 @@ install_plugins() {
     done
     plugins=("${unique_plugins[@]}")
 
+    # The upstream humanizer plugin needs Claude Code >= 2.1.142.
+    if [[ "$seen" == *"|humanizer@humanizer|"* ]] && ! claude_version_at_least 2 1 142; then
+        warn "humanizer@humanizer needs Claude Code >= 2.1.142 ($(claude --version 2>/dev/null | head -1 || echo unknown) found) — update Claude Code if /humanizer:humanizer does not load"
+    fi
+
     # Expose the deduped selection globally so prune_unlisted_plugins() can
     # reconcile installed plugins against what was selected this run.
     RESOLVED_PLUGINS=()
@@ -4028,7 +4420,8 @@ install_plugins() {
     local marketplace_list=(
         "anthropic-agent-skills|anthropics/skills"
         "ecc|affaan-m/everything-claude-code"
-        "ai-research-skills|zechenzhangAGI/AI-research-SKILLs"
+        "ai-research-skills|Orchestra-Research/AI-research-SKILLs"
+        "humanizer|blader/humanizer"
         "claude-plugins-official|anthropics/claude-plugins-official"
         "openai-codex|openai/codex-plugin-cc"
         "karpathy-skills|forrestchang/andrej-karpathy-skills"
@@ -4477,7 +4870,7 @@ uninstall() {
     echo "  - $CLAUDE_DIR/CLAUDE.md"
     echo "  - $CLAUDE_DIR/settings.json (backed up first)"
     echo "  - $CLAUDE_DIR/rules/"
-    echo "  - $CLAUDE_DIR/skills/ (installer-managed only)"
+    echo "  - $CLAUDE_DIR/skills/ (installer-managed only; pinned upstream skills only when unmodified)"
     echo "  - $CLAUDE_DIR/agents/ (installer-managed only)"
     echo "  - $CLAUDE_DIR/scripts/ (installer-managed only)"
     echo "  - $CLAUDE_DIR/skills/image-gen/ (when installer-owned, via .image-gen-sinedied)"
@@ -4516,10 +4909,22 @@ uninstall() {
     # skills are left alone; image-gen is governed by its manifest below.
     local skill
     for skill in "${SCRIPT_OWNED_SKILLS[@]}"; do
+        is_agent_managed_elsewhere "skills/$skill" && continue
         if [[ -d "$CLAUDE_DIR/skills/$skill" ]]; then
             rm -rf "$CLAUDE_DIR/skills/$skill" && ok "Removed skill: $skill"
         fi
     done
+    # Pinned upstream skills: only unmodified copies this installer recorded
+    # in agent-config/files.json. Legacy bundled humanizer copies only when
+    # they still match what earlier releases shipped.
+    local up_item up_name
+    while IFS= read -r up_item; do
+        for up_name in $(upstream_skill_field "$up_item" targets); do
+            remove_script_managed_skill "$up_name"
+        done
+    done < <(upstream_skill_items)
+    cleanup_legacy_vendored_skill humanizer "$LEGACY_HUMANIZER_SHA256"
+    cleanup_legacy_vendored_skill humanizer-zh "$LEGACY_HUMANIZER_ZH_SHA256"
 
     # Only remove agents that ship with this repo
     if [[ -d "$SCRIPT_DIR/agents" ]]; then
@@ -5394,6 +5799,11 @@ main() {
             INSTALL_LARK=true   # --all means everything; lark still self-skips without credentials
             INSTALL_DEEPXIV=true
             SELECTED_DEEPXIV_SKILLS=("${DEEPXIV_KNOWN_SKILLS[@]}")
+            # Pinned upstream skills (storage-analyzer stays opt-in, see
+            # SCRIPT_OPT_IN_SKILLS).
+            SELECTED_UPSTREAM_SKILLS=()
+            local _item
+            while IFS= read -r _item; do SELECTED_UPSTREAM_SKILLS+=("$_item"); done < <(upstream_skill_items)
             PLUGIN_GROUPS=("all")
             # Add code-review plugin (normally from Review group)
             SELECTED_PLUGINS+=("code-review@claude-plugins-official")
@@ -5445,6 +5855,7 @@ main() {
     $INSTALL_SETTINGS && install_settings
     $INSTALL_RULES && install_rules
     $INSTALL_SKILLS && install_skills
+    install_upstream_skills
     $INSTALL_AGENTS && install_agents
     install_scripts
     # image-gen is always-installed (no flag gate). Runs after install_scripts
