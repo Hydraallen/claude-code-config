@@ -1,6 +1,6 @@
 # MCP Servers
 
-> **Note**: Context7 and Playwright now have official plugin equivalents. Use plugins instead — see [`plugins/README.md`](../plugins/README.md). Lark-MCP remains here as a standalone MCP server.
+> **Note**: Context7 and Playwright now have official plugin equivalents. Use plugins instead — see [`plugins/README.md`](../plugins/README.md). Lark-MCP remains here as a standalone MCP server; upstream retired it, this fork keeps it. The agent-guided path registers the same servers with the recipes in [platforms/claude/README.md](../platforms/claude/README.md#mcp). The GitHub MCP server is retired; the script installers remove the old user-scope `github` entry when it points at `api.githubcopilot.com/mcp/`.
 
 ## Servers
 
@@ -31,10 +31,11 @@ not stop it coming back.
 ## Installation
 
 ```bash
-# Default MCP servers (Playwright only):
-./install.sh --mcp
+# Both servers are opt-in. Pick them in the interactive selector, or add one directly:
+./install.sh --only mcp          # standalone Playwright MCP (skip the playwright plugin)
+./install.sh --only mcp-lark     # Lark/Feishu MCP; prompts for App ID / Secret on a terminal
 
-# Lark/Feishu is opt-in — pick it in the interactive selector, or add manually:
+# Or add Lark/Feishu manually:
 claude mcp add lark-mcp --scope user -- npx -y @larksuiteoapi/lark-mcp mcp -a YOUR_APP_ID -s YOUR_APP_SECRET -t preset.light
 ```
 

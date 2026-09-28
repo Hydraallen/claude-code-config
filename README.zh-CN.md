@@ -6,7 +6,7 @@
 
 ![Claude 状态栏](assets/statusline.png)
 
-一个仓库维护 [Claude Code](https://claude.com/claude-code) 和 [Codex](https://developers.openai.com/codex/) 的全局指令、编码规则、插件、共享 skills、状态栏与纠错记忆。本仓库是 [Mizoreww/awesome-agent-config](https://github.com/Mizoreww/awesome-agent-config) 的 fork，保留两条安装路径：脚本安装器（`install.sh` / `install.ps1`，仅 Claude Code）和上游的 agent 引导安装——由已有 agent 识别平台、解释选项并安装你选择的内容。此外还提供多后端启动器、OpenRouter 出图和 Lark/飞书 MCP。
+一个仓库维护 [Claude Code](https://claude.com/claude-code) 和 [Codex](https://developers.openai.com/codex/) 的全局指令、编码规则、插件、共享 skills、状态栏与纠错记忆。本仓库是 [Mizoreww/awesome-agent-config](https://github.com/Mizoreww/awesome-agent-config) 的 fork，保留两条安装路径：脚本安装器（`install.sh` / `install.ps1`，仅 Claude Code）和上游的 agent 引导安装——由已有 agent 识别平台、解释选项并安装你选择的内容。此外还提供多后端启动器与 OpenRouter 出图，并保留上游已退役的 Lark/飞书 MCP。
 
 ## 示例
 
@@ -28,19 +28,26 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Hydraallen/claude-code-confi
 irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex
 ```
 
-启动两级交互菜单。追加 `--all` / `-All` 跳过菜单全量安装。其他参数：`--dry-run`、`--uninstall`、`--version`（PowerShell 对应 `-DryRun`、`-Uninstall`、`-Version`）。
+启动两级交互菜单：11 个分组共 47 项，其中 29 项默认开启。Windows 上的 `install.ps1` 提供 10 个分组共 40 项；模型后端、shell wrapper、co-author 与 Matt skills 目前只支持 macOS / Linux。参数（括号内为 PowerShell 写法）：
+
+- `--all`（`-All`）：跳过菜单，安装除可选 storage-analyzer 之外的全部条目。
+- `--only <ids>`（`-Only`）：只安装列出的菜单项，逗号分隔。增量安装：不删除其他内容、不对账插件、不重建 `enabledPlugins`、不写版本戳。
+- `--list-ids`（`-ListIds`）：列出全部菜单 ID、默认值与分组。
+- `--prune-foreign-plugins`（`-PruneForeignPlugins`）：对账时也处理安装器不管理的插件（见下文）。
+- `--dry-run`（`-DryRun`）、`--uninstall`（`-Uninstall`）、`--force`（`-Force`）、`--version`（`-Version`）。
 
 ```
-  > [7/8] Core                   全局指令、设置、写作规则...
-    [2/4] Model Backends          GLM、OpenRouter、ChatGPT（CLIProxyAPI）、CCR
-    [3/3] Language Rules          Python / TypeScript / Go
-    [1/3] Review                  code-review（adversarial-review 需手动勾选）
-    [9/9] Workflow                karpathy、superpowers、mattpocock、update-config...
-    [3/3] Integrations            context7、playwright...
-    [3/4] Design & Content        document-skills、example-skills、humanizer...
-    [0/2] Slides                  frontend-slides、ppt-master
-    [2/11] Academic Research      paper-reading、cheatsheet-creator、deepxiv-cli...
-    [0/2] MCP Servers             Playwright、Lark/飞书（可选）
+  > [7/8]  Core                  全局指令、设置、写作规则、状态栏...
+    [2/4]  Model Backends        GLM、OpenRouter、ChatGPT（CLIProxyAPI）、CCR
+    [3/3]  Language Rules        Python / TypeScript / Go
+    [1/3]  Review                code-review（adversarial-review / Codex 需手动勾选）
+    [9/10] Workflow              karpathy、superpowers、mattpocock、ecc、update-config、neat-freak...
+    [2/2]  Integrations          context7、playwright
+    [3/5]  Design & Content      document-skills、example-skills、humanizer、humanizer-zh、lieflat-charts
+    [0/2]  Slides                frontend-slides、ppt-master
+    [0/1]  Storage               storage-analyzer
+    [2/7]  Academic Research     paper-reading、cheatsheet-creator、AI Research、ResearchStudio、DeepXiv...
+    [0/2]  MCP Servers           Playwright、Lark/飞书（可选）
 ```
 
 - **主菜单**：↑↓ 切换分组，**Enter 或 →** 进入子菜单，**q** 退出。移到 *Submit* 按 Enter 开始安装。
@@ -48,11 +55,13 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 - 快捷键（任意层级）：**a** 全选，**n** 全不选，**d** 恢复默认；在子菜单中只作用于当前分组。
 - Review 分组中 `adversarial-review` 与 `codex` 互斥——选中一个会取消另一个。
 
-**重跑安装器会对账它管理的插件。** 本次未勾选的目录内插件会被卸载，不再被任何存活插件需要的 marketplace 也会移除；安装器目录之外的插件保持不动。卸载不可逆，建议先用 `--dry-run` 预览。一个插件都没勾选时，对账不做任何动作。
+**重跑安装器会对账它管理的插件。** 本次未勾选的目录内插件会被卸载，不再被任何存活插件需要的 marketplace 也会移除；安装器目录之外的插件保持不动，除非传入 `--prune-foreign-plugins`。卸载不可逆，建议先用 `--dry-run` 预览。一个插件都没勾选时，对账不做任何动作；`--only` 从不对账。
+
+**每次运行（包括 `--only`）都会清理已退役的条目：** github 插件、旧的 user scope GitHub MCP 服务（仅当它指向 `api.githubcopilot.com/mcp/`），以及 claude-mem、PUA 插件和它们的 marketplace。仍在使用 claude-mem 的话，升级前请先读[迁移说明](docs/migration.md#removed-integrations)。每次运行都会把选择记录到 `~/.claude/agent-config/selection.json`，之后可以交给 `edit-config` 接管。
 
 ### 方式 B —— agent 引导安装（Claude 或 Codex）
 
-本 fork 的发布主线为 [Hydraallen/claude-code-config](https://github.com/Hydraallen/claude-code-config) 的 `main`。从旧仓库名或开发分支升级时，请按 [v4 迁移说明](docs/migration.md#repository-identity)处理。
+本 fork 的发布主线为 [Hydraallen/claude-code-config](https://github.com/Hydraallen/claude-code-config) 的 `main`。之前使用上游 Mizoreww/awesome-agent-config 的话，agent 会把它视为不同来源，只有你明确要求才切换，见[迁移说明](docs/migration.md#repository-identity)。只有脚本安装器提供的条目（模型后端、启动器、co-author、搜索 agent、image-gen）由 agent 在你确认后用 `install.sh --only <id>` 安装。
 
 在 Claude 或 Codex 中打开这份 checkout，或把**当前正在阅读的仓库页面 URL**与下面这段请求一起发给 agent。分享分支页面时保留 URL 中的 branch/ref。
 
@@ -70,7 +79,7 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 
 ## 分类目录
 
-保留原有分类，合并 Claude 与 Codex 的能力。第三方原版从上游安装，本仓库保存自有 skill 与保留署名的定制版。handoff 仅作为 Matt 包成员提供。`—` 表示本仓库未为该 agent 提供该项，agent 展示选择时会过滤它。平台列中的 **★** 表示该 agent 的作者推荐。标注 *（fork）* 的条目为本 fork 特有。准确渠道、稳定 ID 与推荐标记以 [catalog.md](catalog.md) 为准。
+保留原有分类，合并 Claude 与 Codex 的能力。第三方原版从上游安装，本仓库保存自有 skill 与保留署名的定制版。handoff 仅作为 Matt 包成员提供。`—` 表示本仓库未为该 agent 提供该项，agent 展示选择时会过滤它。平台列中的 **★** 表示该 agent 的作者推荐。标注 *（fork）* 的条目为本 fork 特有；Claude 列写着*脚本安装器*的条目只能由 `install.sh` / `install.ps1` 安装。准确渠道、稳定 ID 与推荐标记以 [catalog.md](catalog.md) 为准。
 
 ### Core · 基础配置
 
@@ -86,6 +95,15 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 | **Shell wrapper** *（fork）* | [本仓库](docs/BACKENDS.zh-CN.md) | `cl` / `cl_auto` / `cl_switch` 启动器，每个 profile 生成一个 `cl_<backend>`，并附自定义系统提示 | 脚本安装器 ★ | — |
 | **Co-authored-by** *（fork）* | 本仓库 | 在 commit 中把 Claude 加为共同作者 | 脚本安装器 | — |
 
+### Model Backends · 模型后端 *（fork）*
+
+| 项目 | 来源 | 功能 | Claude | Codex |
+| --- | --- | --- | --- | --- |
+| **GLM Coding Plan** | [本仓库](docs/BACKENDS.zh-CN.md) | 智谱 BigModel 的 Anthropic 兼容端点，用 `cl_glm` 启动 | 脚本安装器 ★ | — |
+| **OpenRouter** | [本仓库](docs/BACKENDS.zh-CN.md) | OpenRouter 的 Anthropic 兼容端点，用 `cl_or` 启动；同一个 key 也供 image-gen 使用 | 脚本安装器 ★ | — |
+| **ChatGPT via CLIProxyAPI** | [本仓库](docs/BACKENDS.zh-CN.md) | 用 `cl_gpt` 复用 ChatGPT Plus/Pro 订阅；有封号风险 | 脚本安装器 | — |
+| **CCR gateway** | [本仓库](docs/BACKENDS.zh-CN.md) | claude-code-router：GLM 与 GPT 合并在一个 `/model` 列表，用 `cl_ccr` 启动；需在 Web UI 手动配置 | 脚本安装器 | — |
+
 ### Language Rules · 语言规则
 
 | 项目 | 来源 | 功能 | Claude | Codex |
@@ -99,7 +117,7 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 | 项目 | 来源 | 功能 | Claude | Codex |
 | --- | --- | --- | --- | --- |
 | **Claude code-review** | [Anthropic](https://github.com/anthropics/claude-plugins-official) | 基于置信度的 PR 代码审查 | 原生插件 ★ | — |
-| **Matt code-review** | [Matt Pocock](https://github.com/mattpocock/skills) | Standards / Spec 双轴审查；Codex 可单独选择 | Matt 包内 | 精选源码 ★ |
+| **Matt code-review** | [Matt Pocock](https://github.com/mattpocock/skills) | Standards / Spec 双轴审查；Codex 可单独选择，本 fork 的 Claude Matt 精选子集不含此项 | — | 精选源码 ★ |
 | **adversarial-review** | [poteto/noodle](https://github.com/poteto/noodle/blob/main/.agents/skills/adversarial-review/SKILL.md) | Skeptic、Architect、Minimalist 视角的跨模型审查 | 内置 skill ★ | — |
 | **codex-in-claude** | [OpenAI](https://github.com/openai/codex-plugin-cc) | 在 Claude 内调用 Codex CLI，按需选择审查方式 | 原生插件 | — |
 
@@ -132,7 +150,7 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 | --- | --- | --- | --- | --- |
 | **document-skills** | [Anthropic](https://github.com/anthropics/skills) | 创建和编辑 PDF、DOCX、PPTX、XLSX；优先复用 Codex 已有同等内置能力 | 原生插件 ★ | 内置能力 / 兼容插件 / 源码 ★ |
 | **example-skills** | [Anthropic](https://github.com/anthropics/skills) | Claude：12 项示例；Codex：canvas-design、algorithmic-art、mcp-builder 三项 | 原生插件 ★ | 精选源码 ★ |
-| **humanizer** | [blader](https://github.com/blader/humanizer) | 去除英文写作中的机械化 AI 表达 | 插件 / 源码 ★ | 上游安装 ★ |
+| **humanizer** | [blader](https://github.com/blader/humanizer) | 去除英文写作中的机械化 AI 表达；Claude 使用 `humanizer@humanizer` 插件，调用名 `/humanizer:humanizer`（需要 Claude Code 2.1.142 或更高） | 插件 / 源码 ★ | 上游安装 ★ |
 | **humanizer-zh** | [op7418](https://github.com/op7418/Humanizer-zh) | 去除中文写作中的机械化 AI 表达 | 上游安装 | 上游安装 |
 | **lieflat-charts** | [lieflat-charts](https://github.com/larashero3-dotcom/lieflat-charts) | Lupi / Basics / Glance / Maps HTML 图表与 12 个双语报告模板；源码不含预览媒体，仅限非商业用途 | 精选源码 | — |
 | **image-gen** *（fork）* | [sinedied/agent-skills](https://github.com/sinedied/agent-skills) | 经 OpenRouter 出图；脚本安装器始终安装 | 脚本安装器 | — |
@@ -168,11 +186,13 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 | 项目 | 来源 | 功能 | Claude | Codex |
 | --- | --- | --- | --- | --- |
 | **OpenAI docs** | [OpenAI](https://developers.openai.com/mcp) | OpenAI 官方开发文档 | — | MCP ★ |
-| **Playwright MCP** *（fork）* | [本仓库](mcp/README.md) | 独立的 `@playwright/mcp` 服务；与 playwright 插件同名并会遮蔽它，二者只选其一 | 脚本安装器 | — |
-| **Lark / 飞书 MCP** *（fork）* | [larksuite](https://github.com/larksuite/lark-openapi-mcp) | 飞书 / Lark 集成；需要 App ID / Secret，每会话约占 1 GB 内存。分步指引：[LARK-MCP](docs/LARK-MCP.zh-CN.md) | MCP | — |
+| **Playwright MCP** *（fork）* | [本仓库](mcp/README.md) | 独立的 `@playwright/mcp` 服务；与 playwright 插件同名并会遮蔽它，二者只选其一 | MCP | — |
+| **Lark / 飞书 MCP** *（fork）* | [larksuite](https://github.com/larksuite/lark-openapi-mcp) | 飞书 / Lark 集成，上游已退役、本 fork 保留；需要 App ID / Secret，每会话约占 1 GB 内存，因此默认关闭。分步指引：[LARK-MCP](docs/LARK-MCP.zh-CN.md) | MCP | — |
 
 
-完整包成员见 [catalog.md](catalog.md#members)，源码 revision 与适配见 [sources.md](platforms/sources.md)。存储分析的定制记录在 [UPSTREAM.md](skills/storage-analyzer/UPSTREAM.md)，已通过 [khazix-skills#50](https://github.com/KKKKhazix/khazix-skills/pull/50) 提交上游。Context7、Playwright 统一放在开发集成；独立的 Playwright MCP 只由脚本安装器提供。
+完整包成员见 [catalog.md](catalog.md#members)，源码 revision 与适配见 [sources.md](platforms/sources.md)。存储分析的定制记录在 [UPSTREAM.md](skills/storage-analyzer/UPSTREAM.md)，已通过 [khazix-skills#50](https://github.com/KKKKhazix/khazix-skills/pull/50) 提交上游。Context7、Playwright 统一放在开发集成；独立的 Playwright MCP 供不装 playwright 插件的用户使用。
+
+4.2.0 移除了 GitHub MCP 与 github 插件、claude-mem、PUA；六个 AI Research 条目合并为一个整包，Common rules 由写作规则取代。旧 ID 的处理见[迁移说明](docs/migration.md#script-menu-ids)。
 
 ## 模型后端 —— 首次使用前的配置
 
@@ -226,7 +246,8 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 - **两条安装路径**：脚本安装器按菜单选择一次性写入 `~/.claude`；agent 引导路径在对话中列出编号选项并记录用户选择。两者读取同一套 `platforms/claude/templates/` 模板。
 - **独立记忆**：Claude 使用自己的全局 `lessons.md` 与项目 `memory/MEMORY.md`；Codex 使用自己的全局 `lessons.md` 与项目根目录 `lessons.md`。模板和真实历史各自保留，仅在缺少全局记录时创建空白文件。
 - **规则与状态栏**：Claude 提供一份写作规则，以及独立的 Python / TypeScript / Go 规则；渐变状态栏展示模型、目录、venv、Git、上下文与当前后端的 5 小时额度（Anthropic 或 GLM）。Codex 使用原生状态栏与子 agent 能力，本仓库不再安装自定义角色预设。
-- **配置管理**：edit-config 跟踪 main 并记录实际 revision；`/update-config` 重跑脚本安装器。来源策略冲突时明确选择是否迁移，保留已有选择与定制。
+- **配置管理**：edit-config 跟踪 main 并记录实际 revision；`/update-config` 重跑脚本安装器。两条路径共用 `agent-config/selection.json`。来源策略冲突时明确选择是否迁移，保留已有选择与定制。
+- **目录同步检查**：`scripts/check-catalog-sync.sh` 校验 catalog.md 与两个脚本安装器一致，`scripts/check-readme-sync.sh` 保持两份 README 对齐。
 - **限定修改范围**：保留用户定制、凭据、hooks 和记忆数据库，通过备份与文件归属支持更新和明确移除。ResearchStudio Idea/Reel、PPT Master 只准备完整源码，运行依赖留到首次使用。
 
 ## 默认设置
@@ -278,12 +299,13 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 
 本 fork 在上游基础上新增：
 
-- **脚本安装器**（`install.sh` / `install.ps1`）：两级交互菜单、插件对账、`--dry-run` / `--uninstall`
+- **脚本安装器**（`install.sh` / `install.ps1`）：两级交互菜单、插件对账、`--only` / `--list-ids`、`--dry-run` / `--uninstall`
 - **Shell Wrapper**（`claude.zsh`）：`cl`/`cl_auto`/`cl_switch`/`cl_profiles`，并为每个 profile 自动生成 `cl_<backend>`
 - **模型后端**（`profiles/*.json`）：每个后端一个 JSON —— `claude`、`glm`、`or`、`gpt`、`ccr`。往 `~/.claude/profiles/` 丢一个新 JSON 即可新增后端，无需改代码。详见 [docs/BACKENDS.zh-CN.md](docs/BACKENDS.zh-CN.md)
 - **搜索 Agent**（`agents/search.md`）：Jeff，只读网络搜索专家
 - **系统提示**（`system-prompt.txt`）：自定义行为准则
-- **Lark / 飞书 MCP**（`mcp/`）：可选；见 [docs/LARK-MCP.zh-CN.md](docs/LARK-MCP.zh-CN.md)
+- **Lark / 飞书 MCP**（`mcp/`）：可选，上游已退役、本 fork 保留；见 [docs/LARK-MCP.zh-CN.md](docs/LARK-MCP.zh-CN.md)
+- **额外目录条目**：feature-dev、ralph-loop、commit-commands、ecc 插件，update-config 与 cheatsheet-creator skill，以及 6 项 Matt 精选子集
 - **Co-authored-by**：安装器选项，用于 commit 归属
 
 ## License

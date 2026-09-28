@@ -6,7 +6,7 @@
 
 ![Claude Statusline](assets/statusline.png)
 
-One repository for [Claude Code](https://claude.com/claude-code) and [Codex](https://developers.openai.com/codex/): global instructions, coding rules, plugins, shared skills, status lines and correction memory. This fork of [Mizoreww/awesome-agent-config](https://github.com/Mizoreww/awesome-agent-config) keeps two install paths: the script installers (`install.sh` / `install.ps1`, Claude Code only) and the upstream agent-guided setup, where your existing agent detects the platform, explains the options and installs your choices. It also adds a multi-backend launcher, OpenRouter image generation and Lark/Feishu MCP.
+One repository for [Claude Code](https://claude.com/claude-code) and [Codex](https://developers.openai.com/codex/): global instructions, coding rules, plugins, shared skills, status lines and correction memory. This fork of [Mizoreww/awesome-agent-config](https://github.com/Mizoreww/awesome-agent-config) keeps two install paths: the script installers (`install.sh` / `install.ps1`, Claude Code only) and the upstream agent-guided setup, where your existing agent detects the platform, explains the options and installs your choices. It also adds a multi-backend launcher and OpenRouter image generation, and keeps the Lark/Feishu MCP that upstream retired.
 
 ## Showcase
 
@@ -28,19 +28,26 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Hydraallen/claude-code-confi
 irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex
 ```
 
-Launches a two-level interactive selector. Append `--all` / `-All` to skip the menu and install everything non-interactively. Other flags: `--dry-run`, `--uninstall`, `--version` (PowerShell: `-DryRun`, `-Uninstall`, `-Version`).
+Launches a two-level interactive selector: 47 items in 11 groups, 29 of them on by default. On Windows, `install.ps1` offers 40 items in 10 groups; the model backends, shell wrapper, co-author and Matt skills are macOS/Linux only for now. Flags (PowerShell spelling in parentheses):
+
+- `--all` (`-All`): skip the menu and install every item except the opt-in storage-analyzer.
+- `--only <ids>` (`-Only`): install just the listed menu items, comma-separated. Additive: nothing is removed, plugins are not reconciled, `enabledPlugins` is not rebuilt and the version stamp is not written.
+- `--list-ids` (`-ListIds`): print every menu ID with its default and group.
+- `--prune-foreign-plugins` (`-PruneForeignPlugins`): also reconcile plugins the installer does not manage (see below).
+- `--dry-run` (`-DryRun`), `--uninstall` (`-Uninstall`), `--force` (`-Force`), `--version` (`-Version`).
 
 ```
-  > [7/8] Core                   Global instructions, settings, writing-style rule...
-    [2/4] Model Backends          GLM, OpenRouter, ChatGPT (CLIProxyAPI), CCR
-    [3/3] Language Rules          Python / TypeScript / Go
-    [1/3] Review                  code-review (adversarial-review opt-in)
-    [9/9] Workflow                karpathy, superpowers, mattpocock, update-config...
-    [3/3] Integrations            context7, playwright...
-    [3/4] Design & Content        document-skills, example-skills, humanizer...
-    [0/2] Slides                  frontend-slides, ppt-master
-    [2/11] Academic Research      paper-reading, cheatsheet-creator, deepxiv-cli...
-    [0/2] MCP Servers             Playwright, Lark/Feishu (opt-in)
+  > [7/8]  Core                  Global instructions, settings, writing-style rule, statusline...
+    [2/4]  Model Backends        GLM, OpenRouter, ChatGPT (CLIProxyAPI), CCR
+    [3/3]  Language Rules        Python / TypeScript / Go
+    [1/3]  Review                code-review (adversarial-review / Codex opt-in)
+    [9/10] Workflow              karpathy, superpowers, mattpocock, ecc, update-config, neat-freak...
+    [2/2]  Integrations          context7, playwright
+    [3/5]  Design & Content      document-skills, example-skills, humanizer, humanizer-zh, lieflat-charts
+    [0/2]  Slides                frontend-slides, ppt-master
+    [0/1]  Storage               storage-analyzer
+    [2/7]  Academic Research     paper-reading, cheatsheet-creator, AI Research, ResearchStudio, DeepXiv...
+    [0/2]  MCP Servers           Playwright, Lark/Feishu (opt-in)
 ```
 
 - **Main menu**: ↑↓ navigate groups, **Enter or →** open a group's sub-menu, **q** quit. Arrow to *Submit* and press Enter to install.
@@ -48,11 +55,13 @@ Launches a two-level interactive selector. Append `--all` / `-All` to skip the m
 - Shortcuts (any level): **a** all on, **n** all off, **d** defaults; in sub-menus these only affect that group.
 - The Review group's `adversarial-review` and `codex` are mutually exclusive — selecting one deselects the other.
 
-**Re-running the installer reconciles the plugins it manages.** Catalogue plugins you did not select this run are uninstalled, along with any marketplace no remaining plugin needs; plugins outside the installer's catalogue are left alone. Uninstalls are not reversible, so preview with `--dry-run` first. Selecting no plugins at all reconciles nothing.
+**Re-running the installer reconciles the plugins it manages.** Catalogue plugins you did not select this run are uninstalled, along with any marketplace no remaining plugin needs; plugins outside the installer's catalogue are left alone unless you pass `--prune-foreign-plugins`. Uninstalls are not reversible, so preview with `--dry-run` first. Selecting no plugins at all reconciles nothing, and `--only` never reconciles.
+
+**Every run, including `--only`, removes retired items:** the github plugin, the old user-scope GitHub MCP server (only when it points at `api.githubcopilot.com/mcp/`), and the claude-mem and PUA plugins with their marketplaces. If you still use claude-mem, read the [migration note](docs/migration.md#removed-integrations) before upgrading. Each run records its selection in `~/.claude/agent-config/selection.json`, so `edit-config` can take over later.
 
 ### Option B — agent-guided setup (Claude or Codex)
 
-This fork's release line is [Hydraallen/claude-code-config](https://github.com/Hydraallen/claude-code-config) on `main`. Upgrading from the previous repository name or development branch? Follow the [v4 migration notes](docs/migration.md#repository-identity).
+This fork's release line is [Hydraallen/claude-code-config](https://github.com/Hydraallen/claude-code-config) on `main`. Coming from upstream Mizoreww/awesome-agent-config? The agent treats it as a different source and switches only when you ask; see the [migration notes](docs/migration.md#repository-identity). Items that only the script installer provides (model backends, launcher, co-author, search agent, image-gen) are installed by the agent with `install.sh --only <id>` after you confirm.
 
 Open this checkout in Claude or Codex, or share **the URL of the repository page you are reading** along with the request below. Keep its branch/ref when sharing a branch page.
 
@@ -70,7 +79,7 @@ For Codex, the agent checks the available OpenAI official/curated directory, the
 
 ## Catalogue
 
-The tables retain the original categories and merge the Claude and Codex capabilities. Third-party originals are installed from their upstream sources; this repository stores author-owned and intentionally customized skills with attribution. Handoff belongs to the Matt bundle only. `—` means this repository does not offer that item for the agent. The agent hides those entries when presenting your choices. A platform cell marked **★** identifies an author recommendation for that agent. Items marked *(fork)* are specific to this fork. Exact routes, stable IDs and recommendation markers live in [catalog.md](catalog.md).
+The tables retain the original categories and merge the Claude and Codex capabilities. Third-party originals are installed from their upstream sources; this repository stores author-owned and intentionally customized skills with attribution. Handoff belongs to the Matt bundle only. `—` means this repository does not offer that item for the agent. The agent hides those entries when presenting your choices. A platform cell marked **★** identifies an author recommendation for that agent. Items marked *(fork)* are specific to this fork; a Claude cell reading *Script installer* means only `install.sh` / `install.ps1` installs it. Exact routes, stable IDs and recommendation markers live in [catalog.md](catalog.md).
 
 ### Core
 
@@ -86,6 +95,15 @@ The tables retain the original categories and merge the Claude and Codex capabil
 | **Shell wrapper** *(fork)* | [Repository](docs/BACKENDS.md) | `cl` / `cl_auto` / `cl_switch` launchers plus a `cl_<backend>` per profile and a custom system prompt | Script installer ★ | — |
 | **Co-authored-by** *(fork)* | Repository | Add Claude as co-author in commits | Script installer | — |
 
+### Model Backends *(fork)*
+
+| Item | Source | What It Does | Claude | Codex |
+| --- | --- | --- | --- | --- |
+| **GLM Coding Plan** | [Repository](docs/BACKENDS.md) | Zhipu BigModel Anthropic-compatible endpoint, launched with `cl_glm` | Script installer ★ | — |
+| **OpenRouter** | [Repository](docs/BACKENDS.md) | OpenRouter Anthropic-compatible endpoint, launched with `cl_or`; its key also serves image-gen | Script installer ★ | — |
+| **ChatGPT via CLIProxyAPI** | [Repository](docs/BACKENDS.md) | Reuse a ChatGPT Plus/Pro subscription with `cl_gpt`; carries an account-ban risk | Script installer | — |
+| **CCR gateway** | [Repository](docs/BACKENDS.md) | claude-code-router: GLM and GPT in one `/model` list with `cl_ccr`; manual web-UI setup | Script installer | — |
+
 ### Language Rules
 
 | Item | Source | What It Does | Claude | Codex |
@@ -99,7 +117,7 @@ The tables retain the original categories and merge the Claude and Codex capabil
 | Item | Source | What It Does | Claude | Codex |
 | --- | --- | --- | --- | --- |
 | **Claude code-review** | [Anthropic](https://github.com/anthropics/claude-plugins-official) | Confidence-based pull request review | Native plugin ★ | — |
-| **Matt code-review** | [Matt Pocock](https://github.com/mattpocock/skills) | Separate Standards and Spec reviews; a standalone choice on Codex | In Matt bundle | Selected source ★ |
+| **Matt code-review** | [Matt Pocock](https://github.com/mattpocock/skills) | Separate Standards and Spec reviews; a standalone choice on Codex, not part of this fork's Claude Matt subset | — | Selected source ★ |
 | **adversarial-review** | [poteto/noodle](https://github.com/poteto/noodle/blob/main/.agents/skills/adversarial-review/SKILL.md) | Cross-model review through Skeptic, Architect and Minimalist lenses | Bundled skill ★ | — |
 | **codex-in-claude** | [OpenAI](https://github.com/openai/codex-plugin-cc) | Call Codex CLI from Claude; choose alongside review tools according to need | Native plugin | — |
 
@@ -132,7 +150,7 @@ The tables retain the original categories and merge the Claude and Codex capabil
 | --- | --- | --- | --- | --- |
 | **document-skills** | [Anthropic](https://github.com/anthropics/skills) | PDF, DOCX, PPTX and XLSX creation and editing; reuse equivalent built-in Codex tools | Native plugin ★ | Built-in / compatible plugin / source ★ |
 | **example-skills** | [Anthropic](https://github.com/anthropics/skills) | Claude: 12 examples; Codex: canvas-design, algorithmic-art and mcp-builder | Native plugin ★ | Selected source ★ |
-| **humanizer** | [blader](https://github.com/blader/humanizer) | Remove mechanical AI writing patterns in English | Plugin / source ★ | Upstream install ★ |
+| **humanizer** | [blader](https://github.com/blader/humanizer) | Remove mechanical AI writing patterns in English; on Claude the `humanizer@humanizer` plugin, called as `/humanizer:humanizer` (Claude Code 2.1.142 or later) | Plugin / source ★ | Upstream install ★ |
 | **humanizer-zh** | [op7418](https://github.com/op7418/Humanizer-zh) | Remove mechanical AI writing patterns in Chinese | Upstream install | Upstream install |
 | **lieflat-charts** | [lieflat-charts](https://github.com/larashero3-dotcom/lieflat-charts) | Lupi / Basics / Glance / Maps HTML galleries and 12 bilingual report templates; source excludes preview media; noncommercial use only | Selected source | — |
 | **image-gen** *(fork)* | [sinedied/agent-skills](https://github.com/sinedied/agent-skills) | Image generation through OpenRouter; always installed by the script installer | Script installer | — |
@@ -168,11 +186,13 @@ The tables retain the original categories and merge the Claude and Codex capabil
 | Item | Source | What It Does | Claude | Codex |
 | --- | --- | --- | --- | --- |
 | **OpenAI docs** | [OpenAI](https://developers.openai.com/mcp) | Official OpenAI developer documentation | — | MCP ★ |
-| **Playwright MCP** *(fork)* | [Repository](mcp/README.md) | Standalone `@playwright/mcp` server; claims the same name as the playwright plugin and shadows it, so pick only one | Script installer | — |
-| **Lark / Feishu MCP** *(fork)* | [larksuite](https://github.com/larksuite/lark-openapi-mcp) | Feishu / Lark integration; needs an App ID / Secret and uses about 1 GB RAM per session. Walkthrough: [LARK-MCP](docs/LARK-MCP.md) | MCP | — |
+| **Playwright MCP** *(fork)* | [Repository](mcp/README.md) | Standalone `@playwright/mcp` server; claims the same name as the playwright plugin and shadows it, so pick only one | MCP | — |
+| **Lark / Feishu MCP** *(fork)* | [larksuite](https://github.com/larksuite/lark-openapi-mcp) | Feishu / Lark integration, kept in this fork although upstream retired it; needs an App ID / Secret and uses about 1 GB RAM per session, so it is off by default. Walkthrough: [LARK-MCP](docs/LARK-MCP.md) | MCP | — |
 
 
-Complete bundle membership is listed in [catalog.md](catalog.md#members). Selected source revisions and adaptations are in [sources.md](platforms/sources.md). Storage analyzer modifications are documented in [UPSTREAM.md](skills/storage-analyzer/UPSTREAM.md) and submitted as [khazix-skills#50](https://github.com/KKKKhazix/khazix-skills/pull/50). Context7 and Playwright appear under Integrations; the standalone Playwright MCP exists only for the script installer.
+Complete bundle membership is listed in [catalog.md](catalog.md#members). Selected source revisions and adaptations are in [sources.md](platforms/sources.md). Storage analyzer modifications are documented in [UPSTREAM.md](skills/storage-analyzer/UPSTREAM.md) and submitted as [khazix-skills#50](https://github.com/KKKKhazix/khazix-skills/pull/50). Context7 and Playwright appear under Integrations; the standalone Playwright MCP is for users who skip the plugin.
+
+Removed in 4.2.0: GitHub MCP and the github plugin, claude-mem, and PUA. The six AI Research entries became one bundle, and the Common rules became the writing-style rule. See the [migration notes](docs/migration.md#script-menu-ids) for the old IDs.
 
 ## Model Backends — First-Run Setup
 
@@ -226,7 +246,8 @@ The [`sinedied/agent-skills`:`image-gen`](https://github.com/sinedied/agent-skil
 - **Two install paths** — the script installers apply a menu selection to `~/.claude` in one run; the agent-guided path lists numbered choices in chat and records the user's selections. Both read the same templates under `platforms/claude/templates/`.
 - **Independent memory** — Claude uses its own global `lessons.md` plus project `memory/MEMORY.md`; Codex uses its own global `lessons.md` plus project-root `lessons.md`. Templates and real histories remain separate. Only missing global logs are seeded.
 - **Rules and status lines** — Claude has one writing rule and independent Python / TypeScript / Go rules; the gradient status line shows model, directory, venv, Git, context and the 5-hour quota of the active backend (Anthropic or GLM). Codex uses its native footer and subagent capabilities; this repository no longer installs custom role presets.
-- **Configuration management** — edit-config follows main and records the actual revision; `/update-config` re-runs the script installer. Conflicting source policies require an explicit migration choice; user selections and customizations are preserved.
+- **Configuration management** — edit-config follows main and records the actual revision; `/update-config` re-runs the script installer. Both paths share `agent-config/selection.json`. Conflicting source policies require an explicit migration choice; user selections and customizations are preserved.
+- **Catalogue sync** — `scripts/check-catalog-sync.sh` checks catalog.md against both script installers, and `scripts/check-readme-sync.sh` keeps the two READMEs aligned.
 - **Scoped changes** — preserve user edits, credentials, hooks and memory databases. Backups and file ownership support safe updates and explicit removals. ResearchStudio Idea/Reel and PPT Master prepare complete source only; runtime dependencies are handled on first use.
 
 ## Settings Defaults
@@ -278,12 +299,13 @@ For installed configuration queries and changes, use [edit-config](skills/edit-c
 
 This fork adds the following on top of upstream:
 
-- **Script installers** (`install.sh` / `install.ps1`): interactive two-level selector, plugin reconciliation, `--dry-run` / `--uninstall`
+- **Script installers** (`install.sh` / `install.ps1`): interactive two-level selector, plugin reconciliation, `--only` / `--list-ids`, `--dry-run` / `--uninstall`
 - **Shell Wrapper** (`claude.zsh`): `cl`/`cl_auto`/`cl_switch`/`cl_profiles` plus a generated `cl_<backend>` per profile
 - **Model Backends** (`profiles/*.json`): one JSON per backend — `claude`, `glm`, `or`, `gpt`, `ccr`. Dropping a new JSON in `~/.claude/profiles/` adds a backend with no code changes. See [docs/BACKENDS.md](docs/BACKENDS.md)
 - **Search Agent** (`agents/search.md`): Jeff, a read-only web research specialist
 - **System Prompt** (`system-prompt.txt`): custom behavioral guidelines
-- **Lark / Feishu MCP** (`mcp/`): opt-in; see [docs/LARK-MCP.md](docs/LARK-MCP.md)
+- **Lark / Feishu MCP** (`mcp/`): opt-in, kept although upstream retired it; see [docs/LARK-MCP.md](docs/LARK-MCP.md)
+- **Extra catalogue items**: feature-dev, ralph-loop, commit-commands and ecc plugins, the update-config and cheatsheet-creator skills, and a 6-skill Matt subset
 - **Co-authored-by**: installer option for commit attribution
 
 ## License
