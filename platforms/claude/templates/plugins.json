@@ -19,7 +19,6 @@
     "ralph-loop@claude-plugins-official": true,
     "commit-commands@claude-plugins-official": true,
     "codex@openai-codex": false,
-    "health@claude-health": false,
     "frontend-slides@frontend-slides": false,
     "ppt-master@ppt-master": false,
     "humanizer@humanizer": true
