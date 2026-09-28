@@ -53,6 +53,8 @@ if ($script:REPO_OWNER -notmatch '^[A-Za-z0-9._-]+$') { Write-Host "Invalid REPO
 if ($script:REPO_NAME -notmatch '^[A-Za-z0-9._-]+$') { Write-Host "Invalid REPO_NAME: $($script:REPO_NAME)" -ForegroundColor Red; exit 1 }
 if ($script:REPO_BRANCH -notmatch '^[A-Za-z0-9._/-]+$') { Write-Host "Invalid REPO_BRANCH: $($script:REPO_BRANCH)" -ForegroundColor Red; exit 1 }
 $script:REPO_URL = "https://github.com/$($script:REPO_OWNER)/$($script:REPO_NAME)"
+# Legacy stamp filename kept so existing installs (and update-config) still
+# find their recorded version after the fork rename.
 $VERSION_STAMP_FILE = Join-Path $CLAUDE_DIR ".awesome-claude-code-config-version"
 
 # --- Colors ----------------------------------------------------------------
@@ -197,7 +199,7 @@ function Show-Version {
     $sv = Get-SourceVersion
     $iv = Get-InstalledVersion
     $rv = Get-RemoteVersion
-    Write-Host "awesome-claude-code-config version info:"
+    Write-Host "claude-code-config version info:"
     Write-Host "  Source:    $sv"
     Write-Host "  Installed: $iv"
     Write-Host "  Remote:    $rv"

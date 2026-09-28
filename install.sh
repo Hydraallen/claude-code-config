@@ -24,6 +24,8 @@ if [[ ! "$REPO_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
     echo "Invalid REPO_BRANCH: $REPO_BRANCH" >&2; exit 1
 fi
 REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}"
+# Legacy stamp filename kept so existing installs (and update-config) still
+# find their recorded version after the fork rename.
 VERSION_STAMP_FILE="$CLAUDE_DIR/.awesome-claude-code-config-version"
 # Deployable Claude templates live under platforms/claude/templates/ since the
 # upstream v4 layout (shared with the agent-guided install path). Set by
@@ -448,7 +450,7 @@ show_version() {
     installed_ver="$(get_installed_version)"
     remote_ver="$(get_remote_version)"
 
-    echo "awesome-claude-code-config version info:"
+    echo "claude-code-config version info:"
     echo "  Source:    $source_ver"
     echo "  Installed: $installed_ver"
     echo "  Remote:    $remote_ver"
