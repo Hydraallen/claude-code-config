@@ -3598,6 +3598,9 @@ Options:
     -KeepForeignPlugins Accepted for compatibility; this is now the default.
     -Help               Show this help
 
+Every run also removes retired items (github plugin + GitHub MCP, claude-mem,
+PUA). -All installs every item except the opt-in storage-analyzer skill.
+
 Examples:
     .\install.ps1                  # Interactive selector
     .\install.ps1 -All             # Install everything

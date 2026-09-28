@@ -498,6 +498,9 @@ Options:
                         Accepted for compatibility; this is now the default.
     -h, --help          Show this help
 
+Every run also removes retired items (github plugin + GitHub MCP, claude-mem,
+PUA). --all installs every item except the opt-in storage-analyzer skill.
+
 Examples:
     $(basename "$0")                                 # Interactive selector
     $(basename "$0") --all                           # Install everything
