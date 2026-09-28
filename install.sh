@@ -5368,6 +5368,11 @@ update_installed_plugins() {
             # temp_<epoch> are the CLI's in-flight scratch clones, not catalogs.
             [[ "$mkt_name" == temp_* ]] && continue
             marketplace_dir_is_valid "$mkt_path" || continue
+            if [[ -f "$CLAUDE_DIR/plugins/known_marketplaces.json" ]] \
+                && ! _leftover_mkt_registered "$mkt_name"; then
+                info "Skipping unregistered marketplace directory: $mkt_name"
+                continue
+            fi
             info "Refreshing marketplace: $mkt_name"
             if retry 2 3 "Refresh marketplace $mkt_name" \
                 with_timeout "$NET_TIMEOUT" claude plugin marketplace update "$mkt_name"; then
