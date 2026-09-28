@@ -3,11 +3,14 @@
 #
 #   1. Every install.sh menu ID maps to catalog ID(s) (catalog_id_for_menu_id in
 #      install.sh) or is listed below as script-only.
-#   2. Every mapped catalog ID has a Claude row in catalog.md, unless listed
-#      below as a fork-only item (the fork installs it; a catalog row is optional).
-#   3. Every catalog.md ID with a Claude channel is reachable from some menu ID,
-#      unless listed below as agent-only.
-#   4. install.ps1 offers the same menu IDs (minus the documented macOS/Linux-only
+#   2. Every mapped catalog ID has a Claude row in catalog.md.
+#   3. Every catalog.md ID with a Claude channel is reachable from some menu ID:
+#      through the mapping, through a "script-installed" Claude cell that names
+#      `install.sh --only <menu-id>` for a script-only menu ID, or by being listed
+#      below as agent-only or always-installed.
+#   4. Every script-only menu ID is named by exactly one catalog row's
+#      `install.sh --only <menu-id>` Claude cell.
+#   5. install.ps1 offers the same menu IDs (minus the documented macOS/Linux-only
 #      ones) and carries the same menu -> catalog mapping.
 #
 # Usage: scripts/check-catalog-sync.sh   (exit 0 = in sync)
@@ -24,23 +27,16 @@ SCRIPT_ONLY_MENU_IDS=(
     backend-glm backend-or backend-gpt backend-ccr   # model backend profiles / proxies
 )
 
-# Catalog IDs the script installs that catalog.md may not list (fork additions
-# and fork overrides). Once a row exists it is simply matched.
-FORK_ONLY_CATALOG_IDS=(
-    feature-dev ralph-loop commit-commands   # plugins kept default-on in the fork
-    ecc                                      # Everything Claude Code plugin
-    update-config                            # fork update skill (script path)
-    cheatsheet-creator                       # fork skill
-    playwright-mcp                           # standalone Playwright MCP (menu id: mcp)
-    lark                                     # Lark/Feishu MCP (menu id: mcp-lark)
-)
-
 # Catalog IDs with a Claude channel that the script installer does not offer.
+# (frontend-design, claude-health and matt-code-review have no Claude channel in
+# this fork's catalog.md, so they need no entry here.)
 AGENT_ONLY_CATALOG_IDS=(
     edit-config        # shared agent skill; installed by the agent-guided path
-    matt-code-review   # member of matt-workflow, not a separate install
-    frontend-design    # fork override: removed from the script (examples provides it)
-    claude-health      # fork override: removed from the script
+)
+
+# Catalog IDs that install.sh installs on every run, with no menu ID.
+ALWAYS_INSTALLED_CATALOG_IDS=(
+    image-gen          # sinedied image-gen skill + OpenRouter wrapper
 )
 
 # install.sh menu IDs that install.ps1 does not offer (macOS/Linux-only features).
@@ -57,14 +53,28 @@ in_list() { local n="$1" x; shift; for x in "$@"; do [[ "$x" == "$n" ]] && retur
 
 # Catalog rows: | id | description | Claude | Codex | ... ; a Claude cell of "—"
 # means the item is not offered for Claude.
+# A Claude cell that names `install.sh --only <menu-id>` is a script-installed
+# row: the ID is reached through that (script-only) menu ID.
 catalog_claude_ids=()
-while IFS= read -r id; do
-    [[ -n "$id" ]] && catalog_claude_ids+=("$id")
-done < <(awk -F'|' '
+script_row_ids=()      # catalog ID
+script_row_menu=()     # menu ID named by its --only
+while IFS='|' read -r id only; do
+    [[ -n "$id" ]] || continue
+    catalog_claude_ids+=("$id")
+    if [[ -n "$only" ]]; then
+        script_row_ids+=("$id")
+        script_row_menu+=("$only")
+    fi
+done < <(LC_ALL=C awk -F'|' '
     /^\| [a-z0-9][a-z0-9-]* \|/ {
         id = $2; gsub(/^ +| +$/, "", id)
         claude = $4; gsub(/^ +| +$/, "", claude)
-        if (claude != "" && claude != "—" && claude != "-") print id
+        if (claude == "" || claude == "\342\200\224" || claude == "-") next
+        only = ""
+        if (match(claude, /install\.sh --only [a-z0-9-]+/)) {
+            only = substr(claude, RSTART + 18, RLENGTH - 18)
+        }
+        print id "|" only
     }' "$CATALOG")
 
 # Menu IDs and the mapping, straight from install.sh.
@@ -85,7 +95,7 @@ for id in "${menu_ids[@]}"; do
     in_list "$id" "${SCRIPT_ONLY_MENU_IDS[@]}" && err "menu ID '$id' is mapped but also listed as script-only"
     for cid in $cids; do
         mapped_catalog_ids+=("$cid")
-        if ! in_list "$cid" "${catalog_claude_ids[@]}" && ! in_list "$cid" "${FORK_ONLY_CATALOG_IDS[@]}"; then
+        if ! in_list "$cid" "${catalog_claude_ids[@]}"; then
             err "menu ID '$id' maps to '$cid', which has no Claude row in catalog.md"
         fi
     done
@@ -94,7 +104,23 @@ done
 for cid in "${catalog_claude_ids[@]}"; do
     in_list "$cid" "${mapped_catalog_ids[@]}" && continue
     in_list "$cid" "${AGENT_ONLY_CATALOG_IDS[@]}" && continue
-    err "catalog ID '$cid' offers Claude but no install.sh menu item installs it (add a menu item + mapping, or list it in AGENT_ONLY_CATALOG_IDS)"
+    in_list "$cid" "${ALWAYS_INSTALLED_CATALOG_IDS[@]}" && continue
+    in_list "$cid" "${script_row_ids[@]+"${script_row_ids[@]}"}" && continue
+    err "catalog ID '$cid' offers Claude but no install.sh menu item installs it (add a menu item + mapping, name 'install.sh --only <menu-id>' in its Claude cell, or list it in AGENT_ONLY_CATALOG_IDS)"
+done
+for cid in "${ALWAYS_INSTALLED_CATALOG_IDS[@]}"; do
+    in_list "$cid" "${catalog_claude_ids[@]}" || err "stale ALWAYS_INSTALLED_CATALOG_IDS entry '$cid' (no Claude row in catalog.md)"
+done
+# Script-installed rows <-> script-only menu IDs, one to one.
+for i in "${!script_row_ids[@]}"; do
+    cid="${script_row_ids[$i]}" mid="${script_row_menu[$i]}"
+    in_list "$mid" "${menu_ids[@]}" || { err "catalog row '$cid' names 'install.sh --only $mid', but '$mid' is not an install.sh menu ID"; continue; }
+    in_list "$mid" "${SCRIPT_ONLY_MENU_IDS[@]}" || err "catalog row '$cid' names 'install.sh --only $mid', but '$mid' is mapped (use a normal channel cell for mapped items)"
+done
+for mid in "${SCRIPT_ONLY_MENU_IDS[@]}"; do
+    n=0
+    for x in "${script_row_menu[@]+"${script_row_menu[@]}"}"; do [[ "$x" == "$mid" ]] && n=$((n + 1)); done
+    (( n == 1 )) || err "script-only menu ID '$mid' is named by $n catalog rows (want exactly one 'install.sh --only $mid' Claude cell)"
 done
 for cid in "${AGENT_ONLY_CATALOG_IDS[@]}"; do
     in_list "$cid" "${catalog_claude_ids[@]}" || err "stale AGENT_ONLY_CATALOG_IDS entry '$cid' (no Claude row in catalog.md)"

@@ -1,6 +1,8 @@
 # 完整安装目录
 
-本文件定义当前仓库的完整能力、稳定 ID、平台支持和作者推荐；安装与维护直接使用当前内容。最后两列分别维护 Claude / Codex 推荐。推荐按作者指定的历史安装菜单默认项及后续调整整理，来源与映射见[推荐依据](#recommendations)；v4.0.0 发布采用当前名单，Claude 20 项、Codex 18 项。
+本文件定义当前仓库的完整能力、稳定 ID、平台支持和作者推荐；安装与维护直接使用当前内容。最后两列分别维护 Claude / Codex 推荐。推荐按作者指定的历史安装菜单默认项及后续调整整理，来源与映射见[推荐依据](#recommendations)；上游 v4.0.0 名单为 Claude 20 项、Codex 18 项，本 fork 的调整也记录在推荐依据中。
+
+**Fork 说明（Hydraallen/claude-code-config）**：本 fork 同时保留脚本安装器 `install.sh` / `install.ps1`（仅 Claude Code）。标注 *fork* 的行是本 fork 新增或保留、上游已移除的条目；Claude 列写着“脚本安装”的行只能通过脚本安装器获得，agent 引导安装时在用户确认后运行 `install.sh --only <菜单 ID>`（见 [Claude 操作说明](platforms/claude/README.md#script-only)）。本文件的 Claude ID 与脚本菜单 ID 的对应关系由 `scripts/check-catalog-sync.sh` 校验。
 
 本文件供 agent 读取。面向用户时，按用户语言直接在当前对话展示目标 agent 的完整目录：保留分类，跨分类连续编号，只读当前目标的平台列，附用途、作者推荐和实际已安装状态。平台列“—”的项不进入该目标选择。写着“由某包提供”的行是成员提示，不占第二个可安装编号。依赖未准备时显示前提；不要隐藏受支持的选装项。按 [INSTALL 的选型交互](INSTALL.md#choose-options)优先使用真实多选问答，或在对话接收多个编号；未要求导出时不另建选型文档。其余安装行为由 [INSTALL.md](INSTALL.md) 定义；修改目录和来源按 [MAINTAIN.md](MAINTAIN.md) 同步两份 README 与操作说明。
 
@@ -18,6 +20,20 @@
 | rules-writing-style | 清晰、准确的写作规则；完整英文要求及示例 | [平台配置](platforms/claude/README.md#configuration) | — | 推荐 | — |
 | statusline | 终端状态栏；Claude 渐变脚本与字体 / Codex 原生 footer | [平台配置](platforms/claude/README.md#configuration) | [平台配置](platforms/codex/README.md#configuration) | 推荐 | 推荐 |
 | lessons | 空白全局纠错记录；保留现有真实记录 | [平台配置](platforms/claude/README.md#configuration) | [平台配置](platforms/codex/README.md#configuration) | 推荐 | 推荐 |
+| search-agent | *fork*：Jeff，只读网络搜索 agent（agents/search.md） | [脚本安装](platforms/claude/README.md#script-only)：`install.sh --only agents` | — | 推荐 | — |
+| shell-wrapper | *fork*：`cl` / `cl_auto` / `cl_switch` 多后端启动器（claude.zsh）与自定义系统提示；仅 macOS / Linux | [脚本安装](platforms/claude/README.md#script-only)：`install.sh --only shell-wrapper` | — | 推荐 | — |
+| co-author | *fork*：在 commit 中加入 Claude co-author 署名（`includeCoAuthoredBy`）；仅 macOS / Linux | [脚本安装](platforms/claude/README.md#script-only)：`install.sh --only co-author` | — | — | — |
+
+## Model Backends · 模型后端（fork）
+
+每个后端写入 `~/.claude/profiles/<name>.json` 模板并生成 `cl_<name>`；凭据由用户填写，升级不覆盖。仅 macOS / Linux，依赖 shell-wrapper。详见 [BACKENDS](docs/BACKENDS.zh-CN.md)。
+
+| ID | 安装项与用途 | Claude | Codex | Claude 推荐 | Codex 推荐 |
+| --- | --- | --- | --- | --- | --- |
+| backend-glm | *fork*：智谱 GLM Coding Plan（Anthropic 兼容端点） | [脚本安装](platforms/claude/README.md#script-only)：`install.sh --only backend-glm` | — | 推荐 | — |
+| backend-or | *fork*：OpenRouter 直连 Anthropic 兼容端点 | [脚本安装](platforms/claude/README.md#script-only)：`install.sh --only backend-or` | — | 推荐 | — |
+| backend-gpt | *fork*：经 CLIProxyAPI 复用 ChatGPT 订阅；有账号风险，见 BACKENDS | [脚本安装](platforms/claude/README.md#script-only)：`install.sh --only backend-gpt` | — | — | — |
+| backend-ccr | *fork*：claude-code-router 网关，需在 Web UI 手动配置 | [脚本安装](platforms/claude/README.md#script-only)：`install.sh --only backend-ccr` | — | — | — |
 
 ## Language Rules · 语言规则
 
@@ -32,7 +48,7 @@
 | ID | 安装项与用途 | Claude | Codex | Claude 推荐 | Codex 推荐 |
 | --- | --- | --- | --- | --- | --- |
 | claude-pr-review | Claude 官方 code-review：PR 审查 | [原生插件](platforms/claude/README.md#plugins) | — | 推荐 | — |
-| matt-code-review | Matt code-review：Standards / Spec 双轴审查；Claude 已包含在 Matt 包中 | [由 matt-workflow 提供](#members) | [固定源码](platforms/sources.md#matt) | — | 推荐 |
+| matt-code-review | Matt code-review：Standards / Spec 双轴审查；fork 覆盖：本 fork 的 Claude Matt 精选子集不含此项 | — | [固定源码](platforms/sources.md#matt) | — | 推荐 |
 | adversarial-review | 跨模型审查；与 Claude 内调用 Codex 的方式择需使用 | [本地 skill](platforms/claude/README.md#local-skills) | — | 推荐 | — |
 | codex-in-claude | OpenAI codex-plugin-cc：在 Claude 中调用 Codex | [原生插件](platforms/claude/README.md#plugins) | — | — | — |
 
@@ -42,10 +58,15 @@
 | --- | --- | --- | --- | --- | --- |
 | karpathy | Karpathy 编码准则 | [原生插件](platforms/claude/README.md#plugins) | [原生插件](platforms/codex/README.md#plugins)；[固定源码](platforms/sources.md#karpathy) | 推荐 | 推荐 |
 | superpowers | Superpowers 完整工作流包；成员见下方 | [原生插件](platforms/claude/README.md#plugins) | [原生插件](platforms/codex/README.md#plugins) | — | — |
-| matt-workflow | Matt 工作流；两平台保留各自范围，成员见下方 | [原生插件](platforms/claude/README.md#plugins) | [固定源码](platforms/sources.md#matt) | 推荐 | 推荐 |
+| matt-workflow | Matt 工作流；两平台保留各自范围，成员见下方。*fork*：Claude 为 6 项精选子集（npx skills），不装原生整包 | [fork 6 项精选](platforms/claude/README.md#matt-subset) | [固定源码](platforms/sources.md#matt) | 推荐 | 推荐 |
 | neat-freak | 知识、文档与工作区收尾 | [上游安装](platforms/sources.md#writing) | [上游安装](platforms/sources.md#writing) | 推荐 | 推荐 |
 | code-simplifier | 代码简化与重构 agent | [原生插件](platforms/claude/README.md#plugins) | — | 推荐 | — |
 | edit-config | 查询、增删改、修复与更新配置；两端共用，跟踪 main | [共享 skill](platforms/claude/README.md#local-skills) | [共享 skill](platforms/codex/README.md#local-skills) | 推荐 | 推荐 |
+| feature-dev | *fork*：引导式功能开发 | [原生插件](platforms/claude/README.md#plugins) | — | 推荐 | — |
+| ralph-loop | *fork*：自动迭代循环 | [原生插件](platforms/claude/README.md#plugins) | — | 推荐 | — |
+| commit-commands | *fork*：git commit / push / PR 工作流 | [原生插件](platforms/claude/README.md#plugins) | — | 推荐 | — |
+| ecc | *fork*：Everything Claude Code：TDD、安全、数据库与多语言工作流 | [原生插件](platforms/claude/README.md#plugins) | — | 推荐 | — |
+| update-config | *fork*：`/update-config`，检查 fork main 的 VERSION 后重跑脚本安装器；与 edit-config 共用 selection.json | [本地 skill](platforms/claude/README.md#local-skills) | — | 推荐 | — |
 
 ## Integrations · 开发集成
 
@@ -60,10 +81,11 @@
 | --- | --- | --- | --- | --- | --- |
 | documents | 文档四件套：pdf、docx、pptx、xlsx | [原生插件](platforms/claude/README.md#plugins) | 已有内置能力优先；[原生兼容插件](platforms/codex/plugins.md)；[源码后备](platforms/sources.md#anthropic) | 推荐 | 推荐 |
 | examples | Claude 示例全包 / Codex 精选三个；成员见下方 | [原生插件](platforms/claude/README.md#plugins) | [固定源码](platforms/sources.md#anthropic) | 推荐 | 推荐 |
-| frontend-design | 前端视觉设计；已装 examples 整包时不重复 | [原生插件](platforms/claude/README.md#plugins) | [原生插件](platforms/codex/README.md#plugins)；[固定源码](platforms/sources.md#anthropic) | 推荐 | 推荐 |
-| humanizer | 英文写作去除机械表达 | [原生插件](platforms/claude/README.md#plugins)；[上游源码](platforms/sources.md#writing) | [上游安装](platforms/sources.md#writing) | 推荐 | 推荐 |
+| frontend-design | 前端视觉设计；已装 examples 整包时不重复。fork 覆盖：本 fork 不为 Claude 单独提供，使用 examples 整包中的成员 | — | [原生插件](platforms/codex/README.md#plugins)；[固定源码](platforms/sources.md#anthropic) | — | 推荐 |
+| humanizer | 英文写作去除机械表达；Claude 调用名 `/humanizer:humanizer` | [原生插件](platforms/claude/README.md#plugins)；[上游源码](platforms/sources.md#writing) | [上游安装](platforms/sources.md#writing) | 推荐 | 推荐 |
 | humanizer-zh | 中文写作去除机械表达 | [上游安装](platforms/sources.md#writing) | [上游安装](platforms/sources.md#writing) | — | — |
 | lieflat-charts | HTML 图表模板；PolyForm Noncommercial 1.0.0 | [固定源码](platforms/sources.md#lieflat) | — | — | — |
+| image-gen | *fork*：经 OpenRouter 出图（sinedied/agent-skills image-gen + 本仓库包装器）；需 or 后端的 OpenRouter key | [脚本安装](platforms/claude/README.md#script-only)：install.sh 每次运行都会安装（含 `--only`） | — | — | — |
 
 ## Slides · 演示文稿
 
@@ -76,7 +98,7 @@
 
 | ID | 安装项与用途 | Claude | Codex | Claude 推荐 | Codex 推荐 |
 | --- | --- | --- | --- | --- | --- |
-| claude-health | Claude 健康与状态面板 | [原生插件](platforms/claude/README.md#plugins) | — | — | — |
+| claude-health | Claude 健康与状态面板；fork 覆盖：本 fork 不提供 | — | — | — | — |
 
 ## Storage · 存储分析
 
@@ -89,6 +111,7 @@
 | ID | 安装项与用途 | Claude | Codex | Claude 推荐 | Codex 推荐 |
 | --- | --- | --- | --- | --- | --- |
 | paper-reading | 论文阅读、证据检查与 HTML 报告 | [本地 skill](platforms/claude/README.md#local-skills) | [本地 skill](platforms/codex/README.md#local-skills) | 推荐 | 推荐 |
+| cheatsheet-creator | *fork*：根据讲义、作业与往年试卷生成考试速查表 | [本地 skill](platforms/claude/README.md#local-skills) | — | 推荐 | — |
 | ai-research | AI Research 整包：分词、微调、后训练、推理服务、分布式训练与优化；两端统一 31 项，成员见下方 | [原生插件组合](platforms/claude/README.md#ai-research) | [原生兼容插件组合](platforms/codex/plugins.md)；[源码后备](platforms/sources.md#ai-research) | — | — |
 | deepxiv-cli | DeepXiv 论文检索与阅读 | [固定源码](platforms/sources.md#deepxiv) | [固定源码](platforms/sources.md#deepxiv) | — | — |
 | deepxiv-trending-digest | DeepXiv 热门论文摘要 | [固定源码](platforms/sources.md#deepxiv) | [固定源码](platforms/sources.md#deepxiv) | — | — |
@@ -101,6 +124,8 @@
 | ID | 安装项与用途 | Claude | Codex | Claude 推荐 | Codex 推荐 |
 | --- | --- | --- | --- | --- | --- |
 | openai-docs | OpenAI 官方文档 MCP | — | [MCP](platforms/codex/README.md#mcp) | — | 推荐 |
+| playwright-mcp | *fork*：独立 `@playwright/mcp` 服务；与 playwright 插件同名并会遮蔽它，二者只选其一 | [MCP](platforms/claude/README.md#mcp) | — | — | — |
+| lark | *fork 保留*（上游已退役）：Lark / 飞书 OpenAPI MCP；需 App ID / Secret，每个会话约 1 GB 内存，不推荐 | [MCP](platforms/claude/README.md#mcp) | — | — | — |
 
 <a id="members"></a>
 ## 整包成员
@@ -111,7 +136,7 @@
 - **Claude example-skills**：algorithmic-art、brand-guidelines、canvas-design、doc-coauthoring、frontend-design、internal-comms、mcp-builder、skill-creator、slack-gif-creator、theme-factory、web-artifacts-builder、webapp-testing。
 - **Codex examples 精选**：canvas-design、algorithmic-art、mcp-builder；不装整个 Claude 示例包。
 - **Superpowers**：brainstorming、dispatching-parallel-agents、executing-plans、finishing-a-development-branch、receiving-code-review、requesting-code-review、subagent-driven-development、systematic-debugging、test-driven-development、using-git-worktrees、using-superpowers、verification-before-completion、writing-plans、writing-skills。
-- **Claude Matt 原生包（1.2.3 快照）**：ask-matt、diagnosing-bugs、grill-with-docs、triage、improve-codebase-architecture、setup-matt-pocock-skills、tdd、to-spec、to-tickets、wayfinder、implement、prototype、research、domain-modeling、codebase-design、code-review、resolving-merge-conflicts、wizard、grill-me、grilling、handoff、teach、to-questionnaire、wait-what、writing-for-agents。
+- **Claude Matt fork 精选（6 项）**：grilling、grill-me、teach、prototype、handoff、codebase-design；两条安装路径都用 `npx skills` 从 mattpocock/skills 安装这 6 项（与 install.sh 的 `MATTPOCOCK_SKILLS` 一致）。其余成员与 superpowers / ecc 重复，因此不装；上游原生包（1.2.3 快照：ask-matt、diagnosing-bugs、grill-with-docs、triage、improve-codebase-architecture、setup-matt-pocock-skills、tdd、to-spec、to-tickets、wayfinder、implement、prototype、research、domain-modeling、codebase-design、code-review、resolving-merge-conflicts、wizard、grill-me、grilling、handoff、teach、to-questionnaire、wait-what、writing-for-agents）不在本 fork 的 Claude 选项中。
 - **Codex Matt v1.1.0 精选**：ask-matt、diagnosing-bugs、grill-with-docs、triage、implement、improve-codebase-architecture、setup-matt-pocock-skills、tdd、to-spec、to-tickets、wayfinder、prototype、domain-modeling、codebase-design、grill-me、grilling、research、teach、writing-great-skills、handoff，共 20 项。code-review 是独立可选项；handoff 仅作为本包成员安装。
 - **code-simplifier** 和 **codex-in-claude**：分别包含 agent/commands 等插件能力，按照上游 manifest 说明实际安装范围。
 
@@ -146,6 +171,7 @@
 - 两端的旧更新项对应 `edit-config`；Codex 独立 handoff 已并入原本推荐的 Matt 包，不另计一次。
 - 2026-09-17 按作者要求移除 Codex 的 explorer、reviewer、docs-researcher 自定义预设，推荐由 22 项减为 19 项；原生子 agent 能力继续可用，旧安装按[迁移说明](docs/migration.md#codex-agent-presets)处理。
 - 2026-09-17 按作者要求从两端移除 GitHub MCP 安装入口及该条目的插件替代渠道，Codex 推荐由 19 项减为 18 项；Claude 原本未推荐此项。旧 `github` 记录按[迁移说明](docs/migration.md#github-mcp)处理。
-- Claude 的 frontend-design 仍按原菜单标记推荐，已选 examples 整包时复用其中成员，避免重复安装。
+- 上游 Claude 的 frontend-design 按原菜单标记推荐；本 fork 不为 Claude 单独提供该项（fork 覆盖），因此 Claude 推荐中不再计入，使用 examples 整包中的成员。
 - AI Research 的六组在两端菜单中均默认关闭，合包后仍不标记推荐。main/settings.json 中启用插件的布尔值不替代交互菜单默认选择。
-- Lark / Feishu、Claude-Mem、PUA 已退役，不出现在推荐名单。其他原本关闭的选项继续可选，不因目录改动加入推荐。
+- Claude-Mem、PUA 与 GitHub MCP 已退役，不出现在目录或推荐名单；本 fork 的脚本安装器会主动卸载它们（见[迁移说明](docs/migration.md#removed-integrations)）。上游同时退役了 Lark / Feishu；本 fork 保留 `lark`，默认关闭且不推荐。其他原本关闭的选项继续可选，不因目录改动加入推荐。
+- **Fork 推荐**：标注 *fork* 的条目按 `install.sh` 菜单的默认开启项标记 Claude 推荐（search-agent、shell-wrapper、backend-glm、backend-or、feature-dev、ralph-loop、commit-commands、ecc、update-config、cheatsheet-creator）。上游条目沿用上游推荐，只去掉本 fork 不提供的 frontend-design，因此本 fork 的 Claude 推荐共 29 项。脚本菜单的默认值与上游推荐存在已知差异：Python / TypeScript / Go 规则在脚本中默认开启，neat-freak 与 adversarial-review 在脚本中默认关闭；两条路径各按自己的默认值展示。
