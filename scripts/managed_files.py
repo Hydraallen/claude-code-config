@@ -311,15 +311,24 @@ class ManagedFiles:
             result = self.commit(relative, staged, record, before)
         return {**result, "preserved": kept}
 
-    def remove(self, relative):
+    def remove(self, relative, backup_modified=False):
+        """Remove a helper-created copy. The target is moved to agent-config/backups/.
+
+        A locally modified copy is refused unless backup_modified is set, in which
+        case it is removed the same way (the backup keeps the modified content)
+        and the result reports "modified": true.
+        """
         target = self.path(relative)
         previous = self.state["files"].get(relative)
         if not previous or previous["kind"] != "copy" or not previous["created"]:
             raise ValueError("Only an explicitly selected, helper-created copy can be removed; merge configs manually")
         before = digest(target)
-        if before != previous["hash"]:
+        if before is None:
             raise ValueError("Local modification or missing target: preserve and inspect before removal")
-        return self.commit(relative, None, None, before)
+        modified = before != previous["hash"]
+        if modified and not backup_modified:
+            raise ValueError("Local modification or missing target: preserve and inspect before removal")
+        return {**self.commit(relative, None, None, before), "modified": modified}
 
     def seed_lessons(self, agent):
         if agent not in ("claude", "codex"):
@@ -356,7 +365,12 @@ def main():
         if command == "merge":
             sub.add_argument("--replace", action="append", default=[], help="Explicitly replace this JSON pointer")
             sub.add_argument("--remove", action="append", default=[], help="Remove the obsolete lessons override")
-    commands.add_parser("remove").add_argument("target")
+    remove_parser = commands.add_parser("remove")
+    remove_parser.add_argument("target")
+    remove_parser.add_argument(
+        "--backup-modified", action="store_true",
+        help="Also remove a locally modified copy (its content is kept in the backup)",
+    )
     commands.add_parser("seed-lessons").add_argument("--agent", choices=("claude", "codex"), required=True)
     commands.add_parser("status")
     args = parser.parse_args()
@@ -374,7 +388,7 @@ def main():
         elif args.action == "merge":
             result = manager.merge(args.source, args.target, args.item, args.replace, args.remove, args.origin)
         elif args.action == "remove":
-            result = manager.remove(args.target)
+            result = manager.remove(args.target, args.backup_modified)
         else:
             result = manager.seed_lessons(args.agent)
     print(json.dumps(result, indent=2))
