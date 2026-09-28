@@ -476,10 +476,13 @@ Options:
     --dry-run           Show what would be installed without doing it,
                         including which plugins/marketplaces would be REMOVED
     --force             Skip confirmation prompts
+    --prune-foreign-plugins
+                        Also uninstall plugins this installer does not manage
+                        when they are not selected this run (hand-installed
+                        third-party ones included). By default only
+                        installer-managed plugins are reconciled.
     --keep-foreign-plugins
-                        Only reconcile installer-managed plugins. Without it,
-                        every installed plugin that is not selected this run is
-                        uninstalled — hand-installed third-party ones included.
+                        Accepted for compatibility; this is now the default.
     -h, --help          Show this help
 
 Examples:
@@ -557,17 +560,19 @@ DEEPXIV_KNOWN_SKILLS=("deepxiv-cli" "deepxiv-trending-digest" "deepxiv-baseline-
 #   PRUNED_PLUGINS     - keys prune_unlisted_plugins() decided to uninstall
 #   SURVIVING_PLUGINS  - keys still installed once pruning has settled
 #   LOCAL_MARKETPLACES - marketplace cache dirs present locally (valid catalogs)
-#   PLUGIN_PRUNE_SCOPE - "all" (default: uninstall anything not selected this
-#                        run, including hand-installed third-party plugins) or
-#                        "catalogue" (only reconcile installer-managed plugins;
-#                        set by --keep-foreign-plugins)
+#   PLUGIN_PRUNE_SCOPE - "catalogue" (default: only reconcile installer-managed
+#                        plugins; plugins this installer does not own are never
+#                        uninstalled, apart from tombstoned ones) or "all"
+#                        (uninstall anything not selected this run, including
+#                        hand-installed third-party plugins; set by
+#                        --prune-foreign-plugins)
 RESOLVED_PLUGINS=()
 CATALOGUE_PLUGINS=()
 INSTALLED_PLUGINS=()
 PRUNED_PLUGINS=()
 SURVIVING_PLUGINS=()
 LOCAL_MARKETPLACES=()
-PLUGIN_PRUNE_SCOPE="all"
+PLUGIN_PRUNE_SCOPE="catalogue"
 
 # Retired Skill ownership tombstones.
 RETIRED_HARNESS_WORKFLOW_SHA256="d897cbfec20f87b553cbbe0f0541a1169f045492881b78b566149d15af1e68ba"
@@ -891,7 +896,12 @@ parse_args() {
                 shift
                 ;;
             --keep-foreign-plugins)
+                # Now the default; still accepted for existing scripts.
                 PLUGIN_PRUNE_SCOPE="catalogue"
+                shift
+                ;;
+            --prune-foreign-plugins)
+                PLUGIN_PRUNE_SCOPE="all"
                 shift
                 ;;
             -h|--help)
@@ -3763,7 +3773,7 @@ install_mcp() {
 # build_plugin_catalogue: echo the union of every installer-managed plugin
 # group (newline-separated, deduplicated). This is the set the installer
 # "owns". It only carries a preserve-it meaning under
-# PLUGIN_PRUNE_SCOPE=catalogue; under the default scope=all, plugins outside
+# PLUGIN_PRUNE_SCOPE=catalogue (the default); under scope=all, plugins outside
 # the catalogue are reconciled just like the ones inside it.
 build_plugin_catalogue() {
     local all=(
@@ -3790,7 +3800,7 @@ build_plugin_catalogue() {
 # Also reads PLUGIN_PRUNE_SCOPE. Echoes (newline-separated) the installed keys
 # that should be UNINSTALLED: everything installed but not selected this run
 # (rule 1). Under scope=catalogue the old rule 4 applies and plugins outside the
-# catalogue are preserved; under the default scope=all there is no such
+# catalogue are preserved; under scope=all (--prune-foreign-plugins) there is no such
 # exemption. Selected plugins are reinstalled elsewhere, not pruned (rule 2).
 # bash 3.2 compatible: pipe-delimited "set" strings, no assoc arrays.
 compute_plugins_to_prune() {
@@ -3875,12 +3885,15 @@ read_local_marketplaces() {
     done
 }
 
-# compute_marketplaces_to_remove: pure decision logic. Reads two globals:
+# compute_marketplaces_to_remove: pure decision logic. Reads three globals:
 #   LOCAL_MARKETPLACES - marketplace names present on disk
 #   SURVIVING_PLUGINS  - plugins still installed after pruning (name@marketplace)
+#   PLUGIN_PRUNE_SCOPE - under "catalogue" (default) only marketplaces that
+#                        catalogue plugins come from are candidates; a
+#                        marketplace the user added by hand is never removed
 # Echoes the marketplaces that exist locally but that no surviving plugin needs.
 # The "needed" set must come from the survivors, NOT from this run's selection:
-# under --keep-foreign-plugins a hand-installed plugin is deliberately kept while
+# under the default catalogue scope a hand-installed plugin is deliberately kept while
 # never appearing in RESOLVED_PLUGINS, and a `claude plugin uninstall` that fails
 # also leaves a plugin behind that the selection does not name. Judging by the
 # selection would delete those plugins' marketplaces out from under them.
@@ -3894,9 +3907,18 @@ compute_marketplaces_to_remove() {
         needed="$needed|${entry##*@}|"
     done
     [[ ${#LOCAL_MARKETPLACES[@]} -gt 0 ]] || return 0
+    local owned=""
+    if [[ "$PLUGIN_PRUNE_SCOPE" != "all" ]]; then
+        while IFS= read -r entry; do
+            [[ -n "$entry" ]] && owned="$owned|${entry##*@}|"
+        done < <(build_plugin_catalogue)
+    fi
     for name in "${LOCAL_MARKETPLACES[@]}"; do
         [[ -n "$name" ]] || continue
         [[ "$needed" == *"|$name|"* ]] && continue
+        if [[ "$PLUGIN_PRUNE_SCOPE" != "all" && "$owned" != *"|$name|"* ]]; then
+            continue
+        fi
         printf '%s\n' "$name"
     done
 }
@@ -4107,8 +4129,8 @@ prune_retired_plugins() {
 
 # Reconcile installed plugins against this run's selection: uninstall every
 # installed plugin that was NOT selected (rule 1). Under the default
-# PLUGIN_PRUNE_SCOPE=all that includes plugins the user installed by hand;
-# --keep-foreign-plugins narrows it back to the installer's own catalogue.
+# PLUGIN_PRUNE_SCOPE=catalogue only installer-managed plugins are considered;
+# --prune-foreign-plugins widens it to plugins the user installed by hand.
 # Reads the installed keys from installed_plugins.json, computes the prune set
 # via the pure compute_plugins_to_prune(), and uninstalls each. Must run AFTER
 # install_plugins() so RESOLVED_PLUGINS reflects this run's selection.
@@ -4260,10 +4282,18 @@ sync_enabled_plugins_settings() {
     [[ ${#RESOLVED_PLUGINS[@]} -gt 0 ]] || return
 
     local sel_json; sel_json="$(_effective_selected_plugins_json)"
+    # Under the default catalogue scope, entries for plugins this installer
+    # does not manage are the user's own and are kept.
+    local keep_foreign=true
+    [[ "$PLUGIN_PRUNE_SCOPE" == "all" ]] && keep_foreign=false
+    local cat_json
+    cat_json="$(build_plugin_catalogue | jq -R 'select(length > 0)' | jq -cs .)" || cat_json="[]"
+    local keep_filter='($selected | reduce .[] as $p ({}; .[$p] = true)) as $sel |
+        def keep($k): ($sel[$k] // false) or ($keep_foreign and (($catalogue | index($k)) == null));'
     local stale_count
-    stale_count="$(jq --argjson selected "$sel_json" '
-        ($selected | reduce .[] as $p ({}; .[$p] = true)) as $sel |
-        [(.enabledPlugins // {}) | keys[] | select($sel[.] | not)] | length
+    stale_count="$(jq --argjson selected "$sel_json" --argjson catalogue "$cat_json" \
+        --argjson keep_foreign "$keep_foreign" "$keep_filter"'
+        [(.enabledPlugins // {}) | keys[] | select(keep(.) | not)] | length
     ' "$settings" 2>/dev/null)" || return
     [[ "${stale_count:-0}" -gt 0 ]] || return
 
@@ -4277,9 +4307,9 @@ sync_enabled_plugins_settings() {
         (( INSTALL_WARNINGS++ )) || true
         return
     }
-    if jq --argjson selected "$sel_json" '
-        ($selected | reduce .[] as $p ({}; .[$p] = true)) as $sel |
-        .enabledPlugins = ((.enabledPlugins // {}) | with_entries(select($sel[.key])))
+    if jq --argjson selected "$sel_json" --argjson catalogue "$cat_json" \
+        --argjson keep_foreign "$keep_foreign" "$keep_filter"'
+        .enabledPlugins = ((.enabledPlugins // {}) | with_entries(select(keep(.key))))
     ' "$settings" > "$tmp" && jq empty "$tmp" 2>/dev/null; then
         # mktemp makes the temp file 0600; mv replaces the inode, so carry the
         # original mode over rather than silently tightening settings.json.
@@ -4306,8 +4336,8 @@ update_installed_plugins() {
     # unselected ones were already removed by prune_unlisted_plugins(). We only
     # `claude plugin update` the PRESERVED user-owned third-party plugins, and
     # we never resurrect a pruned plugin. Under PLUGIN_PRUNE_SCOPE=all nothing
-    # survives outside the catalogue, so this loop simply idles; it still earns
-    # its keep under --keep-foreign-plugins.
+    # survives outside the catalogue, so this loop simply idles; under the
+    # default catalogue scope it updates the user's own plugins.
     local catalogue_set="" centry
     while IFS= read -r centry; do
         [[ -n "$centry" ]] && catalogue_set="$catalogue_set|$centry|"

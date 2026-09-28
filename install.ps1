@@ -26,6 +26,7 @@ param(
     [switch]$DryRun,
     [switch]$Force,
     [switch]$KeepForeignPlugins,
+    [switch]$PruneForeignPlugins,
     [switch]$Help
 )
 
@@ -311,17 +312,18 @@ $script:PrunedPlugins = @()
 # Remove-UnlistedMarketplaces. Mirrors LOCAL_MARKETPLACES in install.sh.
 $script:LocalMarketplaces = @()
 
-# "all" (default: uninstall anything not selected this run, including
-# hand-installed third-party plugins) or "catalogue" (only reconcile
-# installer-managed plugins; set by -KeepForeignPlugins).
-# Mirrors PLUGIN_PRUNE_SCOPE in install.sh.
-$script:PluginPruneScope = if ($KeepForeignPlugins) { "catalogue" } else { "all" }
+# "catalogue" (default: only reconcile installer-managed plugins; plugins this
+# installer does not own are never uninstalled, apart from tombstoned ones) or
+# "all" (uninstall anything not selected this run, including hand-installed
+# third-party plugins; set by -PruneForeignPlugins). -KeepForeignPlugins is
+# still accepted and is now the default. Mirrors PLUGIN_PRUNE_SCOPE in install.sh.
+$script:PluginPruneScope = if ($PruneForeignPlugins -and -not $KeepForeignPlugins) { "all" } else { "catalogue" }
 
 # --- Plugin reconciliation helpers (mirror install.sh) ---------------------
 
 # Union of every installer-managed plugin group (the "catalogue"). This is the
 # set the installer "owns". It only carries a preserve-it meaning under
-# PluginPruneScope=catalogue; under the default scope=all, plugins outside the
+# PluginPruneScope=catalogue (the default); under scope=all, plugins outside the
 # catalogue are reconciled just like the ones inside it.
 # Mirrors build_plugin_catalogue() in install.sh.
 function Get-PluginCatalogue {
@@ -409,7 +411,7 @@ function Get-LocalMarketplaces {
 # that are still installed once pruning has settled (name@marketplace), return
 # the marketplaces that exist locally but that no surviving plugin needs.
 # The "needed" set must come from the survivors, NOT from this run's selection:
-# under -KeepForeignPlugins a hand-installed plugin is deliberately kept while
+# under the default catalogue scope a hand-installed plugin is deliberately kept while
 # never appearing in $script:ResolvedPlugins, and a `claude plugin uninstall`
 # that fails also leaves a plugin behind that the selection does not name.
 # Judging by the selection would delete those plugins' marketplaces out from
@@ -418,7 +420,9 @@ function Get-LocalMarketplaces {
 function Get-MarketplacesToRemove {
     param(
         [string[]]$Local = @(),
-        [string[]]$Surviving = @()
+        [string[]]$Surviving = @(),
+        [string]$Scope = "catalogue",
+        [string[]]$Catalogue = @()
     )
     $result = @()
     # Empty survivor set means "remove nothing", never "remove every
@@ -429,9 +433,16 @@ function Get-MarketplacesToRemove {
         if (-not $entry) { continue }
         $needed[($entry -split '@')[-1]] = $true
     }
+    # Under the catalogue scope only marketplaces that catalogue plugins come
+    # from are candidates; a marketplace the user added by hand is kept.
+    $owned = @{}
+    foreach ($entry in $Catalogue) {
+        if ($entry) { $owned[($entry -split '@')[-1]] = $true }
+    }
     foreach ($name in $Local) {
         if (-not $name) { continue }
         if ($needed.ContainsKey($name)) { continue }
+        if ($Scope -ne "all" -and -not $owned.ContainsKey($name)) { continue }
         $result += $name
     }
     return $result
@@ -2525,8 +2536,8 @@ function Remove-RetiredPlugins {
 
 # Reconcile installed plugins against this run's selection: uninstall every
 # installed plugin that was NOT selected (rule 1). Under the default
-# PluginPruneScope=all that includes plugins the user installed by hand;
-# -KeepForeignPlugins narrows it back to the installer's own catalogue. Must run
+# PluginPruneScope=catalogue only installer-managed plugins are considered;
+# -PruneForeignPlugins widens it to plugins the user installed by hand. Must run
 # AFTER Install-Plugins so $script:ResolvedPlugins reflects the selection.
 # Respects DryRun. Mirrors prune_unlisted_plugins() in install.sh.
 function Remove-UnlistedPlugins {
@@ -2603,7 +2614,7 @@ function Remove-UnlistedMarketplaces {
     }
 
     $script:LocalMarketplaces = @(Get-LocalMarketplaces)
-    $toRemove = @(Get-MarketplacesToRemove -Local $script:LocalMarketplaces -Surviving $surviving)
+    $toRemove = @(Get-MarketplacesToRemove -Local $script:LocalMarketplaces -Surviving $surviving -Scope $script:PluginPruneScope -Catalogue (Get-PluginCatalogue))
 
     foreach ($name in $toRemove) {
         if ($DryRun) {
@@ -2642,9 +2653,15 @@ function Sync-EnabledPluginsSettings {
     $selSet = @{}
     foreach ($p in (Get-EffectiveSelectedPlugins -SelectedPluginsList $SelectedPluginsList -Groups $PluginGroups)) { $selSet[$p] = $true }
 
+    # Under the default catalogue scope, entries for plugins this installer
+    # does not manage are the user's own and are kept.
+    $catSet = @{}
+    foreach ($c in (Get-PluginCatalogue)) { if ($c) { $catSet[$c] = $true } }
     $stale = @()
     foreach ($prop in @($enabled.PSObject.Properties)) {
-        if (-not $selSet.ContainsKey($prop.Name)) { $stale += $prop.Name }
+        if ($selSet.ContainsKey($prop.Name)) { continue }
+        if ($script:PluginPruneScope -ne "all" -and -not $catSet.ContainsKey($prop.Name)) { continue }
+        $stale += $prop.Name
     }
     if ($stale.Count -eq 0) { return }
 
@@ -2678,7 +2695,7 @@ function Update-InstalledPlugins {
     # reinstalled fresh, unselected ones were already pruned. Only update the
     # PRESERVED user-owned third-party plugins; never resurrect a pruned plugin.
     # Under PluginPruneScope=all nothing survives outside the catalogue, so this
-    # loop simply idles; it still earns its keep under -KeepForeignPlugins.
+    # loop simply idles; under the default catalogue scope it updates the user's own plugins.
     $catalogue = Get-PluginCatalogue
 
     if ($DryRun) {
@@ -2912,9 +2929,12 @@ Options:
     -DryRun             Show what would be installed without doing it,
                         including which plugins/marketplaces would be REMOVED
     -Force              Skip confirmation prompts
-    -KeepForeignPlugins Only reconcile installer-managed plugins. Without it,
-                        every installed plugin that is not selected this run is
-                        uninstalled - hand-installed third-party ones included.
+    -PruneForeignPlugins
+                        Also uninstall plugins this installer does not manage
+                        when they are not selected this run (hand-installed
+                        third-party ones included). By default only
+                        installer-managed plugins are reconciled.
+    -KeepForeignPlugins Accepted for compatibility; this is now the default.
     -Help               Show this help
 
 Examples:
