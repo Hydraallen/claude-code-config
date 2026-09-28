@@ -1,6 +1,6 @@
 # Claude 操作说明
 
-先完成 [INSTALL.md](../../INSTALL.md) 的目录展示与用户选择。目标默认是已核实的 Claude config directory；全局默认 `~/.claude`，支持用户指定的 `CLAUDE_CONFIG_DIR`。命令先以本机 `claude ... --help` 核实。
+先完成 [INSTALL.md](../../INSTALL.md) 的目录展示与用户选择。本 fork 另有脚本安装器 `install.sh` / `install.ps1`，读取同一批 templates；两条路径共用 `agent-config/selection.json`，脚本写入的条目带 `"source": "script"`。目标默认是已核实的 Claude config directory；全局默认 `~/.claude`，支持用户指定的 `CLAUDE_CONFIG_DIR`。命令先以本机 `claude ... --help` 核实。
 
 <a id="configuration"></a>
 ## 配置与规则
@@ -43,25 +43,38 @@ claude plugin list --json
 | Catalog ID | 原生 selector | Marketplace 来源 |
 | --- | --- | --- |
 | karpathy | andrej-karpathy-skills@karpathy-skills | forrestchang/andrej-karpathy-skills |
-| matt-workflow | mattpocock-skills@mattpocock | mattpocock/skills |
 | superpowers | superpowers@claude-plugins-official | anthropics/claude-plugins-official |
 | claude-pr-review | code-review@claude-plugins-official | anthropics/claude-plugins-official |
 | codex-in-claude | codex@openai-codex | openai/codex-plugin-cc |
 | code-simplifier | code-simplifier@claude-plugins-official | anthropics/claude-plugins-official |
+| feature-dev | feature-dev@claude-plugins-official | anthropics/claude-plugins-official |
+| ralph-loop | ralph-loop@claude-plugins-official | anthropics/claude-plugins-official |
+| commit-commands | commit-commands@claude-plugins-official | anthropics/claude-plugins-official |
+| ecc | ecc@ecc | affaan-m/everything-claude-code |
 | context7 | context7@claude-plugins-official | anthropics/claude-plugins-official |
 | playwright | playwright@claude-plugins-official | anthropics/claude-plugins-official |
 | documents | document-skills@anthropic-agent-skills | anthropics/skills |
 | examples | example-skills@anthropic-agent-skills | anthropics/skills |
-| frontend-design | frontend-design@claude-plugins-official | anthropics/claude-plugins-official |
 | humanizer | humanizer@humanizer（上游要求 Claude Code >= 2.1.142） | blader/humanizer |
 | frontend-slides | frontend-slides@frontend-slides | zarazhangrui/frontend-slides |
 | ppt-master | ppt-master@ppt-master | hugohe3/ppt-master |
-| claude-health | health@claude-health | tw93/claude-health |
 | ai-research | [六个分类插件组成一个安装项](#ai-research) | Orchestra-Research/AI-research-SKILLs |
 
-读取所用 manifest 核实完整成员和插件要求。example-skills 已含 frontend-design，选择整包后复用；同一服务的 MCP 不再另外注册。
+读取所用 manifest 核实完整成员和插件要求。example-skills 已含 frontend-design，本 fork 不为 Claude 单独提供 frontend-design 与 claude-health（fork 覆盖）；同一服务的 MCP 不再另外注册。matt-workflow 在本 fork 不走原生插件，见 [Matt 精选子集](#matt-subset)。humanizer 插件的调用名为 `/humanizer:humanizer`。feature-dev、ralph-loop、commit-commands、ecc 是本 fork 的条目（脚本菜单默认开启）。
 
 更新用本机帮助核实 `claude plugin update <selector>`，显式卸载用 `claude plugin uninstall <selector> --scope user`；只操作用户选择且归属明确的项。原来由用户安装的插件复用时不接管所有权。
+
+<a id="matt-subset"></a>
+## Matt 精选子集（fork）
+
+本 fork 的 Claude `matt-workflow` 只装 6 个 skill：grilling、grill-me、teach、prototype、handoff、codebase-design，与 install.sh 的 `MATTPOCOCK_SKILLS` 相同。其余成员与 superpowers / ecc 重复，不装 `mattpocock-skills@mattpocock` 原生整包。已装原生整包的用户保留现状，改用子集前先说明差异并等待选择。
+
+```sh
+DO_NOT_TRACK=1 npx -y skills@latest add mattpocock/skills --global --agent claude-code --copy --yes \
+  --skill grilling --skill grill-me --skill teach --skill prototype --skill handoff --skill codebase-design
+```
+
+需要 Node.js（npx）。`--global` 写入 `~/.claude/skills/<name>`；目标为自定义 `CLAUDE_CONFIG_DIR` 时先核实 skills CLI 的实际写入位置。`--copy` 生成真实目录而非 symlink。验证 6 个目录各有 SKILL.md，并在 selection.json 中逐 skill 记录归属。脚本路径另在 `~/.claude/.mattpocock-skills` 记录 hash，用于清理与卸载；agent 路径不写该文件。
 
 <a id="ai-research"></a>
 ## AI Research 整包
@@ -73,7 +86,7 @@ claude plugin list --json
 <a id="local-skills"></a>
 ## 本地 skills
 
-共享目录 ../../skills 下的 paper-reading 是自有 skill，storage-analyzer 是保留上游署名的本仓库定制版，分别完整复制到目标 skills 同名目录。Humanizer、Humanizer-zh、neat-freak 从 [上游安装](../sources.md#writing)，不再从本仓库复制。
+共享目录 ../../skills 下的 paper-reading 是自有 skill，storage-analyzer 是保留上游署名的本仓库定制版，分别完整复制到目标 skills 同名目录。本 fork 的 cheatsheet-creator（自有）与 update-config（fork 的脚本更新入口，检查本仓库 main 的 VERSION 后重跑 install.sh / install.ps1）同样从 ../../skills 完整复制到 skills 同名目录，例如 `python3 scripts/managed_files.py --root "$target_dir" install skills/cheatsheet-creator skills/cheatsheet-creator --item cheatsheet-creator --origin "$source_revision"`。update-config 只适合同时使用脚本安装器的用户；纯 agent 路径用 edit-config 即可。Humanizer、Humanizer-zh、neat-freak 从 [上游安装](../sources.md#writing)，不再从本仓库复制。
 
 本目录 skills/adversarial-review 是 Claude 专属版本，安装到 skills/adversarial-review。共享 ../../skills/edit-config 完整部署到 skills/edit-config，处理配置查询与增删改，跟踪本仓库 main 分支；具体来源冲突与更新流程由该 skill 定义。安装全局指令不会暗中补装它；模板也提供同一工作流的读取入口。旧更新 skill 见[迁移说明](../../docs/migration.md#edit-config)。上游获取的 DeepXiv、ResearchStudio、lieflat-charts 见 [共享源码说明](../sources.md)。
 
@@ -82,6 +95,31 @@ adversarial-review 是基于 poteto/noodle 的定制版，来源与修改见其 
 <a id="mcp"></a>
 ## MCP
 
-Context7 和 Playwright 通过上述原生插件提供，选择它们时复用插件的 MCP，无需另行注册。其他未选服务不因配置合并而启用。
+Context7 和 Playwright 通过上述原生插件提供，选择它们时复用插件的 MCP，无需另行注册。其他未选服务不因配置合并而启用。先用 `claude mcp list` 查询现有注册；同名服务已存在时复用，不覆盖。
+
+| Catalog ID | 注册命令（user scope） | 说明 |
+| --- | --- | --- |
+| playwright-mcp | `claude mcp add --scope user --transport stdio playwright -- npx @playwright/mcp@latest` | fork 条目，与 install.sh 相同。与 playwright 插件同名，user scope 注册会遮蔽插件，只在用户不选 playwright 插件时注册 |
+| lark | `claude mcp add lark-mcp --scope user -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET> -t preset.light` | fork 保留（上游已退役）。需要飞书 / Lark 应用凭据，每个会话约 1 GB 内存，默认不推荐 |
+
+Lark 的 `--` 不能省：`claude mcp add` 自己的 `-s` 表示 scope，会吞掉 App Secret。`-t preset.light` 让暴露的工具最少，默认预设可能撑爆上下文。凭据按 INSTALL 的规则处理：由用户在自己的终端运行带真实 App ID / Secret 的命令，不写入聊天、仓库或安装记录；用户未提供时把 `lark` 记为待配置（pending credentials）并给出上面的命令。凭据就绪后用 `python3 scripts/check_mcp.py --timeout 60 -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET> -t preset.light` 验证 stdio initialize，再用 `claude mcp list` 确认 `lark-mcp` 已注册。申请凭据、授权与用户身份模式见 [LARK-MCP](../../docs/LARK-MCP.zh-CN.md)。
 
 旧 GitHub MCP 记录按[退役说明](../../docs/migration.md#github-mcp)处理，不再作为安装或更新项。
+
+<a id="script-only"></a>
+## 仅脚本安装的条目（fork）
+
+catalog 中 Claude 列写着“脚本安装”的条目（search-agent、shell-wrapper、co-author、backend-glm / backend-or / backend-gpt / backend-ccr、image-gen）没有 agent 配方，由脚本安装器负责。用户选择后，在 checkout 根目录运行 catalog 中给出的命令，多个菜单 ID 用逗号分隔：
+
+```sh
+bash install.sh --only shell-wrapper,backend-glm
+```
+
+运行前告知用户这些副作用：
+
+- `--only` 是增量安装：不对账插件、不重建 `enabledPlugins`、不写版本戳，只追加 selection.json 中的 `script_installer.script_only` 记录。
+- 每次运行都会安装 image-gen skill 及其包装器，并执行退役清理：卸载 `github@claude-plugins-official`、`claude-mem@thedotmack`、`pua@pua-skills` 及 thedotmack、pua-skills marketplace，移除指向 `api.githubcopilot.com/mcp/` 的旧 user scope `github` MCP。仍在使用 claude-mem 的用户须先确认，见[迁移说明](../../docs/migration.md#removed-integrations)。
+- shell-wrapper、co-author 与各后端只支持 macOS / Linux；`install.ps1 -Only <ids>` 不提供这些菜单项。
+- 后端需要用户自己填写凭据或登录，见 [BACKENDS](../../docs/BACKENDS.zh-CN.md)。
+
+`bash install.sh --list-ids` 列出全部菜单 ID、默认值与分组。
