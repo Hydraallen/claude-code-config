@@ -227,9 +227,66 @@ function Confirm-Action {
 # Retired Skill ownership tombstones.
 $RETIRED_HARNESS_WORKFLOW_SHA256 = "d897cbfec20f87b553cbbe0f0541a1169f045492881b78b566149d15af1e68ba"
 function Test-SafeRetiredSkillName { param([string]$Name); return -not [string]::IsNullOrEmpty($Name) -and $Name -ne "." -and $Name -ne ".." -and $Name -match '^[A-Za-z0-9][A-Za-z0-9._-]*$' }
+# Curated mattpocock/skills subset install.sh installs (MATTPOCOCK_SKILLS there;
+# install.ps1 has no mattpocock item). Kept in sync so both installers treat the
+# same manifest entries as current rather than retired.
+$MATTPOCOCK_SKILLS = @("grilling", "grill-me", "teach", "prototype", "handoff", "codebase-design")
+
+# Remove manifest-owned mattpocock skills that are no longer in
+# $MATTPOCOCK_SKILLS. Mirrors cleanup_retired_mattpocock_skills in install.sh:
+# the curated keep list survives (the manifest is rewritten to those entries,
+# keeping their install-time digests), and a v2 record ("name<TAB>sha256 of
+# SKILL.md") is only deleted while SKILL.md still hashes to the recorded digest,
+# so a user-authored or modified skill that shares a name is preserved.
+# Legacy v1 records (bare name) carry no digest and are removed as before.
 function Remove-RetiredMattpocockSkills {
-    $manifest = Join-Path $CLAUDE_DIR ".mattpocock-skills"; if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { return }
-    foreach ($skillName in (Get-Content -LiteralPath $manifest)) { if ([string]::IsNullOrEmpty($skillName)) { continue }; if (-not (Test-SafeRetiredSkillName $skillName)) { Write-Warn "Skipping unsafe retired skill manifest entry"; continue }; $skillPath = Join-Path (Join-Path $CLAUDE_DIR "skills") $skillName; if (-not (Test-Path -LiteralPath $skillPath -PathType Container)) { continue }; if ($DryRun) { Write-Info "Would remove retired manifest-owned skill: $skillName" } else { Remove-Item -LiteralPath $skillPath -Recurse -Force; Write-Ok "Removed retired manifest-owned skill: $skillName" } }
+    $manifest = Join-Path $CLAUDE_DIR ".mattpocock-skills"
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { return }
+    if ((Get-Item -LiteralPath $manifest -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        Write-Warn "mattpocock ownership manifest is a link; refusing to act on it: $manifest"
+        return
+    }
+    $survivors = @()
+    foreach ($line in @(Get-Content -LiteralPath $manifest)) {
+        if ([string]::IsNullOrEmpty($line)) { continue }
+        $parts = $line -split "`t", 2
+        $skillName = $parts[0]
+        $skillHash = if ($parts.Count -gt 1) { $parts[1].Trim() } else { "" }
+        if (-not (Test-SafeRetiredSkillName $skillName)) { Write-Warn "Skipping unsafe retired skill manifest entry"; continue }
+        if ($MATTPOCOCK_SKILLS -contains $skillName) { $survivors += ,@($skillName, $skillHash); continue }
+        $skillPath = Join-Path (Join-Path $CLAUDE_DIR "skills") $skillName
+        if (-not (Test-Path -LiteralPath $skillPath -PathType Container)) { continue }
+        if ($skillHash) {
+            $skillFile = Join-Path $skillPath "SKILL.md"
+            $current = $null
+            if (Test-Path -LiteralPath $skillFile -PathType Leaf) {
+                try { $current = (Get-FileHash -Algorithm SHA256 -LiteralPath $skillFile).Hash.ToLowerInvariant() } catch { $current = $null }
+            }
+            if (-not $current) { Write-Warn "Retired skill '$skillName': cannot verify ownership; preserving directory"; continue }
+            if ($current -ne $skillHash.ToLowerInvariant()) { Write-Warn "Retired skill '$skillName' is modified or user-authored; preserving directory"; continue }
+        }
+        if ($DryRun) { Write-Info "Would remove retired manifest-owned skill: $skillName" }
+        else { Remove-Item -LiteralPath $skillPath -Recurse -Force; Write-Ok "Removed retired manifest-owned skill: $skillName" }
+    }
+    if ($survivors.Count -gt 0) {
+        if ($DryRun) { Write-Info "Would rewrite mattpocock skill manifest ($($survivors.Count) kept)"; return }
+        $records = @()
+        foreach ($sv in $survivors) {
+            $skillFile = Join-Path (Join-Path (Join-Path $CLAUDE_DIR "skills") $sv[0]) "SKILL.md"
+            if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { continue }
+            $digest = $sv[1]
+            if (-not $digest) {
+                try { $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $skillFile).Hash.ToLowerInvariant() } catch { continue }
+            }
+            $records += "$($sv[0])`t$digest"
+        }
+        if ($records.Count -gt 0) {
+            [System.IO.File]::WriteAllText($manifest, (($records -join "`n") + "`n"))
+        } else {
+            Remove-Item -LiteralPath $manifest -Force
+        }
+        return
+    }
     if ($DryRun) { Write-Info "Would remove retired skill manifest: $manifest" } else { Remove-Item -LiteralPath $manifest -Force; Write-Ok "Removed retired skill manifest" }
 }
 function Remove-RetiredHarnessWorkflow {
