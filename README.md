@@ -37,6 +37,8 @@ Launches a two-level interactive selector: 48 items in 11 groups, 30 of them on 
 - `--dry-run` (`-DryRun`), `--uninstall` (`-Uninstall`), `--force` (`-Force`), `--version` (`-Version`).
 
 ```
+    Platform: WSL (Ubuntu) — Playwright → Windows Chrome
+
   > [7/8]  Core                  Global instructions, settings, writing-style rule, statusline...
     [2/4]  Model Backends        GLM, OpenRouter, ChatGPT (CLIProxyAPI), CCR
     [3/3]  Language Rules        Python / TypeScript / Go
@@ -50,6 +52,8 @@ Launches a two-level interactive selector: 48 items in 11 groups, 30 of them on 
     [0/2]  MCP Servers           Playwright, Lark/Feishu (opt-in)
 ```
 
+The `Platform:` line at the top of the menu (and at the start of every run) shows the detected platform (macOS, Linux, WSL) and where Playwright goes: the playwright plugin, or in WSL the Windows Chrome ([details](mcp/README.md#wsl-windows-chrome)).
+
 - **Main menu**: ↑↓ navigate groups, **Enter or →** open a group's sub-menu, **q** quit. Arrow to *Submit* and press Enter to install.
 - **Sub-menu**: ↑↓ navigate items, **Space** or **Enter** toggle, **← or Esc** back to main menu.
 - Shortcuts (any level): **a** all on, **n** all off, **d** defaults; in sub-menus these only affect that group.
@@ -59,7 +63,7 @@ Launches a two-level interactive selector: 48 items in 11 groups, 30 of them on 
 
 - Plugins from the installer's catalogue (code-review and codex included) are uninstalled, and so are the marketplaces no remaining plugin needs (never `claude-plugins-official`). Plugins you installed yourself stay unless you pass `--prune-foreign-plugins`. Unchecking every plugin item uninstalls all catalogue plugins.
 - Skills, language rules, the writing-style rule, DeepXiv skills, the search agent, the Matt skills and pinned upstream skills are deleted. A copy you edited is first moved to `~/.claude/agent-config/backups/<timestamp>-deselect/` (pinned upstream skills: `agent-config/backups/<id>/`), and the installer says so.
-- The Playwright and Lark MCP servers are removed only when their command is the one the installer registers (`npx @playwright/mcp` / `npx @larksuiteoapi/lark-mcp`); a same-name server of your own is kept, with a warning.
+- The Playwright and Lark MCP servers are removed only when their command is the one the installer registers (`npx @playwright/mcp` / `npx @larksuiteoapi/lark-mcp`, or in WSL the Windows `node.exe` entry); a same-name server of your own is kept, with a warning.
 - StatusLine removes the `statusLine` setting (only when it runs `~/.claude/hooks/statusline.sh`) and that script. Lessons removes the SessionStart hook and keeps `lessons.md`. Co-authored-by sets `includeCoAuthoredBy` to `false`.
 - The launcher (Shell wrapper, with every model backend unchecked) removes `claude.zsh`, `system-prompt.txt` and a `source ~/.claude/claude.zsh` line in `~/.zshrc` that matches exactly (the rc file is backed up first; other forms get a warning). `profiles/` and `default-profile` hold your API keys and are always kept, also for an unchecked backend.
 - CLAUDE.md and settings.json are never deleted; unchecking them only stops the installer from updating them.
@@ -151,7 +155,7 @@ The tables retain the original categories and merge the Claude and Codex capabil
 | Item | Source | What It Does | Claude | Codex |
 | --- | --- | --- | --- | --- |
 | **context7** | [Upstash](https://github.com/upstash/context7) | Up-to-date library documentation lookup | Native plugin ★ | Plugin / MCP ★ |
-| **playwright** | [Microsoft](https://github.com/microsoft/playwright-mcp) | Browser automation, E2E testing and screenshots; Codex MCP pinned to 0.0.78 | Native plugin ★ | MCP ★ |
+| **playwright** | [Microsoft](https://github.com/microsoft/playwright-mcp) | Browser automation, E2E testing and screenshots; Codex MCP pinned to 0.0.78; in WSL, install.sh drives the Windows Chrome ([details](mcp/README.md#wsl-windows-chrome)) | Native plugin ★ | MCP ★ |
 
 ### Design & Content
 

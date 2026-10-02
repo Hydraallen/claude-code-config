@@ -28,6 +28,49 @@ launch rather than writing `~/.claude.json`, so a server added this way also
 shadows a same-named plugin, and removing the `~/.claude.json` entry alone will
 not stop it coming back.
 
+## WSL: Windows Chrome
+
+Inside WSL, `npx @playwright/mcp` would start a Linux Chromium. When install.sh
+runs inside WSL and either `playwright` (plugin) or `mcp` is selected, it instead:
+
+1. Finds the Windows Chrome (`%LOCALAPPDATA%`, `Program Files`,
+   `Program Files (x86)`); without Chrome it uses Microsoft Edge, and without
+   either it keeps the Linux behaviour.
+2. Uses the Windows `node.exe` on the Windows PATH. If there is none, it
+   downloads the portable Node v24 zip from nodejs.org (SHA256 checked against
+   `SHASUMS256.txt`) to `%LOCALAPPDATA%\claude-code-config\node`. No
+   administrator rights, no PATH or registry change.
+3. Installs `@playwright/mcp@0.0.78` with the Windows npm into
+   `%LOCALAPPDATA%\claude-code-config\playwright-mcp`.
+4. Registers the user-scope `playwright` server as
+   `<node.exe> <cli.js> --browser chrome --executable-path <chrome.exe> --output-dir \\wsl.localhost\<distro>\home\<you>\.cache\playwright-mcp`,
+   so screenshots land in `~/.cache/playwright-mcp` inside WSL. A previous
+   `npx @playwright/mcp` entry from this installer is replaced; a
+   `playwright` server of your own is left in place with a warning.
+5. Once the server is registered, skips the playwright plugin and uninstalls
+   it when it is installed. The plugin runs a separate server under a
+   different name, so leaving it would give the agent a second set of browser
+   tools that open a Linux browser. If any Windows step fails, the plugin
+   (Linux browser) is kept and installed as before.
+6. Starts the server once headless, opens `about:blank` and prints the user
+   agent. The summary at the end shows
+   `Browser (WSL): Playwright MCP connected to Windows chrome (...)`, or
+   `NOT connected` with the reason.
+
+The agent's browser is the installed Chrome program with Playwright's own
+profile (`%LOCALAPPDATA%\ms-playwright\mcp-chrome-*`): your everyday Chrome
+profile, logins and open windows are not used, and both can run at once.
+
+`--wsl-browser linux` (or `ACCC_WSL_BROWSER=linux`) keeps the Linux browser;
+`--wsl-browser windows` / `auto` (default) select the behaviour above. The
+interactive uncheck and `--uninstall` remove the registration and
+`%LOCALAPPDATA%\claude-code-config` (only when the installer created it). The
+directory is shared by all WSL distros of the Windows user; it is deleted only
+when no other distro still uses it. WSL interop must be enabled (`cmd.exe` and
+`wslpath` available); otherwise the installer warns and keeps the Linux
+behaviour. macOS, native Linux and native
+Windows (install.ps1) are unchanged.
+
 ## Installation
 
 ```bash

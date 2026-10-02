@@ -502,6 +502,10 @@ Options:
                         only ever reconciled on interactive runs.
     --keep-foreign-plugins
                         Accepted for compatibility; this is now the default.
+    --wsl-browser <auto|windows|linux>
+                        Inside WSL, which Chrome Playwright drives (default
+                        auto: the Windows Chrome when one is installed). Also
+                        read from ACCC_WSL_BROWSER. No effect outside WSL
     -h, --help          Show this help
 
 Only an interactive run removes unchecked items. --all, --only and the
@@ -557,6 +561,21 @@ WRAPPER_PREEXISTED=false
 # starting the MCP service" as a known problem whose documented fix is this very
 # flag. preset.light is the smallest set; widen it in ~/.claude.json later.
 LARK_MCP_PRESET="preset.light"
+# WSL only: Playwright runs as a Windows-side MCP server (Windows node.exe) so it
+# drives the Chrome installed on Windows instead of a Linux Chromium.
+WSL_BROWSER="${ACCC_WSL_BROWSER:-auto}"
+PLAYWRIGHT_VIA_WINDOWS=false
+# Set only once the Windows-side server is registered; until then the plugin
+# stays in the selection so a failed Windows setup never loses Playwright.
+PLAYWRIGHT_PLUGIN_SKIPPED=false
+PLAYWRIGHT_PLUGIN_PKG="playwright@claude-plugins-official"
+PLAYWRIGHT_MCP_VERSION="0.0.78"
+WIN_NODE_VERSION="v24.21.0"
+WIN_LOCALAPPDATA=""
+WIN_BROWSER_NAME=""
+WIN_BROWSER_EXE=""
+WSL_BROWSER_STATUS=""
+PLATFORM_SUMMARY=""
 CO_AUTHOR=false
 INSTALL_DEEPXIV=false
 # --only: install just the listed menu IDs, additively (no removals, no plugin
@@ -1000,6 +1019,14 @@ parse_args() {
                 PLUGIN_PRUNE_SCOPE="all"
                 shift
                 ;;
+            --wsl-browser)
+                WSL_BROWSER="${2:-}"
+                shift $(( $# > 1 ? 2 : 1 ))
+                ;;
+            --wsl-browser=*)
+                WSL_BROWSER="${1#--wsl-browser=}"
+                shift
+                ;;
             -h|--help)
                 usage
                 exit 0
@@ -1016,6 +1043,13 @@ parse_args() {
         error "--only cannot be combined with --all or --uninstall"
         exit 1
     fi
+    case "$WSL_BROWSER" in
+        auto|windows|linux) ;;
+        *)
+            error "--wsl-browser must be auto, windows or linux (got: '$WSL_BROWSER')"
+            exit 1
+            ;;
+    esac
 
     # Only modifier flags (--dry-run, --force) with no action
     if ! $has_action; then
@@ -1411,6 +1445,7 @@ _interactive_menu_tui() {
         buf+='  \033[1;37m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\033[K\n'
         buf+="    \033[1;36mAwesome Claude Code Config Installer\033[0m  \033[2m${_cached_version}\033[0m\033[K\n"
         buf+='  \033[1;37m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\033[K\n'
+        buf+="    \033[2mPlatform:\033[0m ${PLATFORM_SUMMARY}\033[K\n"
         buf+='\033[K\n'
         buf+='  \033[2m↑/↓ Navigate   Enter/→ Open   a All  n None  d Defaults  q Quit\033[0m\033[K\n'
         buf+='\033[K\n'
@@ -1646,6 +1681,8 @@ _menu_test_hook() {
 }
 
 interactive_menu() {
+    is_wsl && detect_wsl_browser_target
+    PLATFORM_SUMMARY="$(platform_summary)"
     # Menu data comes from load_menu_groups (shared with --only).
     load_menu_groups
     local -a GROUP_LABELS=("${MENU_GROUP_LABELS[@]}")
@@ -1836,6 +1873,13 @@ _effective_selected_plugins_json() {
                 all)            pkgs+=("${PLUGINS_ESSENTIAL[@]}" "${PLUGINS_OPTIONAL[@]}" "${PLUGINS_AI_RESEARCH[@]}") ;;
             esac
         done
+    fi
+    if $PLAYWRIGHT_PLUGIN_SKIPPED && [[ ${#pkgs[@]} -gt 0 ]]; then
+        local kept=() p
+        for p in "${pkgs[@]}"; do
+            [[ "$p" == "$PLAYWRIGHT_PLUGIN_PKG" ]] || kept+=("$p")
+        done
+        pkgs=(${kept[@]+"${kept[@]}"})
     fi
     if [[ ${#pkgs[@]} -eq 0 ]]; then
         echo "[]"
@@ -4295,6 +4339,360 @@ install_statusline() {
     install_nerd_font || true
 }
 
+# --- WSL: Playwright drives the Windows Chrome ------------------------------
+#
+# Inside WSL, `npx @playwright/mcp` would start a Linux Chromium. When WSL
+# interop works and Chrome (or Edge) is installed on Windows, the Playwright
+# MCP server runs under a Windows node.exe instead and launches that browser.
+# Windows-side files live under %LOCALAPPDATA%\claude-code-config\ only:
+#   node\            portable Node, downloaded only when Windows has none
+#   playwright-mcp\  pinned @playwright/mcp (npm --prefix)
+# Nothing on macOS or a non-WSL Linux takes this path.
+
+is_wsl() {
+    [[ -n "${WSL_DISTRO_NAME:-}" || -n "${WSL_INTEROP:-}" ]] && return 0
+    [[ -e /proc/sys/fs/binfmt_misc/WSLInterop ]]
+}
+
+# Run a cmd.exe command line from a Windows drive (an UNC cwd makes cmd warn).
+_win_cmd() {
+    ( cd /mnt/c 2>/dev/null || cd /; cmd.exe /d /c "$@" 2>/dev/null ) | tr -d '\r'
+}
+
+_win_env() {
+    local value
+    value="$(_win_cmd "echo %$1%" | head -n 1)"
+    [[ "$value" == "%$1%" ]] && value=""
+    printf '%s' "$value"
+}
+
+_wsl_unix_path() { wslpath -u "$1" 2>/dev/null; }
+
+# Escape backslashes so a Windows path survives info/ok/warn (echo -e).
+_winmsg() { printf '%s' "${1//\\/\\\\}"; }
+
+# Root of the Windows-side files, as a Windows path.
+wsl_windows_root() {
+    printf '%s\\claude-code-config' "$WIN_LOCALAPPDATA"
+}
+
+# The root is shared by every WSL distro of the Windows user: each distro that
+# uses it leaves a file under .owners/, and the root goes with the last one.
+_wsl_owner_id() {
+    local id="${WSL_DISTRO_NAME:-default}"
+    printf '%s' "${id//[^A-Za-z0-9._-]/_}"
+}
+
+wsl_mark_windows_root() {
+    local root="$1"
+    mkdir -p "$root/.owners" && touch "$root/.claude-code-config-owned" "$root/.owners/$(_wsl_owner_id)"
+}
+
+# Set WIN_BROWSER_NAME / WIN_BROWSER_EXE to the installed Chrome, else Edge.
+detect_windows_browser() {
+    local base cand
+    for base in "$WIN_LOCALAPPDATA" "$(_win_env ProgramFiles)" "$(_win_env 'ProgramFiles(x86)')"; do
+        [[ -n "$base" ]] || continue
+        cand="$base\\Google\\Chrome\\Application\\chrome.exe"
+        if [[ -f "$(_wsl_unix_path "$cand")" ]]; then
+            WIN_BROWSER_NAME="chrome"; WIN_BROWSER_EXE="$cand"; return 0
+        fi
+    done
+    for base in "$(_win_env 'ProgramFiles(x86)')" "$(_win_env ProgramFiles)"; do
+        [[ -n "$base" ]] || continue
+        cand="$base\\Microsoft\\Edge\\Application\\msedge.exe"
+        if [[ -f "$(_wsl_unix_path "$cand")" ]]; then
+            WIN_BROWSER_NAME="msedge"; WIN_BROWSER_EXE="$cand"; return 0
+        fi
+    done
+    return 1
+}
+
+# Decide once per run whether Playwright goes through Windows. Called after the
+# selection is final and before anything is installed.
+# Detect the Windows browser once (read-only). Sets WSL_BROWSER_TARGET to
+# windows when WSL can drive a Windows Chrome/Edge, else linux, and
+# WSL_BROWSER_REASON to why not.
+WSL_BROWSER_DETECTED=false
+WSL_BROWSER_TARGET=""
+WSL_BROWSER_REASON=""
+detect_wsl_browser_target() {
+    $WSL_BROWSER_DETECTED && return 0
+    WSL_BROWSER_DETECTED=true
+    WSL_BROWSER_TARGET="linux"
+    if [[ "$WSL_BROWSER" == "linux" ]]; then
+        WSL_BROWSER_REASON="--wsl-browser linux"
+    elif ! command -v cmd.exe &>/dev/null || ! command -v wslpath &>/dev/null; then
+        WSL_BROWSER_REASON="WSL interop is unavailable (cmd.exe / wslpath not found)"
+    elif WIN_LOCALAPPDATA="$(_win_env LOCALAPPDATA)" && [[ -z "$WIN_LOCALAPPDATA" ]]; then
+        WSL_BROWSER_REASON="could not read %LOCALAPPDATA% from Windows"
+    elif ! detect_windows_browser; then
+        WSL_BROWSER_REASON="no Chrome or Edge found on Windows"
+    else
+        WSL_BROWSER_TARGET="windows"
+    fi
+    return 0
+}
+
+# One line naming the platform and where Playwright goes, e.g.
+# "WSL (Ubuntu) — Playwright → Windows Chrome". Plain text, no backslashes.
+platform_summary() {
+    local os
+    if is_wsl; then
+        detect_wsl_browser_target
+        if [[ "$WSL_BROWSER_TARGET" == "windows" ]]; then
+            if [[ "$WIN_BROWSER_NAME" == "chrome" ]]; then
+                printf 'WSL (%s) — Playwright → Windows Chrome' "${WSL_DISTRO_NAME:-unknown}"
+            else
+                printf 'WSL (%s) — Playwright → Windows Edge (Chrome not found)' "${WSL_DISTRO_NAME:-unknown}"
+            fi
+        else
+            printf 'WSL (%s) — Playwright → playwright plugin, Linux browser (%s)' "${WSL_DISTRO_NAME:-unknown}" "$WSL_BROWSER_REASON"
+        fi
+        return 0
+    fi
+    case "$(uname -s 2>/dev/null)" in
+        Darwin) os="macOS" ;;
+        Linux)  os="Linux" ;;
+        *)      os="$(uname -s 2>/dev/null || echo unknown)" ;;
+    esac
+    printf '%s — Playwright → playwright plugin' "$os"
+}
+
+# Decide once per run whether Playwright goes through Windows. Called after the
+# selection is final and before anything is installed.
+resolve_wsl_browser_mode() {
+    PLAYWRIGHT_VIA_WINDOWS=false
+    if ! is_wsl; then
+        [[ "$WSL_BROWSER" == "windows" ]] && warn "--wsl-browser windows ignored: not running inside WSL"
+        return 0
+    fi
+    [[ "$WSL_BROWSER" == "linux" ]] && return 0
+    command -v jq &>/dev/null || install_jq || true
+    local wanted=false
+    $INSTALL_MCP && wanted=true
+    [[ "$(_effective_plugin_set)" == *"|$PLAYWRIGHT_PLUGIN_PKG|"* ]] && wanted=true
+    $wanted || return 0
+    detect_wsl_browser_target
+    if [[ "$WSL_BROWSER_TARGET" != "windows" ]]; then
+        warn "Playwright will use a Linux browser: $WSL_BROWSER_REASON"
+        return 0
+    fi
+    PLAYWRIGHT_VIA_WINDOWS=true
+    INSTALL_MCP=true
+    info "WSL detected: Playwright will drive the Windows browser $(_winmsg "$WIN_BROWSER_EXE")"
+    info "  (registered as the 'playwright' MCP server; the playwright plugin is skipped once that works)"
+    [[ "$WIN_BROWSER_NAME" == "msedge" ]] && warn "Chrome is not installed on Windows — using Microsoft Edge instead"
+    return 0
+}
+
+_wsl_download() {
+    if command -v curl &>/dev/null; then
+        curl -fsSL "$1" -o "$2"
+    elif command -v wget &>/dev/null; then
+        wget -qO "$2" "$1"
+    else
+        return 1
+    fi
+}
+
+# Echo the Windows path of a node.exe that has npm next to it. Uses the one on
+# the Windows PATH, else downloads the pinned portable Node into the root.
+wsl_windows_node() {
+    local root_win found npm_cli
+    root_win="$(wsl_windows_root)"
+    found="$(_win_cmd "where node.exe" | head -n 1)"
+    if [[ -n "$found" ]]; then
+        npm_cli="${found%\\*}\\node_modules\\npm\\bin\\npm-cli.js"
+        if [[ -f "$(_wsl_unix_path "$found")" && -f "$(_wsl_unix_path "$npm_cli")" ]]; then
+            printf '%s' "$found"
+            return 0
+        fi
+    fi
+
+    local node_win="$root_win\\node\\node.exe" root node_dir
+    root="$(_wsl_unix_path "$root_win")"
+    node_dir="$root/node"
+    if [[ -f "$node_dir/node.exe" && "$(cat "$node_dir/.version" 2>/dev/null)" == "$WIN_NODE_VERSION" ]]; then
+        printf '%s' "$node_win"
+        return 0
+    fi
+
+    local arch
+    case "$(_win_env PROCESSOR_ARCHITECTURE)" in
+        ARM64) arch="arm64" ;;
+        *)     arch="x64" ;;
+    esac
+    local name="node-$WIN_NODE_VERSION-win-$arch"
+    local base_url="https://nodejs.org/dist/$WIN_NODE_VERSION"
+    local tmp
+    tmp="$(mktemp -d)" || return 1
+    info "Windows has no Node.js — downloading portable $name to $(_winmsg "$root_win\\node")" >&2
+    if ! retry 3 3 "Download $name.zip" _wsl_download "$base_url/$name.zip" "$tmp/$name.zip" >&2 \
+        || ! _wsl_download "$base_url/SHASUMS256.txt" "$tmp/SHASUMS256.txt"; then
+        rm -rf "$tmp"
+        warn "Could not download $name.zip" >&2
+        return 1
+    fi
+    local expected actual
+    expected="$(awk -v f="$name.zip" '$2 == f { print $1 }' "$tmp/SHASUMS256.txt")"
+    actual="$(sha256_file "$tmp/$name.zip")"
+    if [[ -z "$expected" || "$expected" != "$actual" ]]; then
+        rm -rf "$tmp"
+        warn "Checksum mismatch for $name.zip — not installed" >&2
+        return 1
+    fi
+    local py
+    if py="$(managed_python)"; then
+        "$py" -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$tmp/$name.zip" "$tmp" || { rm -rf "$tmp"; return 1; }
+    elif command -v unzip &>/dev/null; then
+        unzip -q "$tmp/$name.zip" -d "$tmp" || { rm -rf "$tmp"; return 1; }
+    else
+        rm -rf "$tmp"
+        warn "Need python3 or unzip to unpack $name.zip" >&2
+        return 1
+    fi
+    wsl_mark_windows_root "$root"
+    rm -rf "$node_dir"
+    if ! cp -R "$tmp/$name" "$node_dir"; then
+        rm -rf "$tmp"
+        return 1
+    fi
+    printf '%s\n' "$WIN_NODE_VERSION" > "$node_dir/.version"
+    rm -rf "$tmp"
+    printf '%s' "$node_win"
+}
+
+# Install the pinned @playwright/mcp under the root with the Windows npm and
+# echo the Windows path of its cli.js.
+wsl_install_playwright_package() {
+    local node_win="$1" root_win pkg_win pkg cli_win installed
+    root_win="$(wsl_windows_root)"
+    pkg_win="$root_win\\playwright-mcp"
+    pkg="$(_wsl_unix_path "$pkg_win")"
+    cli_win="$pkg_win\\node_modules\\@playwright\\mcp\\cli.js"
+    installed="$(jq -r '.version // empty' "$pkg/node_modules/@playwright/mcp/package.json" 2>/dev/null || true)"
+    if [[ "$installed" != "$PLAYWRIGHT_MCP_VERSION" ]]; then
+        local node npm_cli
+        node="$(_wsl_unix_path "$node_win")"
+        npm_cli="${node_win%\\*}\\node_modules\\npm\\bin\\npm-cli.js"
+        mkdir -p "$pkg"
+        info "Installing @playwright/mcp@$PLAYWRIGHT_MCP_VERSION with the Windows npm..." >&2
+        if ! ( cd "$pkg" && retry 3 3 "npm install @playwright/mcp" "$node" "$npm_cli" install \
+                --prefix "$pkg_win" --no-audit --no-fund --ignore-scripts --loglevel=error \
+                "@playwright/mcp@$PLAYWRIGHT_MCP_VERSION" ) >&2; then
+            return 1
+        fi
+    fi
+    [[ -f "$(_wsl_unix_path "$cli_win")" ]] || return 1
+    printf '%s' "$cli_win"
+}
+
+# Start the registered server once in headless/isolated mode, open about:blank
+# and report which browser answered. Sets WSL_BROWSER_STATUS for the summary.
+wsl_browser_probe() {
+    local py out ua
+    if ! py="$(managed_python)"; then
+        WSL_BROWSER_STATUS="not verified (python3 not found)"
+        warn "python3 not found — cannot verify the Windows browser connection"
+        return 0
+    fi
+    info "Verifying that Playwright MCP opens the Windows browser..."
+    out="$("$py" "$SCRIPT_DIR/scripts/check_mcp.py" --timeout 120 --browser -- "$@" --headless --isolated 2>&1)" || true
+    ua="$(jq -r '.user_agent // empty' <<< "$out" 2>/dev/null || true)"
+    if [[ "$ua" == *"Windows NT"* ]]; then
+        WSL_BROWSER_STATUS="connected to Windows $WIN_BROWSER_NAME ($WIN_BROWSER_EXE)"
+        ok "Playwright MCP is connected to the Windows browser: $(_winmsg "$WIN_BROWSER_EXE")"
+        info "  User agent: $ua"
+    else
+        WSL_BROWSER_STATUS="NOT connected — ${out:-no output}"
+        warn "Playwright MCP did not reach the Windows browser: $(_winmsg "${out:-no output}")"
+        (( INSTALL_WARNINGS++ )) || true
+    fi
+}
+
+install_wsl_playwright_mcp() {
+    local node_win cli_win node out_win cfg="$HOME/.claude.json"
+    if ! node_win="$(wsl_windows_node)"; then
+        WSL_BROWSER_STATUS="NOT connected — no Windows Node.js"
+        warn "No Windows Node.js available — Playwright MCP not registered"
+        warn "  The playwright plugin (Linux browser) is kept if selected; re-run install.sh to retry"
+        (( INSTALL_WARNINGS++ )) || true
+        return 0
+    fi
+    if ! cli_win="$(wsl_install_playwright_package "$node_win")"; then
+        WSL_BROWSER_STATUS="NOT connected — @playwright/mcp install failed"
+        warn "Could not install @playwright/mcp on Windows — Playwright MCP not registered"
+        warn "  The playwright plugin (Linux browser) is kept if selected; re-run install.sh to retry"
+        (( INSTALL_WARNINGS++ )) || true
+        return 0
+    fi
+    node="$(_wsl_unix_path "$node_win")"
+    wsl_mark_windows_root "$(_wsl_unix_path "$(wsl_windows_root)")"
+    mkdir -p "$HOME/.cache/playwright-mcp"
+    out_win="$(wslpath -w "$HOME/.cache/playwright-mcp" 2>/dev/null)"
+    local args=("$cli_win" --browser "$WIN_BROWSER_NAME" --executable-path "$WIN_BROWSER_EXE")
+    [[ -n "$out_win" ]] && args+=(--output-dir "$out_win")
+
+    local wanted current
+    wanted="$(printf '%s\n' "${args[@]}" | jq -R . | jq -cs --arg c "$node" '{command: $c, args: .}')"
+    current="$(jq -c '.mcpServers.playwright // null | if . == null then null else {command, args} end' "$cfg" 2>/dev/null || echo null)"
+    if [[ "$current" == "$wanted" ]]; then
+        ok "MCP server playwright already points at the Windows browser"
+    else
+        if mcp_registered playwright; then
+            if ! mcp_is_ours playwright; then
+                WSL_BROWSER_STATUS="NOT connected — an existing 'playwright' MCP server was left in place"
+                warn "MCP server 'playwright' was not registered by this installer — left in place (remove it with: claude mcp remove playwright --scope user, then re-run)"
+                (( INSTALL_WARNINGS++ )) || true
+                return 0
+            fi
+            claude mcp remove playwright --scope user >/dev/null 2>&1 || true
+            info "Replaced the previous playwright MCP registration"
+        fi
+        if retry 3 3 "Add MCP server playwright" claude mcp add --scope user --transport stdio playwright \
+            -- "$node" "${args[@]}" 2>/dev/null; then
+            ok "MCP server added: playwright (Windows $WIN_BROWSER_NAME)"
+        else
+            WSL_BROWSER_STATUS="NOT connected — claude mcp add failed"
+            warn "MCP server playwright could not be added, skipping"
+            return 0
+        fi
+    fi
+    PLAYWRIGHT_PLUGIN_SKIPPED=true
+    if plugin_is_installed "$PLAYWRIGHT_PLUGIN_PKG"; then
+        if claude plugin uninstall "$PLAYWRIGHT_PLUGIN_PKG" >/dev/null 2>&1; then
+            ok "Uninstalled the playwright plugin (it would start a second, Linux browser)"
+        else
+            warn "Could not uninstall $PLAYWRIGHT_PLUGIN_PKG — it still starts a Linux browser next to the Windows one"
+        fi
+    fi
+    wsl_browser_probe "$node" "${args[@]}"
+}
+
+# Remove %LOCALAPPDATA%\claude-code-config when this installer created it.
+wsl_remove_windows_files() {
+    is_wsl && command -v cmd.exe &>/dev/null && command -v wslpath &>/dev/null || return 0
+    [[ -n "$WIN_LOCALAPPDATA" ]] || WIN_LOCALAPPDATA="$(_win_env LOCALAPPDATA)"
+    [[ -n "$WIN_LOCALAPPDATA" ]] || return 0
+    local root others
+    root="$(_wsl_unix_path "$(wsl_windows_root)")"
+    [[ -n "$root" && -f "$root/.claude-code-config-owned" ]] || return 0
+    others="$(ls "$root/.owners" 2>/dev/null | grep -vx "$(_wsl_owner_id)" | tr '\n' ' ' || true)"
+    if [[ -n "$others" ]]; then
+        if ! $DRY_RUN; then rm -f "$root/.owners/$(_wsl_owner_id)"; fi
+        info "Kept $(_winmsg "$(wsl_windows_root)"): still used by WSL distro(s) ${others% }"
+        return 0
+    fi
+    if $DRY_RUN; then
+        info "Would remove $(_winmsg "$(wsl_windows_root)")"
+    elif rm -rf "$root"; then
+        ok "Removed $(_winmsg "$(wsl_windows_root)")"
+    else
+        warn "Could not remove $(_winmsg "$(wsl_windows_root)")"
+    fi
+}
+
 install_mcp() {
     info "Installing MCP servers..."
 
@@ -4346,8 +4744,19 @@ install_mcp() {
     if ! $INSTALL_MCP; then
         :  # Playwright not selected — skip entirely
     elif $DRY_RUN; then
-        info "Would add MCP server: playwright (stdio)"
+        if $PLAYWRIGHT_VIA_WINDOWS; then
+            PLAYWRIGHT_PLUGIN_SKIPPED=true
+            info "Would add MCP server: playwright (stdio, Windows node.exe driving $(_winmsg "$WIN_BROWSER_EXE"))"
+        else
+            info "Would add MCP server: playwright (stdio)"
+        fi
+    elif $PLAYWRIGHT_VIA_WINDOWS; then
+        install_wsl_playwright_mcp
     else
+        if is_wsl && mcp_is_wsl_windows playwright; then
+            claude mcp remove playwright --scope user >/dev/null 2>&1 || true
+            info "Replaced the Windows-browser playwright MCP registration (--wsl-browser linux)"
+        fi
         if _mcp_exists playwright; then
             ok "MCP server playwright already exists, skipping"
         elif retry 3 3 "Add MCP server playwright" claude mcp add --scope user --transport stdio playwright \
@@ -4549,6 +4958,7 @@ resolve_plugin_selection() {
     RESOLVED_PLUGINS=()
     for entry in ${plugins[@]+"${plugins[@]}"}; do
         [[ "$seen" == *"|$entry|"* ]] && continue
+        $PLAYWRIGHT_PLUGIN_SKIPPED && [[ "$entry" == "$PLAYWRIGHT_PLUGIN_PKG" ]] && continue
         RESOLVED_PLUGINS+=("$entry")
         seen="$seen|$entry|"
     done
@@ -4608,12 +5018,14 @@ install_plugins() {
     local unique_plugins=()
     local seen=""
     for entry in "${plugins[@]}"; do
+        $PLAYWRIGHT_PLUGIN_SKIPPED && [[ "$entry" == "$PLAYWRIGHT_PLUGIN_PKG" ]] && continue
         if [[ "$seen" != *"|$entry|"* ]]; then
             unique_plugins+=("$entry")
             seen="$seen|$entry|"
         fi
     done
-    plugins=("${unique_plugins[@]}")
+    plugins=(${unique_plugins[@]+"${unique_plugins[@]}"})
+    if [[ ${#plugins[@]} -eq 0 ]] && $PLAYWRIGHT_PLUGIN_SKIPPED; then return 0; fi
 
     # The upstream humanizer plugin needs Claude Code >= 2.1.142.
     if [[ "$seen" == *"|humanizer@humanizer|"* ]] && ! claude_version_at_least 2 1 142; then
@@ -5990,12 +6402,22 @@ mcp_is_ours() {
     local cfg="$HOME/.claude.json" pkg
     pkg="$(mcp_package_for "$1")"
     [[ -n "$pkg" && -f "$cfg" ]] && command -v jq &>/dev/null || return 1
-    jq -e --arg n "$1" --arg p "$pkg" '
+    jq -e --arg n "$1" --arg p "$pkg" --arg wp "\\${pkg//\//\\}\\" '
         (.mcpServers[$n]? // null) as $s
         | $s != null
-          and ((($s.command? // "") | tostring | test("(^|[/\\\\])npx(\\.cmd|\\.exe)?$")))
-          and ((($s.args? // []) | map(tostring) | any(. == $p or startswith($p + "@"))))
+          and (
+            ((($s.command? // "") | tostring | test("(^|[/\\\\])npx(\\.cmd|\\.exe)?$"))
+              and (($s.args? // []) | map(tostring) | any(. == $p or startswith($p + "@"))))
+            or ((($s.command? // "") | tostring | test("/node\\.exe$"))
+              and (($s.args? // []) | map(tostring) | any(contains("\\claude-code-config\\") and contains($wp))))
+          )
     ' "$cfg" >/dev/null 2>&1
+}
+
+# 0 when $1 is this installer's WSL registration (Windows node.exe).
+mcp_is_wsl_windows() {
+    mcp_is_ours "$1" || return 1
+    jq -e --arg n "$1" '(.mcpServers[$n].command // "") | test("/node\\.exe$")' "$HOME/.claude.json" >/dev/null 2>&1
 }
 
 # --- Detection for the initial menu state ---------------------------------
@@ -6159,6 +6581,7 @@ remove_deselected_mcp() {
         warn "claude CLI not found — cannot remove MCP server $name (run: claude mcp remove $name --scope user)"
     elif claude mcp remove "$name" --scope user >/dev/null 2>&1; then
         ok "Removed unchecked MCP server: $name"
+        if [[ "$name" == "playwright" ]]; then wsl_remove_windows_files; fi
     else
         warn "Could not remove MCP server $name (run: claude mcp remove $name --scope user)"
         (( INSTALL_WARNINGS++ )) || true
@@ -6466,6 +6889,7 @@ uninstall() {
         claude mcp remove playwright 2>/dev/null && \
             ok "Removed MCP server: playwright" || \
             warn "Could not remove playwright"
+        wsl_remove_windows_files
     else
         warn "Claude CLI not found — cannot uninstall plugins or MCP servers"
     fi
@@ -7300,6 +7724,11 @@ main() {
     echo "  $(get_source_version)"
     echo "========================================="
     echo ""
+    if [[ -z "$PLATFORM_SUMMARY" ]]; then
+        is_wsl && detect_wsl_browser_target
+        PLATFORM_SUMMARY="$(platform_summary)"
+    fi
+    info "Platform: $PLATFORM_SUMMARY"
 
     if $DRY_RUN; then
         warn "DRY RUN MODE -- no changes will be made"
@@ -7316,6 +7745,7 @@ main() {
     # chmod) so the run is fully side-effect-free and previewable from an empty
     # HOME. Each install_* function also guards its own writes on $DRY_RUN.
     $DRY_RUN || mkdir -p "$CLAUDE_DIR"
+    resolve_wsl_browser_mode
     cleanup_retired_skills
     cleanup_retired_enabled_plugins
 
@@ -7397,6 +7827,10 @@ main() {
     info "Next steps:"
     local step=1
     echo "  $((step++)). Restart Claude Code for changes to take effect"
+    if [[ -n "$WSL_BROWSER_STATUS" ]]; then
+        echo "  $((step++)). Browser (WSL): Playwright MCP $WSL_BROWSER_STATUS"
+        echo "      Screenshots and other output files: ~/.cache/playwright-mcp"
+    fi
     echo "  $((step++)). Customize CLAUDE.md for your specific projects"
     shell_wrapper_source_hint "$step" && step=$((step + 1))
     if $INSTALL_LARK; then

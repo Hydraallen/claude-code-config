@@ -1,5 +1,26 @@
 # Changelog
 
+## [4.2.4] - 2026-10-01
+
+### Features
+- **install.sh inside WSL drives the Windows Chrome.** When `playwright` (plugin) or `mcp` is selected and WSL interop works, the installer registers the user-scope `playwright` MCP server under a Windows `node.exe` with `--browser chrome --executable-path <chrome.exe>`, instead of `npx @playwright/mcp` (Linux Chromium). Without Chrome it uses Edge; without either it keeps the Linux behaviour. Details: [mcp/README.md](mcp/README.md#wsl-windows-chrome).
+- Windows Node.js: the one on the Windows PATH is used; if there is none, the portable Node v24.21.0 zip is downloaded from nodejs.org, checked against `SHASUMS256.txt` and unpacked to `%LOCALAPPDATA%\claude-code-config\node`. `@playwright/mcp@0.0.78` is installed with the Windows npm into `%LOCALAPPDATA%\claude-code-config\playwright-mcp`.
+- **Connection check after install.** The installer starts the registered server once headless, opens `about:blank`, prints the user agent and ends with `Browser (WSL): Playwright MCP connected to Windows chrome (...)`, or `NOT connected` with the reason. `scripts/check_mcp.py` gains `--browser` for this.
+- **Platform line.** The top of the interactive menu and the start of every run show `Platform: <macOS|Linux|WSL (distro)> — Playwright → <playwright plugin|Windows Chrome|Windows Edge>`; in WSL without a usable Windows browser it names the reason.
+- New option `--wsl-browser auto|windows|linux` (env `ACCC_WSL_BROWSER`); `linux` keeps the previous behaviour inside WSL.
+
+### Design Rationale
+- The MCP server has to run on Windows: Playwright starts the browser and talks to it over a pipe, which does not cross the WSL boundary. Connecting a Linux-side server to Chrome over CDP would need WSL mirrored networking (`.wslconfig`) and a manually started Chrome, which conflicts with installing everything from install.sh while changing as little on Windows as possible.
+- The package is installed into a fixed directory and started as `node.exe cli.js` instead of `npx`: npx bin shims call `node` from the Windows PATH, which the portable Node is not on, and a pinned local install also avoids a registry lookup at every start.
+- In WSL the playwright plugin is skipped and uninstalled once the Windows server is registered; if a Windows step fails (download, npm, registration), the plugin is installed as before so Playwright is never lost. Its server has a different name (`plugin:playwright:playwright`), so with both installed the agent would get two sets of browser tools, one of them opening a Linux browser.
+- Screenshots go to `~/.cache/playwright-mcp` through `\\wsl.localhost\...` so the agent can read them from WSL.
+
+### Notes & Caveats
+- macOS, native Linux and install.ps1 are unchanged; the WSL path runs only when `WSL_DISTRO_NAME` / `WSL_INTEROP` is set or `/proc/sys/fs/binfmt_misc/WSLInterop` exists, and `cmd.exe` / `wslpath` are available.
+- The browser uses Playwright's own profile, not your everyday Chrome profile or logins.
+- Interactive uncheck and `--uninstall` also remove `%LOCALAPPDATA%\claude-code-config` when the installer created it (marker file `.claude-code-config-owned`). The directory is shared by all WSL distros of the Windows user and is deleted only when no other distro is listed under `.owners/`. A Node.js you installed yourself is never touched.
+- The agent-guided path (INSTALL.md) and Codex are unchanged.
+
 ## [4.2.3] - 2026-09-28
 
 ### Features

@@ -16,6 +16,10 @@ plugin's, so enabling both leaves the plugin one silently never started. The
 standalone server is default-off in the installer for this reason; if you
 already have the duplicate, drop it with `claude mcp remove playwright`.
 
+Inside WSL, install.sh installs neither of the two above. It registers a
+`playwright` MCP server that drives the Chrome installed on Windows instead;
+see [WSL: Windows Chrome](../mcp/README.md#wsl-windows-chrome).
+
 ### context7 — optional `CONTEXT7_API_KEY`
 
 Its header is `${CONTEXT7_API_KEY:-}`, so an unset key is not an error: the

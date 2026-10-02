@@ -2,6 +2,27 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.2.4] - 2026-10-01
+
+### Features
+- **WSL 中的 install.sh 改为驱动 Windows 的 Chrome。** 选中 `playwright`（插件）或 `mcp` 且 WSL interop 可用时，安装器用 Windows 的 `node.exe` 注册 user scope 的 `playwright` MCP 服务，参数为 `--browser chrome --executable-path <chrome.exe>`，不再使用 `npx @playwright/mcp`（Linux Chromium）。没有 Chrome 时使用 Edge；两者都没有时保持 Linux 行为。说明见 [mcp/README.md](mcp/README.md#wsl-windows-chrome)。
+- Windows Node.js：优先使用 Windows PATH 中的 node；没有时从 nodejs.org 下载便携版 Node v24.21.0 zip，按 `SHASUMS256.txt` 校验后解压到 `%LOCALAPPDATA%\claude-code-config\node`。`@playwright/mcp@0.0.78` 用 Windows npm 安装到 `%LOCALAPPDATA%\claude-code-config\playwright-mcp`。
+- **安装后检查连接。** 安装器以 headless 方式启动一次已注册的服务，打开 `about:blank`，打印 user agent，并在结尾显示 `Browser (WSL): Playwright MCP connected to Windows chrome (...)`；失败时显示 `NOT connected` 及原因。为此 `scripts/check_mcp.py` 新增 `--browser`。
+- **平台信息行。** 交互菜单顶部和每次运行开头显示 `Platform: <macOS|Linux|WSL (发行版)> — Playwright → <playwright plugin|Windows Chrome|Windows Edge>`；WSL 中没有可用的 Windows 浏览器时注明原因。
+- 新增选项 `--wsl-browser auto|windows|linux`（环境变量 `ACCC_WSL_BROWSER`）；`linux` 在 WSL 中保持原行为。
+
+### Design Rationale
+- MCP 服务必须在 Windows 端运行：Playwright 启动浏览器后通过 pipe 通信，pipe 不能跨越 WSL 边界。让 Linux 端服务通过 CDP 连接 Chrome 需要 WSL mirrored 网络（`.wslconfig`）和手动启动的 Chrome，与"由 install.sh 完成安装、尽量少改 Windows 设置"的要求冲突。
+- 包安装到固定目录并以 `node.exe cli.js` 启动，不使用 `npx`：npx 的 bin shim 从 Windows PATH 调用 `node`，而便携版 Node 不在 PATH 中；固定版本的本地安装也避免了每次启动查询 registry。
+- WSL 中在 Windows 端服务注册成功后才跳过并卸载 playwright 插件；任一 Windows 步骤（下载、npm、注册）失败时按原方式安装插件，Playwright 不会丢失。插件的服务名不同（`plugin:playwright:playwright`），两者并存时 agent 会得到两套浏览器工具，其中一套打开 Linux 浏览器。
+- 截图通过 `\\wsl.localhost\...` 写入 `~/.cache/playwright-mcp`，agent 可在 WSL 中直接读取。
+
+### Notes & Caveats
+- macOS、原生 Linux 和 install.ps1 不变；只有设置了 `WSL_DISTRO_NAME` / `WSL_INTEROP` 或存在 `/proc/sys/fs/binfmt_misc/WSLInterop`，且 `cmd.exe` / `wslpath` 可用时才进入 WSL 分支。
+- 浏览器使用 Playwright 自己的 profile，不使用日常 Chrome 的 profile 和登录态。
+- 交互式取消勾选和 `--uninstall` 会一并删除安装器创建的 `%LOCALAPPDATA%\claude-code-config`（以标记文件 `.claude-code-config-owned` 判断）。该目录由同一 Windows 用户的所有 WSL 发行版共用，只有 `.owners/` 中没有其他发行版时才删除。用户自己安装的 Node.js 不会被改动。
+- agent 引导安装路径（INSTALL.md）和 Codex 不变。
+
 ## [4.2.3] - 2026-09-28
 
 ### Features
