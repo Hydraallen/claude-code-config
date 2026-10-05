@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Claude Code status line — gradient progress bars
-# Shows: model, dir, git branch, context window, 5h usage (Anthropic or GLM)
+# Shows: model, dir, git branch, context window, 5h usage (Anthropic or GLM),
+# running subagents / in-process teammates
 
 # Cross-platform home directory (Windows $HOME may be wrong)
 _HOME="${USERPROFILE:-$HOME}"
@@ -487,6 +488,7 @@ C_GIT="\033[38;5;116m"
 C_SEP="\033[38;5;240m"
 C_LABEL="\033[38;5;250m"
 C_CONDA="\033[38;5;113m"   # soft green (Python/conda)
+C_AGENT="\033[38;5;180m"   # tan (subagents; teammates use their own colour)
 C_R="\033[0m"
 
 # Gradient: soft green -> green -> yellow-green -> yellow -> orange -> red -> dark red
@@ -658,6 +660,101 @@ if [ -n "$usage_pct" ]; then
     segments+=("$usage_seg")
     _usage_w=$(visible_len "$usage_seg"); _usage_w=${_usage_w:-0}
     _seg_widths+=("$_usage_w")
+fi
+
+# Segment 7+: running subagents and in-process teammates.
+# The stdin payload only describes the main thread, so this reads the
+# per-agent transcripts Claude Code writes next to the session transcript:
+#   <transcript without .jsonl>/subagents/agent-<id>.jsonl      (messages)
+#   <transcript without .jsonl>/subagents/agent-<id>.meta.json  (agentType,
+#     description; teammates add name, color, taskKind=in_process_teammate)
+# An agent counts as running when its file was written within
+# CL_AGENT_ACTIVE_SECS (default 300) AND its last user/assistant entry is not
+# an assistant turn that ended with stop_reason "end_turn" (finished subagent
+# or idle teammate) or a text-only reply (streamed entries carry no
+# stop_reason). The window covers a long tool call that writes nothing
+# meanwhile; an agent killed mid-tool disappears once the window passes.
+transcript_path=$(echo "$input" | jq -r '.transcript_path // ""')
+AGENT_ACTIVE_SECS="${CL_AGENT_ACTIVE_SECS:-300}"
+case "$AGENT_ACTIVE_SECS" in ''|*[!0-9]*) AGENT_ACTIVE_SECS=300 ;; esac
+AGENT_MAX_SHOWN=1
+# Only the tail of each transcript is parsed; a single tool result can be
+# several MB, so the first (partial) line is dropped by `fromjson?`.
+AGENT_TAIL_BYTES=524288
+agent_dir=""
+case "$transcript_path" in
+    *.jsonl) agent_dir="${transcript_path%.jsonl}/subagents" ;;
+esac
+
+# Teammate colour names (meta.json "color") -> 256-colour codes
+agent_color() {
+    case "$1" in
+        red) echo 203 ;; orange) echo 209 ;; yellow) echo 221 ;;
+        green) echo 114 ;; cyan) echo 80 ;; blue) echo 75 ;;
+        purple) echo 141 ;; pink) echo 211 ;; *) echo 180 ;;
+    esac
+}
+
+agent_rows=()
+if [ "$AGENT_ACTIVE_SECS" -gt 0 ] && [ -n "$agent_dir" ] && [ -d "$agent_dir" ]; then
+    _mmin=$(( (AGENT_ACTIVE_SECS + 59) / 60 ))
+    # find -mmin pre-filters by minute so idle transcripts are never opened;
+    # the exact age is re-checked per file below.
+    while IFS= read -r _af; do
+        [ -n "$_af" ] || continue
+        _amt=$(stat -c %Y "$_af" 2>/dev/null || stat -f %m "$_af" 2>/dev/null || echo 0)
+        [ $(( now - _amt )) -le "$AGENT_ACTIVE_SECS" ] || continue
+        _meta=$(cat "${_af%.jsonl}.meta.json" 2>/dev/null)
+        # Output: name \x1f is_teammate \x1f color \x1f tokens
+        # (nothing when the agent's last turn ended)
+        _arow=$(tail -c "$AGENT_TAIL_BYTES" "$_af" 2>/dev/null | jq -R -s -r --arg m "$_meta" '
+            [split("\n")[] | fromjson? | select(.type == "user" or .type == "assistant")] as $e
+            | ($e | last) as $l
+            | if ($l != null and $l.type == "assistant"
+                  and ($l.message.stop_reason == "end_turn"
+                       or ([$l.message.content[]? | .type]
+                           | (index("text") != null) and (index("tool_use") == null))))
+              then empty
+              else
+                ([$e[] | select(.type == "assistant" and .message.usage != null)] | last) as $a
+                | (($m | fromjson?) // {}) as $meta
+                | [ ($meta.name // $meta.description // $meta.agentType // "agent"),
+                    (if $meta.taskKind == "in_process_teammate" then "1" else "0" end),
+                    ($meta.color // ""),
+                    ($a.message.usage
+                        | if . == null then ""
+                          else ((.input_tokens // 0) + (.cache_read_input_tokens // 0)
+                                + (.cache_creation_input_tokens // 0)) end) ]
+                | map(tostring) | join("\u001f")
+              end' 2>/dev/null)
+        [ -n "$_arow" ] && agent_rows+=("${_amt}"$'\x1f'"${_arow}")
+    done < <(find "$agent_dir" -maxdepth 1 -type f -name 'agent-*.jsonl' -mmin "-$_mmin" 2>/dev/null)
+fi
+
+if [ "${#agent_rows[@]}" -gt 0 ]; then
+    # Most recently written first
+    _sorted=$(printf '%s\n' "${agent_rows[@]}" | sort -t $'\x1f' -k1,1nr)
+    _n_agents=${#agent_rows[@]}
+    segments+=("${C_LABEL}agents${C_R} ${C_AGENT}${_n_agents}${C_R}")
+    _seg_widths+=("$(visible_len "${segments[${#segments[@]}-1]}")")
+    _shown=0
+    while IFS=$'\x1f' read -r _amt _aname _ateam _acolor _atok; do
+        [ "$_shown" -ge "$AGENT_MAX_SHOWN" ] && break
+        _shown=$(( _shown + 1 ))
+        [ "${#_aname}" -gt 22 ] && _aname="${_aname:0:21}~"
+        if [ "$_ateam" = "1" ]; then
+            _ac="\033[38;5;$(agent_color "$_acolor")m"
+        else
+            _ac="$C_AGENT"
+        fi
+        _aseg="${_ac}${_aname}${C_R}"
+        case "$_atok" in
+            ''|*[!0-9]*) ;;
+            *) _aseg+=" ${C_LABEL}$(fmt_ctx "$_atok")${C_R}" ;;
+        esac
+        segments+=("$_aseg")
+        _seg_widths+=("$(visible_len "$_aseg")")
+    done <<< "$_sorted"
 fi
 
 # --- Wrap algorithm ---

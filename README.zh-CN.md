@@ -258,7 +258,7 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 
 - **两条安装路径**：脚本安装器按菜单选择一次性写入 `~/.claude`；agent 引导路径在对话中列出编号选项并记录用户选择。两者读取同一套 `platforms/claude/templates/` 模板。
 - **独立记忆**：Claude 使用自己的全局 `lessons.md` 与项目 `memory/MEMORY.md`；Codex 使用自己的全局 `lessons.md` 与项目根目录 `lessons.md`。模板和真实历史各自保留，仅在缺少全局记录时创建空白文件。
-- **规则与状态栏**：Claude 提供一份写作规则，以及独立的 Python / TypeScript / Go 规则；渐变状态栏展示模型、目录、venv、Git、上下文与当前后端的 5 小时额度（Anthropic 或 GLM）。Codex 使用原生状态栏与子 agent 能力，本仓库不再安装自定义角色预设。
+- **规则与状态栏**：Claude 提供一份写作规则，以及独立的 Python / TypeScript / Go 规则；渐变状态栏展示模型、目录、venv、Git、上下文、当前后端的 5 小时额度（Anthropic 或 GLM），以及正在运行的 subagent / in-process teammate 及其上下文占用。Codex 使用原生状态栏与子 agent 能力，本仓库不再安装自定义角色预设。
 - **配置管理**：edit-config 跟踪 main 并记录实际 revision；`/update-config` 重跑脚本安装器。两条路径共用 `agent-config/selection.json`。来源策略冲突时明确选择是否迁移，保留已有选择与定制。
 - **目录同步检查**：`scripts/check-catalog-sync.sh` 校验 catalog.md 与两个脚本安装器一致，`scripts/check-readme-sync.sh` 保持两份 README 对齐。
 - **限定修改范围**：保留用户定制、凭据、hooks 和记忆数据库，通过备份与文件归属支持更新和明确移除。ResearchStudio Idea/Reel、PPT Master 只准备完整源码，运行依赖留到首次使用。

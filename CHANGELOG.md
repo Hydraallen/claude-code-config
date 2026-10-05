@@ -1,5 +1,26 @@
 # Changelog
 
+## [4.2.5] - 2026-10-04
+
+### Features
+- **The statusline shows running subagents and in-process teammates.** After the 5h segment it adds `agents <N>` and the most recently written agent's name with its context length in tokens, so the segment has a fixed width however many agents run: `agents 2 │ shipfeed-dev 32k`. Teammates use the name and colour from their team; subagents show the task description passed to the Agent tool (falling back to `agentType`), truncated to 22 characters. Nothing changes when no agent is running.
+- `statusline.json` sets `"refreshInterval": 5`, so the line is re-rendered every 5 seconds while the main thread waits on background agents.
+- `CL_AGENT_ACTIVE_SECS` (default 300) sets how long an agent counts as running after its transcript was last written; `0` hides the segment.
+
+### Design Rationale
+- The statusLine stdin payload describes the main thread only (`agent.name` is set only for `--agent` sessions). The data source is the per-agent transcripts Claude Code writes next to the session transcript, `<transcript>/subagents/agent-<id>.jsonl`, with `agent-<id>.meta.json` (`agentType`; teammates add `name`, `color`, `taskKind: in_process_teammate`). `~/.claude/teams/*/config.json` is not used: its `leadSessionId` can differ from the current session after a resume.
+- An agent counts as running when its transcript was written within the window and its last user/assistant entry is not an assistant turn with `stop_reason: "end_turn"` or a text-only assistant entry (finished subagent or idle teammate; streamed entries often carry no `stop_reason`). The window covers tool calls that write nothing for minutes.
+- Cost per render: one `find -mmin` over the directory (idle transcripts are never opened), then per recent file the last 512 KB via `tail -c` and one `jq`. jq is already required by the script. About 0.12 s per render was measured on a session directory with 378 transcripts.
+- Context length: input + cache-read + cache-creation tokens from the `usage` of the agent's latest assistant entry, i.e. the prompt size of its last API request as reported by the API. No percentage is shown because the agent's window size would have to be guessed from its model id.
+- Without `refreshInterval`, Claude Code re-runs the command only on main-thread events, so agent progress was not visible while the main thread waited.
+
+### Notes & Caveats
+- Teammates on the tmux / separate-process backend run as their own sessions with their own transcripts and are not shown.
+- A subagent stopped in the middle of a tool call stays listed until the window passes.
+- Older Claude Code versions without `refreshInterval` render event-driven as before.
+- The statusline cannot follow the agent selected in the agent view: on Claude Code 2.1.289 the stdin payload stays identical (same `transcript_path`, no agent field) while a subagent is being viewed.
+- install.ps1 installs the same bash script (there is no PowerShell statusline), so both installers get the change; no installer code changed.
+
 ## [4.2.4] - 2026-10-01
 
 ### Features

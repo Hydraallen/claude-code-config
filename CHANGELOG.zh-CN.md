@@ -2,6 +2,27 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.2.5] - 2026-10-04
+
+### Features
+- **状态栏显示正在运行的 subagent 与 in-process teammate。** 在 5h 段之后增加 `agents <N>`，并显示最近写入的那个 agent 的名字和上下文长度（token 数），无论有多少 agent，该段宽度固定：`agents 2 │ shipfeed-dev 32k`。teammate 使用其团队中的名字和颜色，subagent 显示调用 Agent 工具时的任务描述（缺失时退回 `agentType`），超过 22 字符截断。没有运行中的 agent 时输出不变。
+- `statusline.json` 设置 `"refreshInterval": 5`，主线程等待后台 agent 时状态栏每 5 秒重新渲染。
+- `CL_AGENT_ACTIVE_SECS`（默认 300）设置 transcript 最后一次写入后 agent 仍视为运行中的时长；设为 `0` 隐藏该段。
+
+### Design Rationale
+- statusLine 的 stdin 只描述主线程（`agent.name` 仅在 `--agent` 会话中出现）。数据来源是 Claude Code 在会话 transcript 旁写入的各 agent transcript：`<transcript>/subagents/agent-<id>.jsonl` 及 `agent-<id>.meta.json`（`agentType`；teammate 另有 `name`、`color`、`taskKind: in_process_teammate`）。不使用 `~/.claude/teams/*/config.json`：resume 之后其 `leadSessionId` 可能与当前会话不同。
+- 判定为运行中的条件：transcript 在时间窗口内被写入，且最后一条 user/assistant 记录不是 `stop_reason: "end_turn"` 的 assistant 回合，也不是只含文本的 assistant 记录（已结束的 subagent 或空闲的 teammate；流式写入的记录常不带 `stop_reason`）。时间窗口覆盖数分钟不写 transcript 的工具调用。
+- 每次渲染的开销：对目录执行一次 `find -mmin`（空闲 transcript 不会被打开），对近期文件各用 `tail -c` 读取最后 512 KB 并调用一次 `jq`。脚本原本就依赖 jq。在含 378 个 transcript 的会话目录上实测每次渲染约 0.12 s。
+- 上下文长度：agent 最新一条 assistant 记录 `usage` 中的 input + cache-read + cache-creation token 数，即其最近一次 API 请求的 prompt 大小，由 API 返回。不显示百分比，因为 agent 的窗口大小只能由模型 id 推测。
+- 未设置 `refreshInterval` 时，Claude Code 只在主线程事件发生时重新运行命令，主线程等待期间看不到 agent 的进度。
+
+### Notes & Caveats
+- tmux / 独立进程后端的 teammate 作为独立会话运行、使用各自的 transcript，不会显示。
+- 在工具调用中途被停止的 subagent 会一直显示到时间窗口结束。
+- 不支持 `refreshInterval` 的旧版 Claude Code 保持原来的事件驱动渲染。
+- install.ps1 安装的是同一个 bash 脚本（没有 PowerShell 版状态栏），两个安装器都会获得此改动；安装器代码未改。
+- 状态栏无法跟随 agent 视图中当前选中的 agent：在 Claude Code 2.1.289 上，查看 subagent 时 stdin 内容不变（`transcript_path` 相同，也没有 agent 字段）。
+
 ## [4.2.4] - 2026-10-01
 
 ### Features
