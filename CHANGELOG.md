@@ -1,5 +1,26 @@
 # Changelog
 
+## [4.2.7] - 2026-10-05
+
+### Features
+- **Default-emoji-presentation symbols below U+1F300 count 2 cells.** The statusline width function now uses all East_Asian_Width W/F ranges of Unicode 15.1, including ✅ ❌ ⚡ ⭐ ✨ ⌛ ⌚ ⏩–⏳ ☔ ☕ ♈–♓ ⚽ ⛔ ❓ ➕–➗ ⬛ ⬜ ⭕ (U+231A–2B55), 🀄 🃏 🆎 🆑–🆚 🈁–🉥 (U+1F004–1F265), Hangul Jamo Extended-A, vertical and small form variants, and the Tangut/Kana supplements (U+16FE0–1B2FF). Previously these were counted 1 cell.
+- **Invalid UTF-8 no longer hides the following characters.** A lead byte is decoded only when it is C2–F4 and followed by the required continuation bytes (80–BF); otherwise that single byte counts 1 cell and decoding resumes at the next byte. `\xff\xfeab` now measures 4 instead of 1.
+- **OSC sequences are skipped.** `ESC ] … BEL` and `ESC ] … ESC \` (for example OSC 8 hyperlinks) occupy no cells; an unterminated sequence runs to the end of the string. Previously the payload, including the URL, was counted.
+- **Agent names are truncated by display width.** A name wider than 22 cells keeps the longest prefix of whole characters that fits in 21 cells, plus `~`. Previously the name was cut at 21 characters: a CJK name occupied up to 43 cells, and under `LC_ALL=C` the cut was made by byte, which could split a multibyte character. Backslashes in the name are now printed literally; previously `\n` or `\033` in a task description was interpreted by the final `printf %b`.
+
+### Design Rationale
+- The decoder moved into `_cells_scan`, which `visible_len` and the agent-name truncation share; with a maximum it also returns the longest prefix within that width, so the cut always falls on a character boundary independent of locale.
+- The symbol list in U+231A–2B55 is checked only inside three narrower ranges, so the bar characters `█ ░` (U+2588, U+2591) and `│ ⎇` do not evaluate it. All four characters have East_Asian_Width A or N and stay 1 cell.
+- CSI and OSC sequences are now skipped with parameter expansion (`${p%%[@-~]*}`) instead of one `printf` per byte. With the context-bar segment, `visible_len` takes about 1.8 ms per call on macOS bash 3.2, compared with 2.0 ms in 4.2.6; a full render with the reproduction input stays at about 78–98 ms on bash 3.2 and 5.x (run-to-run variation).
+- Checked against Python `unicodedata.east_asian_width` for every code point U+00A0–U+3FFFF: no W/F code point is counted 1 cell, on bash 3.2 and 5.x.
+
+### Notes & Caveats
+- Some assigned code points that are not W/F still count 2 cells because they lie inside the existing wide ranges: text-presentation symbols in U+1F300–1FAFF (for example 🌡 U+1F321, 🕯 U+1F56F), U+303F and the Yijing hexagrams U+4DC0–4DFF. This makes the line wrap earlier and does not cause overflow.
+- Terminals narrower than 22 columns still overflow: the line width floor stays at 20 cells, and a non-bar segment (a long directory name, model name or agent name) is never shortened. Claude Code truncates such lines itself.
+- Correction to the 4.2.6 entry: U+2600–27BF is no longer counted 1 cell; its EAW W characters count 2.
+- Correction to the 4.2.5 entry: agent names are truncated to 22 terminal cells, not 22 characters.
+- install.ps1 installs the same bash script, so both installers get the change; no installer code changed.
+
 ## [4.2.6] - 2026-10-05
 
 ### Features

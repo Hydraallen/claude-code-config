@@ -480,64 +480,120 @@ case "$RIGHT_MARGIN" in ''|*[!0-9]*) RIGHT_MARGIN=2 ;; esac
 LINE_W=$(( COLUMNS - RIGHT_MARGIN ))
 [ "$LINE_W" -lt 20 ] && LINE_W=20
 
-# visible_len: terminal cells occupied by a string with ANSI escapes.
+# _cells_scan STRING [MAX]: terminal cells occupied by STRING (escape
+# sequences already expanded), returned in CELLS_W. With MAX, CELLS_HEAD is
+# the longest prefix of whole characters that occupies at most MAX cells.
 # Decodes UTF-8 byte by byte under LC_ALL=C, so the result does not depend on
 # the user's locale, GNU `wc -L` (BSD wc -L counts bytes) or any external tool.
-# Wide (2 cells): Hangul Jamo, CJK, Hangul syllables, fullwidth forms,
-# emoji U+1F300-1FAFF, planes 2-3. Zero: combining marks, ZWSP/ZWJ/ZWNJ and
-# VS16 after a wide char (after a narrow one VS16 requests emoji
-# presentation, which most terminals draw 2 cells wide).
-visible_len() {
-    local LC_ALL=C s len i=0 w=0 b n cp prev=0
-    printf -v s '%b' "$1"
+# Skipped: CSI (ESC [ ... final byte) and OSC (ESC ] ... BEL or ESC \, e.g.
+# OSC 8 hyperlinks); an unterminated sequence runs to the end of the string.
+# A byte that does not start a valid UTF-8 sequence counts 1 cell.
+# Wide (2 cells): the East_Asian_Width W/F ranges of Unicode 15.1 (Hangul
+# Jamo, CJK, Hangul syllables, fullwidth forms, the emoji with default emoji
+# presentation in U+231A-2B55 and U+1F004-1F265, U+1F300-1FAFF, Tangut/Kana
+# supplements, planes 2-3). Zero: combining marks, ZWSP/ZWJ/ZWNJ and VS16
+# after a wide char (after a narrow one VS16 requests emoji presentation,
+# which most terminals draw 2 cells wide).
+_cells_scan() {
+    local LC_ALL=C s=$1 max=${2:--1} len i=0 j w=0 b n cp prev=0 cut=0 c p
     len=${#s}
     while (( i < len )); do
         printf -v b '%d' "'${s:i:1}"
         (( b < 0 && (b += 256), i++ ))
         if (( b == 27 )); then
-            # CSI: ESC [ parameters/intermediates, then a final byte @..~
-            if [ "${s:i:1}" = "[" ]; then
-                while (( ++i < len )); do
-                    printf -v b '%d' "'${s:i:1}"
-                    (( b >= 64 && b <= 126 )) && { i=$(( i + 1 )); break; }
-                done
+            c=${s:i:1}
+            if [[ $c == "[" ]]; then
+                # CSI: parameters/intermediates up to a final byte @..~
+                p=${s:i+1}; p=${p%%[@-~]*}
+                i=$(( i + ${#p} + 2 ))
+            elif [[ $c == "]" ]]; then
+                # OSC: ends at BEL or ST (ESC \); another ESC also ends it
+                # and is parsed as the next sequence.
+                p=${s:i+1}; p=${p%%[$'\a'$'\e']*}
+                i=$(( i + ${#p} + 1 ))
+                if [[ ${s:i:1} == $'\a' ]]; then
+                    i=$(( i + 1 ))
+                elif [[ ${s:i:2} == $'\e\\' ]]; then
+                    i=$(( i + 2 ))
+                fi
             fi
+            (( w <= max && (cut = i) ))
             continue
         fi
         if (( b < 128 )); then
-            (( b >= 32 && b != 127 && (w += 1, prev = 1) ))
-            continue
-        fi
-        if (( b >= 240 )); then
-            n=3; cp=$(( b & 7 ))
-        elif (( b >= 224 )); then
-            n=2; cp=$(( b & 15 ))
-        elif (( b >= 192 )); then
-            n=1; cp=$(( b & 31 ))
+            (( b >= 32 && b != 127 && (w += 1, prev = 1), w <= max && (cut = i) ))
         else
-            continue
-        fi
-        while (( n > 0 && i < len )); do
-            printf -v b '%d' "'${s:i:1}"
-            (( b < 0 && (b += 256) ))
-            cp=$(( (cp << 6) | (b & 63) ))
-            (( i++, n-- ))
-        done
-        if (( cp == 0xFE0F )); then
-            (( prev == 1 && (w += 1, prev = 2) ))
-        elif (( (cp >= 0x300 && cp <= 0x36F) || (cp >= 0x200B && cp <= 0x200D) )); then
-            :
-        elif (( (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0xA4CF)
-                || (cp >= 0xAC00 && cp <= 0xD7A3) || (cp >= 0xF900 && cp <= 0xFAFF)
-                || (cp >= 0xFE30 && cp <= 0xFE4F) || (cp >= 0xFF00 && cp <= 0xFF60)
-                || (cp >= 0xFFE0 && cp <= 0xFFE6) || (cp >= 0x1F300 && cp <= 0x1FAFF)
-                || (cp >= 0x20000 && cp <= 0x3FFFD) )); then
-            w=$(( w + 2 )); prev=2
-        else
-            w=$(( w + 1 )); prev=1
+            # Lead byte C2-F4 plus the number of continuation bytes it needs
+            if (( b >= 0xF0 && b <= 0xF4 )); then
+                n=3; cp=$(( b & 7 ))
+            elif (( b >= 0xE0 && b <= 0xEF )); then
+                n=2; cp=$(( b & 15 ))
+            elif (( b >= 0xC2 && b <= 0xDF )); then
+                n=1; cp=$(( b & 31 ))
+            else
+                n=-1
+            fi
+            j=$i
+            while (( n > 0 && j < len )); do
+                printf -v b '%d' "'${s:j:1}"
+                (( b < 0 && (b += 256) ))
+                (( b >= 0x80 && b <= 0xBF )) || break
+                (( cp = (cp << 6) | (b & 63), j++, n-- ))
+            done
+            if (( n != 0 )); then
+                # Invalid or truncated sequence: this byte alone, 1 cell
+                w=$(( w + 1 )); prev=1
+            else
+                i=$j
+                if (( cp == 0xFE0F )); then
+                    (( prev == 1 && (w += 1, prev = 2) ))
+                elif (( (cp >= 0x300 && cp <= 0x36F) || (cp >= 0x200B && cp <= 0x200D) )); then
+                    :
+                elif (( cp < 0x1100 )); then
+                    w=$(( w + 1 )); prev=1
+                elif (( (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0xA4CF)
+                        || (cp >= 0xA960 && cp <= 0xA97C) || (cp >= 0xAC00 && cp <= 0xD7A3)
+                        || (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFE10 && cp <= 0xFE19)
+                        || (cp >= 0xFE30 && cp <= 0xFE6B) || (cp >= 0xFF00 && cp <= 0xFF60)
+                        || (cp >= 0xFFE0 && cp <= 0xFFE6) || (cp >= 0x16FE0 && cp <= 0x1B2FF)
+                        || cp == 0x1F004 || cp == 0x1F0CF || cp == 0x1F18E
+                        || (cp >= 0x1F191 && cp <= 0x1F19A) || (cp >= 0x1F200 && cp <= 0x1F265)
+                        || (cp >= 0x1F300 && cp <= 0x1FAFF) || (cp >= 0x20000 && cp <= 0x3FFFD)
+                        || (cp >= 0x231A && cp <= 0x23F3
+                            && (cp <= 0x231B || cp == 0x2329 || cp == 0x232A
+                                || (cp >= 0x23E9 && cp <= 0x23EC) || cp == 0x23F0 || cp == 0x23F3))
+                        || cp == 0x25FD || cp == 0x25FE
+                        || (cp >= 0x2614 && cp <= 0x27BF
+                            && (cp == 0x2614 || cp == 0x2615 || (cp >= 0x2648 && cp <= 0x2653)
+                                || cp == 0x267F || cp == 0x2693 || cp == 0x26A1 || cp == 0x26AA
+                                || cp == 0x26AB || cp == 0x26BD || cp == 0x26BE || cp == 0x26C4
+                                || cp == 0x26C5 || cp == 0x26CE || cp == 0x26D4 || cp == 0x26EA
+                                || cp == 0x26F2 || cp == 0x26F3 || cp == 0x26F5 || cp == 0x26FA
+                                || cp == 0x26FD || cp == 0x2705 || cp == 0x270A || cp == 0x270B
+                                || cp == 0x2728 || cp == 0x274C || cp == 0x274E
+                                || (cp >= 0x2753 && cp <= 0x2755) || cp == 0x2757
+                                || (cp >= 0x2795 && cp <= 0x2797) || cp == 0x27B0 || cp == 0x27BF))
+                        || cp == 0x2B1B || cp == 0x2B1C || cp == 0x2B50 || cp == 0x2B55 )); then
+                    w=$(( w + 2 )); prev=2
+                else
+                    w=$(( w + 1 )); prev=1
+                fi
+            fi
+            (( w <= max && (cut = i) ))
         fi
     done
-    echo "$w"
+    CELLS_W=$w
+    (( max >= 0 )) && CELLS_HEAD=${s:0:cut}
+    return 0
+}
+
+# visible_len: terminal cells occupied by a string with backslash escapes
+# (\033, \xNN) as the segments are built; printed for $(...) callers.
+visible_len() {
+    local s
+    printf -v s '%b' "$1"
+    _cells_scan "$s"
+    echo "$CELLS_W"
 }
 
 # --- Colors ---
@@ -783,7 +839,13 @@ if [ "${#agent_rows[@]}" -gt 0 ]; then
     while IFS=$'\x1f' read -r _amt _aname _ateam _acolor _atok; do
         [ "$_shown" -ge "$AGENT_MAX_SHOWN" ] && break
         _shown=$(( _shown + 1 ))
-        [ "${#_aname}" -gt 22 ] && _aname="${_aname:0:21}~"
+        # At most 22 cells: longer names keep 21 cells plus "~". The cut is
+        # made by display width at a character boundary, so a CJK name is
+        # not 44 cells wide and LC_ALL=C cannot split a multibyte character.
+        _cells_scan "$_aname" 21
+        [ "$CELLS_W" -gt 22 ] && _aname="${CELLS_HEAD}~"
+        # The line is printed with printf %b; keep backslashes literal.
+        _aname=${_aname//\\/\\\\}
         if [ "$_ateam" = "1" ]; then
             _ac="\033[38;5;$(agent_color "$_acolor")m"
         else
