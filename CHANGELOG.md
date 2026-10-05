@@ -1,5 +1,25 @@
 # Changelog
 
+## [4.2.6] - 2026-10-05
+
+### Features
+- **Statusline width is measured in terminal cells.** `visible_len()` strips ANSI escapes and decodes UTF-8 in bash under `LC_ALL=C`, counting 2 cells for CJK, Hangul, fullwidth forms, emoji U+1F300–1FAFF and planes 2–3, 0 for combining marks, ZWSP/ZWJ and VS16 after a wide character, and 1 otherwise. Lines with the 🧠 / 📂 / 🐍 icons or a CJK agent name were previously measured several cells short, so Claude Code truncated them with `…`.
+- **Whole segments move to the next line.** The context and 5h bars are built at the full 20 cells; a segment that does not fit on the current line moves to the next line intact. A bar is narrowed (minimum 8 cells) only when its segment does not fit on a line by itself. Previously the bars shrank to fill the rest of the current line, so the wrap check always passed and the 5h segment was squeezed onto line 1 at widths of about 110–125 columns while line 2 had room.
+- **Right margin.** Lines are laid out to `COLUMNS - 2`; `CL_RIGHT_MARGIN` sets the number of cells kept free.
+- **Terminal width from `/dev/tty`.** After `COLUMNS` and the Linux `/proc` walk, the script tries `stty size < /dev/tty` before `tput cols`, which gives the width on macOS when the process has a controlling terminal.
+
+### Design Rationale
+- The width function is pure bash with no forks, so it behaves the same on GNU, BSD/macOS and Git Bash and does not depend on the user's locale. macOS `/usr/bin/wc -L` exists, but it returns 0 for input without a trailing newline and otherwise counts bytes, so the previous code always used the `${#stripped}` fallback (one cell per character).
+- Byte values come from `printf '%d' "'c"`; bash 3.2 returns them signed and they are corrected by +256.
+- U+2600–27BF is counted as 1 cell: the script's own icons do not use it and the block mixes narrow and wide characters. A narrow character followed by VS16 counts 2 cells, matching the emoji presentation most terminals use.
+- Measured on macOS bash 3.2 with the reproduction input (50 renders): about 105 ms per render before, about 82 ms after, because `visible_len` no longer spawns `sed`, `wc` and `tr`.
+
+### Notes & Caveats
+- A non-bar segment wider than the line (a long directory name) still overflows; a bar segment wider than the line at the 8-cell minimum also overflows.
+- Without a controlling terminal, `/dev/tty` fails to open immediately and the next method is used.
+- Correction to the 2.3.0 entry: macOS `wc -L` is available; it returns 0 without a trailing newline and counts bytes otherwise.
+- install.ps1 installs the same bash script, so both installers get the change; no installer code changed.
+
 ## [4.2.5] - 2026-10-04
 
 ### Features
@@ -962,7 +982,7 @@ Earlier releases: [Claude history](platforms/claude/CHANGELOG.previous.md) · [C
 
 ### Bug Fixes
 - **COLUMNS=0 in pipe context**: Claude Code passes empty/zero `COLUMNS` to statusline subprocess; now detected and falls back to fd probing.
-- **macOS `wc -L` fallback**: `visible_len()` falls back to `${#stripped}` on platforms where `wc -L` is unavailable (BSD/macOS).
+- **macOS `wc -L` fallback**: `visible_len()` falls back to `${#stripped}` when `wc -L` returns 0 or nothing. (Corrected in 4.2.6: BSD/macOS `wc -L` exists, but returns 0 for input without a trailing newline and counts bytes otherwise.)
 - **Negative bar sizing clamp**: When preceding segments exceed available space, adaptive bar sizing now correctly clamps instead of silently using full 20-char width.
 - **Width cache**: Segment widths cached in parallel array, reducing subshell forks from ~13 to ~7 per render.
 

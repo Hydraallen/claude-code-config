@@ -458,26 +458,85 @@ _get_term_width() {
         _pid=$(awk '{print $4}' /proc/"$_pid"/stat 2>/dev/null) || break
     done
 
-    # 3) Try tput cols as last resort before fallback
+    # 3) Controlling terminal (macOS has no /proc). Opening /dev/tty fails
+    # immediately when the process has none, so this cannot block.
+    c=$( { stty size < /dev/tty; } 2>/dev/null )
+    c="${c##* }"
+    [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -gt 0 ] && { echo "$c"; return; }
+
+    # 4) Try tput cols as last resort before fallback
     c=$(tput cols 2>/dev/null)
     [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -gt 0 ] && { echo "$c"; return; }
 
-    # 4) Fallback
+    # 5) Fallback
     echo 120
 }
 COLUMNS=$(_get_term_width)
 
-# visible_len: compute display width of a string with ANSI escapes
-# Strips escape codes, then uses wc -L for accurate multi-byte/emoji width
+# Cells kept free at the right edge; Claude Code truncates a line that
+# reaches the full width. CL_RIGHT_MARGIN overrides the default.
+RIGHT_MARGIN="${CL_RIGHT_MARGIN:-2}"
+case "$RIGHT_MARGIN" in ''|*[!0-9]*) RIGHT_MARGIN=2 ;; esac
+LINE_W=$(( COLUMNS - RIGHT_MARGIN ))
+[ "$LINE_W" -lt 20 ] && LINE_W=20
+
+# visible_len: terminal cells occupied by a string with ANSI escapes.
+# Decodes UTF-8 byte by byte under LC_ALL=C, so the result does not depend on
+# the user's locale, GNU `wc -L` (BSD wc -L counts bytes) or any external tool.
+# Wide (2 cells): Hangul Jamo, CJK, Hangul syllables, fullwidth forms,
+# emoji U+1F300-1FAFF, planes 2-3. Zero: combining marks, ZWSP/ZWJ/ZWNJ and
+# VS16 after a wide char (after a narrow one VS16 requests emoji
+# presentation, which most terminals draw 2 cells wide).
 visible_len() {
-    local stripped w
-    stripped=$(printf "%b" "$1" | sed $'s/\x1b\[[0-9;]*[a-zA-Z]//g')
-    # wc -L gives display width (handles CJK/emoji double-width) — GNU only
-    w=$(printf "%b" "$stripped" | wc -L 2>/dev/null | tr -d ' ')
-    # Fallback for macOS/BSD where wc -L is unavailable
-    if [ -z "$w" ] || [ "$w" -eq 0 ] 2>/dev/null; then
-        w=${#stripped}
-    fi
+    local LC_ALL=C s len i=0 w=0 b n cp prev=0
+    printf -v s '%b' "$1"
+    len=${#s}
+    while (( i < len )); do
+        printf -v b '%d' "'${s:i:1}"
+        (( b < 0 && (b += 256), i++ ))
+        if (( b == 27 )); then
+            # CSI: ESC [ parameters/intermediates, then a final byte @..~
+            if [ "${s:i:1}" = "[" ]; then
+                while (( ++i < len )); do
+                    printf -v b '%d' "'${s:i:1}"
+                    (( b >= 64 && b <= 126 )) && { i=$(( i + 1 )); break; }
+                done
+            fi
+            continue
+        fi
+        if (( b < 128 )); then
+            (( b >= 32 && b != 127 && (w += 1, prev = 1) ))
+            continue
+        fi
+        if (( b >= 240 )); then
+            n=3; cp=$(( b & 7 ))
+        elif (( b >= 224 )); then
+            n=2; cp=$(( b & 15 ))
+        elif (( b >= 192 )); then
+            n=1; cp=$(( b & 31 ))
+        else
+            continue
+        fi
+        while (( n > 0 && i < len )); do
+            printf -v b '%d' "'${s:i:1}"
+            (( b < 0 && (b += 256) ))
+            cp=$(( (cp << 6) | (b & 63) ))
+            (( i++, n-- ))
+        done
+        if (( cp == 0xFE0F )); then
+            (( prev == 1 && (w += 1, prev = 2) ))
+        elif (( (cp >= 0x300 && cp <= 0x36F) || (cp >= 0x200B && cp <= 0x200D) )); then
+            :
+        elif (( (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0xA4CF)
+                || (cp >= 0xAC00 && cp <= 0xD7A3) || (cp >= 0xF900 && cp <= 0xFAFF)
+                || (cp >= 0xFE30 && cp <= 0xFE4F) || (cp >= 0xFF00 && cp <= 0xFF60)
+                || (cp >= 0xFFE0 && cp <= 0xFFE6) || (cp >= 0x1F300 && cp <= 0x1FAFF)
+                || (cp >= 0x20000 && cp <= 0x3FFFD) )); then
+            w=$(( w + 2 )); prev=2
+        else
+            w=$(( w + 1 )); prev=1
+        fi
+    done
     echo "$w"
 }
 
@@ -592,34 +651,29 @@ if [ -n "$git_branch" ]; then
     segments+=("${C_GIT}${ICON_GIT} ${git_branch}${C_R}")
 fi
 
-# Pre-compute widths of all segments (cached for reuse)
+# Widths of all segments, and for bar segments the bar kind so the wrap pass
+# can rebuild them narrower.
 _seg_widths=()
-_pre_w=0
+_seg_bars=()
 for _s in "${segments[@]}"; do
     local_w=$(visible_len "$_s")
-    local_w=${local_w:-0}
-    _seg_widths+=("$local_w")
-    [ "$_pre_w" -gt 0 ] && _pre_w=$(( _pre_w + sep_visible_w ))
-    _pre_w=$(( _pre_w + local_w ))
+    _seg_widths+=("${local_w:-0}")
+    _seg_bars+=("")
 done
 
-# Segment 5: Context bar (adaptive width)
+# Segment 5: Context bar
 ctx_pct_int=$(printf "%.0f" "$ctx_pct" 2>/dev/null || echo "$ctx_pct")
 ctx_fmt=$(fmt_ctx "$ctx_size")
-# Estimate overhead: "context " (8) + " " (1) + pct "XX%" (3-4) + " " (1) + ctx_fmt (~4) ≈ 18
-ctx_label_overhead=18
-ctx_bar_w=$BAR_W
-ctx_remaining=$(( COLUMNS - _pre_w - sep_visible_w - ctx_label_overhead ))
-if [ "$ctx_remaining" -lt "$BAR_W" ]; then
-    ctx_bar_w=$(( ctx_remaining >= 8 ? ctx_remaining : BAR_W ))
-fi
-ctx_bar=$(build_bar "$ctx_pct_int" "$ctx_bar_w")
-_ctx_seg="${C_LABEL}context${C_R} ${ctx_bar} ${C_LABEL}${ctx_fmt}${C_R}"
+ctx_segment() {
+    printf '%s' "${C_LABEL}context${C_R} $(build_bar "$ctx_pct_int" "$1") ${C_LABEL}${ctx_fmt}${C_R}"
+}
+_ctx_seg=$(ctx_segment "$BAR_W")
 segments+=("$_ctx_seg")
 _ctx_w=$(visible_len "$_ctx_seg"); _ctx_w=${_ctx_w:-0}
 _seg_widths+=("$_ctx_w")
+_seg_bars+=("ctx")
 
-# Segment 6: 5-hour usage bar (adaptive width)
+# Segment 6: 5-hour usage bar
 if [ -n "$usage_5h" ]; then
     # `printf %.0f` emits a partial "0" *before* failing on a bad operand, so
     # its output is only trustworthy after a second integer check.
@@ -638,28 +692,15 @@ if [ -n "$usage_pct" ]; then
     # distinguishable; a bare "5h" is always the native Anthropic quota.
     usage_label="5h"
     [ "$USAGE_BACKEND" = "glm" ] && usage_label="glm 5h"
-    # Overhead: "5h " (3) + " " (1) + pct "XX%" (3-4) + " " (1) + resets (~5) ≈ 14
-    usage_label_overhead=$(( 14 + ${#usage_label} - 2 ))
-    usage_bar_w=$BAR_W
-
-    # Re-compute cumulative width including segment 5 (use cached widths + new segment)
-    _pre_w=0
-    for _w in "${_seg_widths[@]}"; do
-        [ "$_pre_w" -gt 0 ] && _pre_w=$(( _pre_w + sep_visible_w ))
-        _pre_w=$(( _pre_w + _w ))
-    done
-
-    usage_remaining=$(( COLUMNS - _pre_w - sep_visible_w - usage_label_overhead ))
-    if [ "$usage_remaining" -lt "$BAR_W" ]; then
-        usage_bar_w=$(( usage_remaining >= 8 ? usage_remaining : BAR_W ))
-    fi
-
-    usage_bar=$(build_bar "$usage_pct" "$usage_bar_w")
-    usage_seg="${C_LABEL}${usage_label}${C_R} ${usage_bar}"
-    [ -n "$resets_fmt" ] && usage_seg+=" ${C_LABEL}${resets_fmt}${C_R}"
+    usage_segment() {
+        printf '%s' "${C_LABEL}${usage_label}${C_R} $(build_bar "$usage_pct" "$1")"
+        [ -n "$resets_fmt" ] && printf '%s' " ${C_LABEL}${resets_fmt}${C_R}"
+    }
+    usage_seg=$(usage_segment "$BAR_W")
     segments+=("$usage_seg")
     _usage_w=$(visible_len "$usage_seg"); _usage_w=${_usage_w:-0}
     _seg_widths+=("$_usage_w")
+    _seg_bars+=("usage")
 fi
 
 # Segment 7+: running subagents and in-process teammates.
@@ -737,6 +778,7 @@ if [ "${#agent_rows[@]}" -gt 0 ]; then
     _n_agents=${#agent_rows[@]}
     segments+=("${C_LABEL}agents${C_R} ${C_AGENT}${_n_agents}${C_R}")
     _seg_widths+=("$(visible_len "${segments[${#segments[@]}-1]}")")
+    _seg_bars+=("")
     _shown=0
     while IFS=$'\x1f' read -r _amt _aname _ateam _acolor _atok; do
         [ "$_shown" -ge "$AGENT_MAX_SHOWN" ] && break
@@ -754,6 +796,7 @@ if [ "${#agent_rows[@]}" -gt 0 ]; then
         esac
         segments+=("$_aseg")
         _seg_widths+=("$(visible_len "$_aseg")")
+        _seg_bars+=("")
     done <<< "$_sorted"
 fi
 
@@ -763,14 +806,24 @@ sep_str="${C_SEP} \xe2\x94\x82 ${C_R}"
 out=""
 line_w=0
 
+# Segments keep their full BAR_W bars and move whole to the next line when
+# they do not fit. Only a bar segment wider than a line on its own gets a
+# narrower bar (min 8 cells).
 _seg_idx=0
 for seg in "${segments[@]}"; do
     seg_w=${_seg_widths[$_seg_idx]:-0}
+    _bar_kind=${_seg_bars[$_seg_idx]}
     _seg_idx=$(( _seg_idx + 1 ))
+    if [ -n "$_bar_kind" ] && [ "$seg_w" -gt "$LINE_W" ]; then
+        _bar_w=$(( BAR_W - (seg_w - LINE_W) ))
+        [ "$_bar_w" -lt 8 ] && _bar_w=8
+        seg=$("${_bar_kind}_segment" "$_bar_w")
+        seg_w=$(( seg_w - BAR_W + _bar_w ))
+    fi
     needed=$seg_w
     [ "$line_w" -gt 0 ] && needed=$(( seg_w + sep_visible_w ))
 
-    if [ "$line_w" -gt 0 ] && [ $(( line_w + needed )) -gt "$COLUMNS" ]; then
+    if [ "$line_w" -gt 0 ] && [ $(( line_w + needed )) -gt "$LINE_W" ]; then
         # Wrap to next line
         out+="\n"
         line_w=0
