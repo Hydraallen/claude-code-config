@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.2.9] - 2026-10-07
+
+### Features
+- **The `or` (OpenRouter DeepSeek) profile declares the `thinking` capability.** `profiles/or.json` sets `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS,FABLE}_MODEL_SUPPORTED_CAPABILITIES` to `thinking`, so Claude Code sends the `thinking` parameter to deepseek-v4-pro / deepseek-v4-flash.
+
+### Design Rationale
+- Without the capability, Claude Code sent no `thinking` parameter. In one `cl_or_auto` session DeepSeek V4 Pro produced only ` You have 15000000 tokens left.\n</system-reminder>` (16 output tokens, 0 thinking tokens, 86K input tokens) and ended the turn: it continued the total_tokens reminder that Claude Code appends to the user turn instead of answering.
+- Tested against `/api/v1/messages` with `thinking: {type: "enabled", budget_tokens: 2000}`: both models through `ds-preset` return a `thinking` block followed by a `text` block. OpenRouter's model list includes `reasoning` and `reasoning_effort` in `supported_parameters` for both.
+- Only `thinking` is added. `effort` / `xhigh_effort` / `max_effort` are untested on this route; `adaptive_thinking` / `interleaved_thinking` have no DeepSeek counterpart.
+
+### Notes & Caveats
+- Multi-turn tool use with thinking enabled has not been verified. If it returns 400, remove the four `_SUPPORTED_CAPABILITIES` keys from `~/.claude/profiles/or.json`.
+- `install.sh` copies `profiles/*.json` unchanged, so the installer code is unchanged; re-running `bash install.sh --only backend-or` applies the new template and keeps the API key. install.ps1 does not install model backends.
+
 ## [4.2.8] - 2026-10-07
 
 ### Features

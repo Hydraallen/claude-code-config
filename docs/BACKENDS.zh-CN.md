@@ -178,16 +178,21 @@ OpenRouter 用 `Authorization: Bearer` 鉴权，而 Claude Code 只在 `ANTHROPI
 > **`deepseek/deepseek-reasoner` 在 OpenRouter 上不存在。** 那个 id 属于 DeepSeek 官方
 > API。在这里用它会 404。
 
-#### 刻意没有 `_SUPPORTED_CAPABILITIES`
+#### `_SUPPORTED_CAPABILITIES`：只有 `thinking`
 
-`glm.json` 和 `gpt.json` 里那串
-`effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking`
-在这里是刻意缺席的。它们会让 Claude Code 发出 Anthropic 的 thinking/effort 参数，
-而 OpenRouter 必须把这些翻译成 DeepSeek 的 `reasoning` 字段；其中 `adaptive_thinking` /
-`interleaved_thinking` 在 DeepSeek 侧根本没有对应物 —— 这是零星 400 的合理来源。
-如果你想要 reasoning 控制，请一次加回一个键，每加一个测一次。
+每个槽位都带 `..._SUPPORTED_CAPABILITIES: "thinking"`。没有这个键时 Claude Code 不会发送
+`thinking` 参数，DeepSeek 不经推理直接作答；在这种模式下曾观察到它续写消息末尾的
+`<system-reminder>` 文本（`You have 15000000 tokens left. </system-reminder>`），然后
+结束本轮，既没有回答也没有工具调用。
 
-#### Best-effort，且未经实测
+2026-10-07 对 `/api/v1/messages` 实测：`deepseek-v4-pro` 与 `deepseek-v4-flash` 经
+`ds-preset`，在 `thinking: {type: "enabled", budget_tokens: 2000}` 下都返回一个 `thinking`
+块和一个 `text` 块。开启 thinking 后的多轮工具调用尚未验证；如果返回 400，删除这四个键。
+
+`glm.json` 与 `gpt.json` 带有的 `effort`、`xhigh_effort`、`max_effort` 在测试前不加入。
+`adaptive_thinking` / `interleaved_thinking` 在 DeepSeek 侧没有对应功能，保持不加。
+
+#### Best-effort
 
 OpenRouter 官方文档写的是：其原生 Anthropic 端点
 

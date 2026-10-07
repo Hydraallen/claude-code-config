@@ -206,17 +206,25 @@ probes), so it is pointed at the cheaper model.
 > **`deepseek/deepseek-reasoner` does not exist on OpenRouter.** That id belongs
 > to DeepSeek's own API. Using it here 404s.
 
-#### No `_SUPPORTED_CAPABILITIES` keys
+#### `_SUPPORTED_CAPABILITIES`: `thinking` only
 
-The `effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking`
-strings that `glm.json` and `gpt.json` carry are intentionally absent. They make
-Claude Code emit Anthropic thinking/effort parameters that OpenRouter has to
-translate into DeepSeek's `reasoning` field, and `adaptive_thinking` /
-`interleaved_thinking` have no DeepSeek counterpart at all — a plausible source
-of sporadic 400s. If you want reasoning controls, add them back one key at a
-time and test after each.
+Every slot carries `..._SUPPORTED_CAPABILITIES: "thinking"`. Without it Claude
+Code never sends the `thinking` parameter, so DeepSeek answers with no reasoning.
+In that mode it has been observed to continue the trailing `<system-reminder>`
+text (`You have 15000000 tokens left. </system-reminder>`) and end the turn with
+no answer and no tool call.
 
-#### Best-effort, and untested
+Tested on 2026-10-07 against `/api/v1/messages`: `deepseek-v4-pro` and
+`deepseek-v4-flash` through `ds-preset` both return a `thinking` block followed by
+a `text` block for `thinking: {type: "enabled", budget_tokens: 2000}`.
+Multi-turn tool use with thinking enabled has not been verified; if it returns
+400, remove the four keys.
+
+`effort`, `xhigh_effort` and `max_effort` (which `glm.json` and `gpt.json` carry)
+are left out until tested. `adaptive_thinking` / `interleaved_thinking` have no
+DeepSeek counterpart and stay out.
+
+#### Best-effort
 
 OpenRouter's own documentation says the native Anthropic endpoint
 

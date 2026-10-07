@@ -2,6 +2,20 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.2.9] - 2026-10-07
+
+### Features
+- **`or`（OpenRouter DeepSeek）profile 声明 `thinking` 能力。** `profiles/or.json` 把 `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS,FABLE}_MODEL_SUPPORTED_CAPABILITIES` 设为 `thinking`，Claude Code 会向 deepseek-v4-pro / deepseek-v4-flash 发送 `thinking` 参数。
+
+### Design Rationale
+- 不声明该能力时，Claude Code 不发送 `thinking` 参数。在一次 `cl_or_auto` 会话中，DeepSeek V4 Pro 只输出了 ` You have 15000000 tokens left.\n</system-reminder>`（输出 16 token，thinking 0 token，输入 86K token）就结束了本轮：它续写了 Claude Code 附加在用户消息后的 total_tokens 提醒，而没有回答问题。
+- 用 `thinking: {type: "enabled", budget_tokens: 2000}` 实测 `/api/v1/messages`：两个模型经 `ds-preset` 都返回一个 `thinking` 块和一个 `text` 块。OpenRouter 模型列表中两者的 `supported_parameters` 都包含 `reasoning` 与 `reasoning_effort`。
+- 只加入 `thinking`。`effort` / `xhigh_effort` / `max_effort` 在这条路由上未测试；`adaptive_thinking` / `interleaved_thinking` 在 DeepSeek 侧没有对应功能。
+
+### Notes & Caveats
+- 开启 thinking 后的多轮工具调用尚未验证。如果返回 400，从 `~/.claude/profiles/or.json` 删除这四个 `_SUPPORTED_CAPABILITIES` 键。
+- `install.sh` 原样复制 `profiles/*.json`，安装器代码不变；重新运行 `bash install.sh --only backend-or` 即可应用新模板并保留 API key。install.ps1 不安装模型后端。
+
 ## [4.2.8] - 2026-10-07
 
 ### Features
