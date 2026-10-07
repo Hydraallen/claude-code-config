@@ -102,7 +102,7 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 | **Base settings** | [本仓库](platforms/codex/README.md#configuration) | 局部合并模型、推理与运行设置 | 模板 ★ | 模板 ★ |
 | **Permissions** | [本仓库](platforms/codex/README.md#configuration) | 用户选择可信环境后，单独配置高自主权限 | 模板 ★ | 模板 ★ |
 | **Writing style rule** | [本仓库](platforms/claude/README.md#configuration) | 完整英文写作要求与示例，替代原 Common rules | 规则 ★ | — |
-| **StatusLine** | [本仓库](platforms/claude/README.md#configuration) | Claude 渐变上下文/用量栏（Anthropic / GLM 5h 额度）与字体；Codex 原生状态栏 | 模板 ★ | 模板 ★ |
+| **StatusLine** | [本仓库](platforms/claude/README.md#configuration) | Claude 渐变上下文/用量栏（Anthropic / GLM 5h 与每周额度）与字体；Codex 原生状态栏 | 模板 ★ | 模板 ★ |
 | **Lessons** | [本仓库](platforms/codex/README.md#configuration) | 独立空白全局记录及记忆规则，保留真实纠错历史 | 模板 ★ | 模板 ★ |
 | **Search agent** *（fork）* | [本仓库](agents/search.md) | Jeff，只读网络搜索 agent | 脚本安装器 ★ | — |
 | **Shell wrapper** *（fork）* | [本仓库](docs/BACKENDS.zh-CN.md) | `cl` / `cl_auto` / `cl_switch` 启动器，每个 profile 生成一个 `cl_<backend>`，并附自定义系统提示 | 脚本安装器 ★ | — |

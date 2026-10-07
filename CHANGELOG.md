@@ -1,5 +1,24 @@
 # Changelog
 
+## [4.2.8] - 2026-10-07
+
+### Features
+- **The statusline shows the weekly quota after the 5h quota.** A `7d` segment (`glm 7d` on the GLM Coding Plan) follows the `5h` segment, with the same gradient bar, the same percentage colours (40 / 65 / 85%) and the time until the window resets: `5h █████░░░░░░░░░ 37% 2h7m │ 7d ███████████░░░ 82% 3d20h`. Reset times of 24h or more are shown as `XdYh`; shorter ones keep `XhYm` / `Ym`.
+- **Bars are 10 cells wide instead of 20.** This applies to the context, 5h and 7d bars (`BAR_W`). A bar segment wider than a line on its own is still narrowed to no less than 8 cells.
+
+### Design Rationale
+- No extra request is made. On Anthropic, `api.anthropic.com/api/oauth/usage` already returns a `seven_day` object with the same shape as `five_hour`, and the raw response was already cached; the statusline now also reads `seven_day` from it. On GLM, `/api/monitor/usage/quota/limit` returns two `TOKENS_LIMIT` entries; on open.bigmodel.cn they carry `unit: 3, number: 5` (5h) and `unit: 6, number: 1` (weekly). A third entry, `TIME_LIMIT` (`unit: 5`), is a separate tool-call quota and is ignored.
+- GLM window selection: if any entry carries a window's `unit`/`number` tag, only tagged entries count for that window, and the tagged entry must also reset within 6h (5h window) or within (0, 169h] (weekly window). If no entry carries the tag, the reset-time bound alone is used: the 5h window is the only entry resetting within 6h, and the weekly window is the only entry resetting in (6h, 169h]. A window is emitted only when exactly one candidate remains.
+- The tags also identify the 5h window during the last 6h before the weekly reset, when both entries reset within 6h. In 4.2.7 the 5h segment was blank for that period.
+- The two windows are stored and validated independently in the cache (`five_hour`, `seven_day`). A missing, null, non-object or non-numeric weekly window removes only the 7d segment. A GLM response with neither window counts as a failed fetch, as before.
+- The cache is read with one `jq` call for both windows; a 4.2.7 GLM cache that has only `five_hour` renders the 5h segment until the next refresh adds `seven_day`.
+
+### Notes & Caveats
+- Zhipu has not documented `unit` / `number`. If they are renamed, selection falls back to the reset-time bound, which leaves both GLM segments blank for about 6h of every 168h.
+- With the default segments the full line is about 85 columns, so all three bars usually fit on one line at 100 columns; extra segments (git, venv, agents) push the 7d segment to the next line on narrower terminals.
+- Until every running Claude Code session uses 4.2.8, a 4.2.7 statusline in another terminal on the same GLM key rewrites the shared cache without `seven_day`, so the `glm 7d` segment can disappear until the next 4.2.8 refresh (up to 600s). Reinstalling updates `~/.claude/hooks/statusline.sh` for all sessions.
+- install.ps1 installs the same bash script, so both installers get the change; installer code changed only in the StatusLine description.
+
 ## [4.2.7] - 2026-10-05
 
 ### Features

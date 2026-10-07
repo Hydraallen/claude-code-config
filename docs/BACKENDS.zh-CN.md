@@ -105,7 +105,7 @@ glm-5.3 的 3 倍；原生多模态，思考不可关闭）。`glm-5-turbo` 和 
 
 文档：<https://docs.bigmodel.cn/cn/coding-plan/tool/claude>
 
-状态栏也会读这个后端的 5h 额度，见下方[状态栏里的额度](#状态栏里的额度)。
+状态栏也会读这个后端的 5h 与每周额度，见下方[状态栏里的额度](#状态栏里的额度)。
 
 ### `or` —— OpenRouter（直连）
 
@@ -200,7 +200,7 @@ aren't supported through the native endpoint"。这是**不保证**，不是 API
 `tool_use` 往返会按上文所述失败；其他 provider 未经验证。如果它表现异常，先查工具调用和
 实际服务的 provider（OpenRouter → Logs）。
 
-这个后端没有 5h 额度条，见下方[状态栏里的额度](#状态栏里的额度)。
+这个后端没有额度条（5h 与每周均无），见下方[状态栏里的额度](#状态栏里的额度)。
 
 文档：<https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration>
 
@@ -605,18 +605,23 @@ v3 的路由**不再是**老 v1 那套 `default` / `background` / `think` / `lon
 
 ## 状态栏里的额度
 
-`hooks/statusline.sh` 会渲染当前终端**实际所用后端**的 5 小时额度条。后端由
-`$ANTHROPIC_BASE_URL` 推导，而这个变量是启动器按 shell 导出的，所以两个终端跑两个
-后端时会同时显示各自的数字，互不干扰：
+`hooks/statusline.sh` 会渲染当前终端**实际所用后端**的 5 小时额度条，其后是每周（7 天）
+额度条。后端由 `$ANTHROPIC_BASE_URL` 推导，而这个变量是启动器按 shell 导出的，所以两个
+终端跑两个后端时会同时显示各自的数字，互不干扰：
 
-| `$ANTHROPIC_BASE_URL`           | 标签      | 数据来源                                                        | 刷新间隔 |
-| ------------------------------- | -------- | -------------------------------------------------------------- | ------- |
-| 未设置（`claude` profile）       | `5h`     | `api.anthropic.com/api/oauth/usage`，OAuth token                | 60 秒   |
-| `*bigmodel.cn*` / `*z.ai*`      | `glm 5h` | `{host}/api/monitor/usage/quota/limit`，`$ANTHROPIC_AUTH_TOKEN` | 600 秒  |
-| 其他（`or`、`gpt`、`ccr` 等）    | —        | 没有可用的额度端点，整段不渲染                                    | —       |
+| `$ANTHROPIC_BASE_URL`           | 标签                | 数据来源                                                        | 刷新间隔 |
+| ------------------------------- | ------------------ | -------------------------------------------------------------- | ------- |
+| 未设置（`claude` profile）       | `5h`、`7d`         | `api.anthropic.com/api/oauth/usage`，OAuth token                | 60 秒   |
+| `*bigmodel.cn*` / `*z.ai*`      | `glm 5h`、`glm 7d` | `{host}/api/monitor/usage/quota/limit`，`$ANTHROPIC_AUTH_TOKEN` | 600 秒  |
+| 其他（`or`、`gpt`、`ccr` 等）    | —                  | 没有可用的额度端点，两段都不渲染                                  | —       |
 
-进度条显示的是**已用**百分比，后面的时间是窗口重置时刻。GLM 的窗口是滚动的 —— 从开启
-窗口的那次请求起五小时后重置，而不是按整点 —— 所以重置时间取自接口返回值，不在本地推算。
+每个进度条显示的是**已用**百分比，后面的时间是该窗口的重置时刻（不足 24 小时显示
+`XhYm`，24 小时及以上显示 `XdYh`）。两个窗口来自同一次请求：Anthropic 取返回中的
+`five_hour` 与 `seven_day` 对象；GLM 取 `unit: 3, number: 5`（5 小时）与
+`unit: 6, number: 1`（每周）的 `TOKENS_LIMIT` 条目，若缺少这两个字段，则只按重置时间
+区分（6 小时内，以及 6–169 小时）。GLM 的窗口是滚动的 —— 5 小时窗口从开启它的那次请求起
+五小时后重置，而不是按整点 —— 所以重置时间取自接口返回值，不在本地推算。某个窗口缺失或
+格式不对时，只去掉对应的那一段。
 
 说明：
 

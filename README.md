@@ -102,7 +102,7 @@ The tables retain the original categories and merge the Claude and Codex capabil
 | **Base settings** | [Repository](platforms/codex/README.md#configuration) | Partially merge model, reasoning and runtime settings | Template ★ | Template ★ |
 | **Permissions** | [Repository](platforms/codex/README.md#configuration) | Optional high-autonomy permissions for a user-selected trusted environment | Template ★ | Template ★ |
 | **Writing style rule** | [Repository](platforms/claude/README.md#configuration) | Complete English writing requirements and examples; replaces the previous common rules | Rule ★ | — |
-| **StatusLine** | [Repository](platforms/claude/README.md#configuration) | Claude gradient context/usage bar (Anthropic / GLM 5h quota) and fonts; Codex native footer | Template ★ | Template ★ |
+| **StatusLine** | [Repository](platforms/claude/README.md#configuration) | Claude gradient context/usage bar (Anthropic / GLM 5h and weekly quota) and fonts; Codex native footer | Template ★ | Template ★ |
 | **Lessons** | [Repository](platforms/codex/README.md#configuration) | Independent blank global logs and memory routing; preserve real corrections | Template ★ | Template ★ |
 | **Search agent** *(fork)* | [Repository](agents/search.md) | Jeff, a read-only web research agent | Script installer ★ | — |
 | **Shell wrapper** *(fork)* | [Repository](docs/BACKENDS.md) | `cl` / `cl_auto` / `cl_switch` launchers plus a `cl_<backend>` per profile and a custom system prompt | Script installer ★ | — |

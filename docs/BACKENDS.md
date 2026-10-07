@@ -117,7 +117,7 @@ and it would go out on the wire.
 
 Docs: <https://docs.bigmodel.cn/cn/coding-plan/tool/claude>
 
-The statusline reads this backend's 5h quota too — see
+The statusline reads this backend's 5h and weekly quota too — see
 [Quota in the statusline](#quota-in-the-statusline) below.
 
 ### `or` — OpenRouter (direct)
@@ -231,7 +231,7 @@ StreamLake, `tool_use` round-trips failed as described above; other providers
 are unverified. If it misbehaves, check tool calls and the serving provider
 (OpenRouter → Logs) first.
 
-There is no 5h quota bar for this backend — see
+There is no quota bar (5h or weekly) for this backend — see
 [Quota in the statusline](#quota-in-the-statusline) below.
 
 Docs: <https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration>
@@ -756,21 +756,27 @@ once at least one model has a **Description** filled in on the **Models** page.
 
 ## Quota in the statusline
 
-`hooks/statusline.sh` renders a 5-hour quota bar for the backend the terminal is
-actually on. It picks the backend from `$ANTHROPIC_BASE_URL`, which the launcher
-exports per shell, so two terminals on two backends show two different numbers at
-the same time without interfering:
+`hooks/statusline.sh` renders a 5-hour quota bar followed by a weekly (7-day)
+quota bar for the backend the terminal is actually on. It picks the backend from
+`$ANTHROPIC_BASE_URL`, which the launcher exports per shell, so two terminals on
+two backends show two different numbers at the same time without interfering:
 
-| `$ANTHROPIC_BASE_URL`            | Label    | Source                                              | Refresh |
-| -------------------------------- | -------- | --------------------------------------------------- | ------- |
-| unset (the `claude` profile)     | `5h`     | `api.anthropic.com/api/oauth/usage`, OAuth token     | 60s     |
-| `*bigmodel.cn*` / `*z.ai*`       | `glm 5h` | `{host}/api/monitor/usage/quota/limit`, `$ANTHROPIC_AUTH_TOKEN` | 600s |
-| anything else (`or`, `gpt`, `ccr`, …) | —   | no quota endpoint; the segment is not rendered       | —       |
+| `$ANTHROPIC_BASE_URL`            | Labels             | Source                                              | Refresh |
+| -------------------------------- | ------------------ | --------------------------------------------------- | ------- |
+| unset (the `claude` profile)     | `5h`, `7d`         | `api.anthropic.com/api/oauth/usage`, OAuth token     | 60s     |
+| `*bigmodel.cn*` / `*z.ai*`       | `glm 5h`, `glm 7d` | `{host}/api/monitor/usage/quota/limit`, `$ANTHROPIC_AUTH_TOKEN` | 600s |
+| anything else (`or`, `gpt`, `ccr`, …) | —             | no quota endpoint; neither segment is rendered       | —       |
 
-The bar shows the **used** percentage, and the trailing time is when the window
-resets. GLM's window is rolling — it resets five hours after the request that
-opened it, not on a clock boundary — so the reset time comes from the API rather
-than being computed locally.
+Each bar shows the **used** percentage, and the trailing time is when that window
+resets (`XhYm` below 24h, `XdYh` from 24h on). Both windows come from the same
+request. On Anthropic they are the response's `five_hour` and `seven_day`
+objects. On GLM they are the `TOKENS_LIMIT` entries tagged `unit: 3, number: 5`
+(5h) and `unit: 6, number: 1` (weekly); if those tags are missing, the windows
+are told apart by reset time alone (within 6h, and 6h–169h). GLM's windows are
+rolling — the 5h window resets five hours after the request that opened it, not
+on a clock boundary — so the reset times come from the API rather than being
+computed locally. Each segment is dropped on its own when its window is missing
+or malformed.
 
 Notes:
 

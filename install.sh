@@ -1087,7 +1087,7 @@ load_menu_groups() {
     MENU_GROUP_ITEMS+=("CLAUDE.md|Global instructions template|1|claude-md
 settings.json|Smart-merged Claude Code settings|1|settings
 Writing style rule|Complete English writing rule (rules/writing-style.md)|1|rules-writing-style
-StatusLine|Gradient bars + Anthropic/GLM 5h quota|1|statusline
+StatusLine|Gradient bars + Anthropic/GLM 5h/7d quota|1|statusline
 Lessons|lessons.md template + SessionStart hook|1|lessons
 Search agent|Jeff read-only web search agent|1|agents
 Shell wrapper|cl/cl_auto zsh functions + system prompt|1|shell-wrapper

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Claude Code status line — gradient progress bars
-# Shows: model, dir, git branch, context window, 5h usage (Anthropic or GLM),
-# running subagents / in-process teammates
+# Shows: model, dir, git branch, context window, 5h and weekly (7d) usage
+# (Anthropic or GLM), running subagents / in-process teammates
 
 # Cross-platform home directory (Windows $HOME may be wrong)
 _HOME="${USERPROFILE:-$HOME}"
@@ -74,7 +74,7 @@ else
     ICON_GIT="br:"
 fi
 
-# --- 5-hour usage from API (non-blocking, async refresh) ---
+# --- 5-hour and weekly usage from API (non-blocking, async refresh) ---
 # Strategy: statusline ONLY reads from cache (never blocks on network).
 # If cache is stale, a background process refreshes it for next render.
 #
@@ -165,6 +165,9 @@ esac
 usage_5h=""
 usage_resets=""
 usage_resets_epoch=""
+usage_7d=""
+usage_7d_resets=""
+usage_7d_resets_epoch=""
 
 # Stale threshold: a fetch is curl --max-time 5 plus a keychain/powershell
 # lookup, so it finishes well inside 120s on any healthy machine. Anything
@@ -328,42 +331,66 @@ fetch_glm_usage() {
 
     norm=""
     if [ "$http_code" = "200" ] && [ -s "$raw" ]; then
-        # Several TOKENS_LIMIT windows are returned (5h plus longer ones).
-        # Zhipu encodes the window size inconsistently across its own clients,
-        # so no `unit`/`duration`/`window` field can be trusted to exist or to
-        # keep its spelling — reading one would break silently the moment the
-        # response is reshaped. What can be relied on is a bound that holds by
-        # construction: the 5h window's next reset is always within 5h of now.
+        # Several TOKENS_LIMIT windows are returned. Observed on
+        # open.bigmodel.cn (2026-10): {unit:3, number:5} is the 5h window and
+        # {unit:6, number:1} the weekly one (a TIME_LIMIT entry is a separate
+        # tool-call quota and is ignored). Zhipu has not documented these
+        # fields and encodes the window size inconsistently across its own
+        # clients, so they are used only together with a bound on the reset
+        # time, which holds by construction:
         #
-        # So: keep only windows resetting within now+6h (an hour of slack for
-        # clock skew), and identify the 5h window only when exactly one
-        # candidate survives. "Take the soonest" is deliberately NOT used: a
-        # longer window in the last minutes before its own reset also passes
-        # the bound and would then be relabelled as the 5h window, showing a
-        # confidently wrong number. Nothing in the response distinguishes the
-        # two at that point, so the ambiguous case renders nothing at all — a
-        # missing segment is recoverable, a wrong percentage is not. For a 5h
-        # + weekly pair this blanks roughly 6h out of every 168h.
+        #   5h window:     resets within now+6h   (an hour of slack for skew)
+        #   weekly window: resets in (0, now+169h]
+        #
+        # Selection, per window and independently of the other:
+        #   1. If any entry carries the window's unit/number tag, only tagged
+        #      entries are considered, and the tagged one must pass the bound.
+        #      This also separates the two windows during the last 6h before
+        #      the weekly reset, when both reset within 6h.
+        #   2. If no entry carries the tag (the fields are missing or were
+        #      renamed), fall back to the bound alone: the 5h window is the
+        #      only entry resetting within 6h (an entry tagged weekly is
+        #      excluded), the weekly window is the only entry resetting in
+        #      (6h, 169h].
+        # Either way a window is emitted only when exactly one candidate is
+        # left. "Take the soonest" is deliberately NOT used: a longer window in
+        # its last hours also passes the 5h bound and would be relabelled,
+        # showing a wrong number. Without tags the ambiguous case renders
+        # nothing — a missing segment is recoverable, a wrong percentage is
+        # not — which blanks both segments roughly 6h out of every 168h.
         #
         # nextResetTime is a rolling deadline in milliseconds; it must be taken
         # from the response rather than computed from a clock boundary. jq's
         # `now` is float seconds, so it is scaled to match.
         # percentage is type-checked here: a non-numeric value (e.g. "N/A")
-        # must drop the whole segment, not reach the renderer's arithmetic.
+        # must drop that window, not reach the renderer's arithmetic. The
+        # output carries five_hour and/or seven_day; if neither is found the
+        # fetch counts as failed.
         norm=$(jq -c '
+            def tag(u; n): (.unit == u and .number == n);
+            def pick: if length == 1
+                then .[0] | {utilization: .percentage,
+                             resets_epoch: (.nextResetTime / 1000 | floor)}
+                else null end;
             if (.success == true) then
-                (.data.limits // [])
-                | map(select(.type == "TOKENS_LIMIT"
-                             and (.percentage | type) == "number"
-                             and (.nextResetTime | type) == "number"
-                             and ((.nextResetTime / 1000) - now) <= (6 * 3600)))
-                | if length == 1 then
-                      .[0] | {five_hour: {
-                        utilization: .percentage,
-                        resets_epoch: (.nextResetTime / 1000 | floor)
-                      }}
-                  else empty
-                  end
+                ((.data.limits // [])
+                 | if type == "array" then . else [] end
+                 | map(select(type == "object"
+                              and .type == "TOKENS_LIMIT"
+                              and (.percentage | type) == "number"
+                              and (.nextResetTime | type) == "number")
+                       | . + {_d: ((.nextResetTime / 1000) - now)})) as $l
+                | ($l | if any(.[]; tag(3; 5))
+                        then map(select(tag(3; 5) and ._d <= 6 * 3600))
+                        else map(select(._d <= 6 * 3600 and (tag(6; 1) | not)))
+                        end | pick) as $five
+                | ($l | if any(.[]; tag(6; 1))
+                        then map(select(tag(6; 1) and ._d > 0 and ._d <= 169 * 3600))
+                        else map(select(._d > 6 * 3600 and ._d <= 169 * 3600 and (tag(3; 5) | not)))
+                        end | pick) as $week
+                | (if $five then {five_hour: $five} else {} end)
+                  + (if $week then {seven_day: $week} else {} end)
+                | if length == 0 then empty else . end
             else empty end' "$raw" 2>/dev/null)
     fi
 
@@ -397,16 +424,21 @@ if [ "$USAGE_BACKEND" != "other" ]; then
             cache_is_fresh=true
         fi
         # Display from cache only if not too old.
-        # One jq call for all three fields instead of three. The separator must
-        # not be whitespace: `read` collapses runs of IFS whitespace, which
-        # would silently shift fields whenever one is empty (only one of
-        # resets_at / resets_epoch is ever present). \x1f is non-whitespace, so
-        # empty fields are preserved positionally.
+        # One jq call for both windows (five_hour, seven_day) and all three
+        # fields of each. The separator must not be whitespace: `read`
+        # collapses runs of IFS whitespace, which would silently shift fields
+        # whenever one is empty (only one of resets_at / resets_epoch is ever
+        # present, and seven_day may be missing or null). \x1f is
+        # non-whitespace, so empty fields are preserved positionally. A window
+        # that is not an object is treated as absent so it cannot take the
+        # other window down with a jq error.
         if [ "$cache_age" -lt "$CACHE_MAX_AGE" ]; then
-            _usage_row=$(jq -r '.five_hour
-                | [(.utilization // ""), (.resets_at // ""), (.resets_epoch // "")]
+            _usage_row=$(jq -r '[.five_hour, .seven_day]
+                | map(if type == "object" then . else {} end
+                      | (.utilization // ""), (.resets_at // ""), (.resets_epoch // ""))
                 | join("\u001f")' "$USAGE_CACHE" 2>/dev/null)
-            IFS=$'\x1f' read -r usage_5h usage_resets usage_resets_epoch <<< "$_usage_row"
+            IFS=$'\x1f' read -r usage_5h usage_resets usage_resets_epoch \
+                usage_7d usage_7d_resets usage_7d_resets_epoch <<< "$_usage_row"
         fi
     fi
 
@@ -416,6 +448,9 @@ if [ "$USAGE_BACKEND" != "other" ]; then
     # disappears, which is the required degradation mode.
     case "$usage_5h" in
         ''|*[!0-9.]*|.|*.*.*) usage_5h="" ;;
+    esac
+    case "$usage_7d" in
+        ''|*[!0-9.]*|.|*.*.*) usage_7d="" ;;
     esac
 
     # If cache is stale or missing, trigger async background refresh
@@ -608,7 +643,9 @@ C_R="\033[0m"
 
 # Gradient: soft green -> green -> yellow-green -> yellow -> orange -> red -> dark red
 bar_colors=(71 72 78 114 150 186 222 221 220 214 208 202 196 160 124 88)
-BAR_W=20
+# Full width of every bar (context, 5h, 7d). The wrap pass may narrow a bar
+# that does not fit on a line by itself, down to 8 cells.
+BAR_W=10
 
 build_bar() {
     local pct=$1 w=${2:-$BAR_W}
@@ -647,7 +684,8 @@ fmt_ctx() {
     fi
 }
 
-# Format an absolute epoch as a relative countdown
+# Format an absolute epoch as a relative countdown: "XdYh" from 24h on,
+# otherwise "XhYm" or "Ym".
 fmt_reltime() {
     local reset_epoch="$1"
     case "$reset_epoch" in
@@ -656,7 +694,9 @@ fmt_reltime() {
     local diff=$(( reset_epoch - now ))
     [ "$diff" -le 0 ] && { echo "now"; return; }
     local h=$(( diff / 3600 )) m=$(( diff % 3600 / 60 ))
-    if [ "$h" -gt 0 ]; then
+    if [ "$h" -ge 24 ]; then
+        echo "$(( h / 24 ))d$(( h % 24 ))h"
+    elif [ "$h" -gt 0 ]; then
         echo "${h}h${m}m"
     else
         echo "${m}m"
@@ -759,7 +799,35 @@ if [ -n "$usage_pct" ]; then
     _seg_bars+=("usage")
 fi
 
-# Segment 7+: running subagents and in-process teammates.
+# Segment 7: weekly (7-day) usage bar, same layout as the 5h segment. Absent
+# whenever the cache has no valid seven_day window.
+weekly_pct=""
+if [ -n "$usage_7d" ]; then
+    weekly_pct=$(printf "%.0f" "$usage_7d" 2>/dev/null)
+    case "$weekly_pct" in
+        ''|*[!0-9]*) weekly_pct="" ;;
+    esac
+fi
+if [ -n "$weekly_pct" ]; then
+    if [ -n "$usage_7d_resets_epoch" ]; then
+        weekly_resets_fmt=$(fmt_reltime "$usage_7d_resets_epoch")
+    else
+        weekly_resets_fmt=$(fmt_resets "$usage_7d_resets")
+    fi
+    weekly_label="7d"
+    [ "$USAGE_BACKEND" = "glm" ] && weekly_label="glm 7d"
+    weekly_segment() {
+        printf '%s' "${C_LABEL}${weekly_label}${C_R} $(build_bar "$weekly_pct" "$1")"
+        [ -n "$weekly_resets_fmt" ] && printf '%s' " ${C_LABEL}${weekly_resets_fmt}${C_R}"
+    }
+    weekly_seg=$(weekly_segment "$BAR_W")
+    segments+=("$weekly_seg")
+    _weekly_w=$(visible_len "$weekly_seg"); _weekly_w=${_weekly_w:-0}
+    _seg_widths+=("$_weekly_w")
+    _seg_bars+=("weekly")
+fi
+
+# Segment 8+: running subagents and in-process teammates.
 # The stdin payload only describes the main thread, so this reads the
 # per-agent transcripts Claude Code writes next to the session transcript:
 #   <transcript without .jsonl>/subagents/agent-<id>.jsonl      (messages)

@@ -559,7 +559,7 @@ function Get-MenuGroups {
             @{ Label = "CLAUDE.md";       Desc = "Global instructions template";      Default = $true;  Id = "claude-md" }
             @{ Label = "settings.json";   Desc = "Smart-merged Claude Code settings"; Default = $true;  Id = "settings" }
             @{ Label = "Writing style rule"; Desc = "Complete English writing rule (rules/writing-style.md)"; Default = $true; Id = "rules-writing-style" }
-            @{ Label = "StatusLine";      Desc = "Gradient bars + Anthropic/GLM 5h quota"; Default = $true; Id = "statusline" }
+            @{ Label = "StatusLine";      Desc = "Gradient bars + Anthropic/GLM 5h/7d quota"; Default = $true; Id = "statusline" }
             @{ Label = "Lessons";         Desc = "lessons.md template + SessionStart hook"; Default = $true; Id = "lessons" }
             @{ Label = "Search agent";    Desc = "Jeff read-only web search agent"; Default = $true; Id = "agents" }
         )}
