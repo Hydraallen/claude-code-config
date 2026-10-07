@@ -181,7 +181,8 @@ probes), so it is pointed at the cheaper model.
 > `@preset/ds-preset`, an OpenRouter preset that only sets provider routing. It
 > must exist in your account, or every slot fails with a not-found error. Create
 > it at openrouter.ai → Presets → New Preset: slug `ds-preset`, Models left empty,
-> Include Provider Preferences → `ignore`: StreamLake. Leave `only` completely
+> Include Provider Preferences → `ignore`: StreamLake, **Require parameters:
+> `true`**. Leave `only` completely
 > empty: an `only` list with nothing ticked is sent as `[]` and every request
 > fails with "No allowed providers are specified". Leave Parameters, Tools,
 > Caching and Reasoning unticked; Claude Code sends its own `max_tokens` and
@@ -195,6 +196,14 @@ probes), so it is pointed at the cheaper model.
 > to DeepSeek alone works only when Settings → Privacy allows providers that
 > train on paid requests; otherwise every request is rejected with "Paid model
 > training violation".
+>
+> Why Require parameters: OpenRouter also routed to DigitalOcean and Cloudflare.
+> Both accept the `thinking` parameter and return no reasoning
+> (`native_tokens_reasoning` 0). DeepSeek then continued the trailing
+> `<system-reminder>` text and ended the turn with no answer and no tool call.
+> With `require_parameters: true` OpenRouter only uses providers that support
+> every parameter in the request; in a 15-turn session after the change every
+> request went to SiliconFlow and every turn had thinking tokens.
 
 > **Caveat — one context limit, all slots.** `CLAUDE_CODE_MAX_CONTEXT_TOKENS`
 > is a single client-wide value. It is set to `1000000` because both DeepSeek V4
@@ -214,11 +223,17 @@ In that mode it has been observed to continue the trailing `<system-reminder>`
 text (`You have 15000000 tokens left. </system-reminder>`) and end the turn with
 no answer and no tool call.
 
+The capability alone is not sufficient. A provider that drops the parameter
+produces the same failure; `ds-preset` therefore sets Require parameters (see
+above). To check a turn, look up its request id at
+`/api/v1/generation?id=<id>` and compare `provider_name` and
+`native_tokens_reasoning`.
+
 Tested on 2026-10-07 against `/api/v1/messages`: `deepseek-v4-pro` and
 `deepseek-v4-flash` through `ds-preset` both return a `thinking` block followed by
 a `text` block for `thinking: {type: "enabled", budget_tokens: 2000}`.
-Multi-turn tool use with thinking enabled has not been verified; if it returns
-400, remove the four keys.
+A 15-turn tool-use session with thinking enabled (SiliconFlow) returned no 400.
+If a 400 appears on another provider, remove the four keys.
 
 `effort`, `xhigh_effort` and `max_effort` (which `glm.json` and `gpt.json` carry)
 are left out until tested. `adaptive_thinking` / `interleaved_thinking` have no
@@ -235,8 +250,9 @@ and that "Claude Code expects Anthropic request semantics, so non-Anthropic
 models aren't supported through the native endpoint". That is a
 *no-guarantee*, not a hard API-level rejection, and no public report of DeepSeek
 succeeding or failing through this endpoint exists either way. Through
-StreamLake, `tool_use` round-trips failed as described above; other providers
-are unverified. If it misbehaves, check tool calls and the serving provider
+StreamLake, `tool_use` round-trips failed as described above; DigitalOcean and
+Cloudflare drop `thinking`; SiliconFlow worked in a 15-turn session. Other
+providers are unverified. If it misbehaves, check tool calls and the serving provider
 (OpenRouter → Logs) first.
 
 There is no quota bar (5h or weekly) for this backend — see

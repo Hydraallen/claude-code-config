@@ -157,7 +157,7 @@ OpenRouter 用 `Authorization: Bearer` 鉴权，而 Claude Code 只在 `ANTHROPI
 > **必需 —— 创建 `ds-preset` preset。** 所有槽位都带 `@preset/ds-preset` 后缀，这是一个只设置
 > provider 路由的 OpenRouter preset。账号里必须有它，否则所有槽位返回 not found。创建位置：
 > openrouter.ai → Presets → New Preset：slug `ds-preset`，Models 留空，勾选 Include Provider
-> Preferences → `ignore`：StreamLake。`only` 必须完全留空：`only` 里一个都不勾会以 `[]`
+> Preferences → `ignore`：StreamLake，**Require parameters：`true`**。`only` 必须完全留空：`only` 里一个都不勾会以 `[]`
 > 发出，所有请求都会报 "No allowed providers are specified"。Parameters、Tools、Caching、
 > Reasoning 不要勾，Claude Code 会自己发送 `max_tokens` 和 thinking 设置。不想用 preset
 > 就去掉 `@preset/ds-preset` 后缀。
@@ -168,6 +168,12 @@ OpenRouter 用 `Authorization: Bearer` 鉴权，而 Claude Code 只在 `ANTHROPI
 > Claude Code 只显示 "Thought for Ns" 就结束。preset 的 `only` 只选 DeepSeek 需要在
 > Settings → Privacy 允许会用付费请求训练的 provider，否则所有请求都会以
 > "Paid model training violation" 被拒绝。
+>
+> 需要 Require parameters 的原因：OpenRouter 还会路由到 DigitalOcean 和 Cloudflare。两者都接受
+> `thinking` 参数，但不返回 reasoning（`native_tokens_reasoning` 为 0）。DeepSeek 随后续写消息末尾的
+> `<system-reminder>` 文本并结束本轮，既没有回答也没有工具调用。设为 `require_parameters: true`
+> 后，OpenRouter 只使用支持请求中全部参数的 provider；改动后的一次 15 轮会话中，所有请求都发往
+> SiliconFlow，每一轮都有 thinking token。
 
 > **注意 —— 一个上下文上限，管所有槽位。** `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 是客户端
 > 全局的单一值。这里设为 `1000000`，是因为两个 DeepSeek V4 模型都接受约 1M。如果你把
@@ -185,9 +191,14 @@ OpenRouter 用 `Authorization: Bearer` 鉴权，而 Claude Code 只在 `ANTHROPI
 `<system-reminder>` 文本（`You have 15000000 tokens left. </system-reminder>`），然后
 结束本轮，既没有回答也没有工具调用。
 
+只声明该能力还不够。丢弃该参数的 provider 会产生同样的问题，因此 `ds-preset` 设置了
+Require parameters（见上文）。要检查某一轮，用其 request id 查询
+`/api/v1/generation?id=<id>`，对比 `provider_name` 与 `native_tokens_reasoning`。
+
 2026-10-07 对 `/api/v1/messages` 实测：`deepseek-v4-pro` 与 `deepseek-v4-flash` 经
 `ds-preset`，在 `thinking: {type: "enabled", budget_tokens: 2000}` 下都返回一个 `thinking`
-块和一个 `text` 块。开启 thinking 后的多轮工具调用尚未验证；如果返回 400，删除这四个键。
+块和一个 `text` 块。开启 thinking 的一次 15 轮工具调用会话（SiliconFlow）没有出现 400。
+如果在其他 provider 上出现 400，删除这四个键。
 
 `glm.json` 与 `gpt.json` 带有的 `effort`、`xhigh_effort`、`max_effort` 在测试前不加入。
 `adaptive_thinking` / `interleaved_thinking` 在 DeepSeek 侧没有对应功能，保持不加。
@@ -202,7 +213,8 @@ OpenRouter 官方文档写的是：其原生 Anthropic 端点
 以及 "Claude Code expects Anthropic request semantics, so non-Anthropic models
 aren't supported through the native endpoint"。这是**不保证**，不是 API 层的硬拒绝；
 而且目前也不存在任何"DeepSeek 走该端点成功或失败"的公开报告。经 StreamLake 时
-`tool_use` 往返会按上文所述失败；其他 provider 未经验证。如果它表现异常，先查工具调用和
+`tool_use` 往返会按上文所述失败；DigitalOcean 与 Cloudflare 会丢弃 `thinking`；
+SiliconFlow 在一次 15 轮会话中工作正常。其他 provider 未经验证。如果它表现异常，先查工具调用和
 实际服务的 provider（OpenRouter → Logs）。
 
 这个后端没有额度条（5h 与每周均无），见下方[状态栏里的额度](#状态栏里的额度)。

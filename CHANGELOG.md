@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.2.10] - 2026-10-07
+
+### Features
+- **`ds-preset` setup now includes Require parameters: `true`.** The preset instructions in `profiles/or.json` (`note`), `docs/BACKENDS.md` and `docs/BACKENDS.zh-CN.md` add `require_parameters: true` next to `ignore: StreamLake`. No profile key changes; the preset is configured on openrouter.ai.
+
+### Design Rationale
+- 4.2.9 stated that declaring `thinking` fixes the no-reasoning failure. Two later `cl_or_auto` sessions still had 0 thinking tokens on every turn, and one reproduced the failure (DeepSeek continued the trailing system-reminder text and ended the turn). A `cl_or -p` run with `ANTHROPIC_LOG=debug` showed that the request body contains `thinking`.
+- `/api/v1/generation` lookups of the request ids showed the provider: turns with thinking were served by Relace, turns without thinking by DigitalOcean and Cloudflare (`native_tokens_reasoning` 0). These providers accept the parameter and return no reasoning.
+- `require_parameters: true` restricts routing to providers that support every parameter in the request. This also covers providers added later, which an `ignore` list would not. In a 15-turn tool-use session after the change, every request went to SiliconFlow and every turn had thinking tokens (13–341), with no 400.
+
+### Notes & Caveats
+- Existing installs: open the `ds-preset` preset on openrouter.ai and set Require parameters to `true`. Re-running the installer only updates the profile `note`.
+- If no provider supports every parameter, OpenRouter returns "No endpoints found that can handle the requested parameters". In that case set Require parameters back and add DigitalOcean and Cloudflare to `ignore` instead.
+- `ANTHROPIC_LOG=debug` writes to stderr, which the interactive TUI does not display or save; use `cl_or -p ... 2>log` to capture request bodies.
+- One stall in the 15-turn session was unrelated to routing: after GateGuard blocked a Write and asked for facts, the model presented them and ended the turn without retrying. No change was made for this.
+
 ## [4.2.9] - 2026-10-07
 
 ### Features

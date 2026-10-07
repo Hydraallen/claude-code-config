@@ -2,6 +2,22 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.2.10] - 2026-10-07
+
+### Features
+- **`ds-preset` 设置增加 Require parameters：`true`。** `profiles/or.json`（`note`）、`docs/BACKENDS.md` 与 `docs/BACKENDS.zh-CN.md` 中的 preset 说明在 `ignore: StreamLake` 旁加入 `require_parameters: true`。profile 的键没有变化；preset 在 openrouter.ai 上配置。
+
+### Design Rationale
+- 4.2.9 称声明 `thinking` 即可解决无推理的问题。之后的两次 `cl_or_auto` 会话每一轮仍是 0 thinking token，其中一次复现了该问题（DeepSeek 续写消息末尾的 system-reminder 文本并结束本轮）。用 `ANTHROPIC_LOG=debug` 运行 `cl_or -p`，请求体中包含 `thinking`。
+- 用 `/api/v1/generation` 查询各 request id 的 provider：有 thinking 的回合由 Relace 提供，没有 thinking 的回合由 DigitalOcean 和 Cloudflare 提供（`native_tokens_reasoning` 为 0）。这些 provider 接受该参数，但不返回 reasoning。
+- `require_parameters: true` 只路由到支持请求中全部参数的 provider，也能覆盖以后新增的同类 provider，`ignore` 列表做不到这一点。改动后的一次 15 轮工具调用会话中，所有请求都发往 SiliconFlow，每一轮都有 thinking token（13–341），没有出现 400。
+
+### Notes & Caveats
+- 已安装用户：在 openrouter.ai 打开 `ds-preset`，把 Require parameters 设为 `true`。重新运行安装器只会更新 profile 的 `note`。
+- 如果没有 provider 支持全部参数，OpenRouter 返回 "No endpoints found that can handle the requested parameters"。此时把 Require parameters 改回去，改为在 `ignore` 中加入 DigitalOcean 和 Cloudflare。
+- `ANTHROPIC_LOG=debug` 输出到 stderr，交互式 TUI 既不显示也不保存；要抓请求体，用 `cl_or -p ... 2>log`。
+- 那次 15 轮会话中有一次停顿与路由无关：GateGuard 拦截 Write 并要求说明后，模型给出说明就结束了本轮，没有重试。此问题未做改动。
+
 ## [4.2.9] - 2026-10-07
 
 ### Features
