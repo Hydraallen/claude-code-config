@@ -1,5 +1,24 @@
 # 变更记录
 
+## [4.2.0] - 2026-10-09
+
+### Features
+- 新增 `asd-ste100`（[danyuchn/asd-ste100-skill](https://github.com/danyuchn/asd-ste100-skill)，MIT，固定在 `32511c6992ecb5f1971e46a2943f2e6adceedafe`），Claude 与 Codex 均可安装。它接替 `paper-reading` 在 Academic Research 中的位置，包括两端的推荐。`platforms/sources.md#asd-ste100` 记录上游安装方式，以及固定 revision 的部署配方：把 `SKILL.md`、`LICENSE`、`references/`、`examples/`、`scripts/` 部署到 `skills/asd-ste100`。
+- 原 `paper-reading` 的论文讲解现在用 `/asd-ste100` 结合 Claude Code 内置的 `/dataviz` 完成。agent 读论文全文，按 asd-ste100 的结构规则写讲解，按 dataviz 的流程绘制论文报告的数字。
+
+### Removed
+- `paper-reading`：skill 源码（`skills/paper-reading/`）、6 个测试文件及其辅助模块、`pytest.ini` 中的 `e2e` 标记、*Attention Is All You Need* 示例（`docs/Attention_Is_All_You_Need.md`、中文版与 `docs/images/`）、两份 README 中的示例链接，以及 Codex AGENTS 模板中的「Paper Reading」一节。
+- `scripts/README.md` 的受保护复制示例改用 storage-analyzer。
+
+### Design Rationale
+- 作者比较了 paper-reading 按模板生成的报告与一次只用 `/asd-ste100` 和 `/dataviz` 写出的论文讲解，选择后者。那份讲解的质量来自写作规则（术语表、一句一个论断、保留论文的限定语气、单独标注的读者分析一节），以及论文自己的图和数字。单独维护的 paper-reading 模板相对这两个 skill 没有额外价值。
+- asd-ste100 是第三方 skill，本仓库只记录上游来源与部署配方。目录仍为 39 个活动 ID，推荐仍为 Claude 20 项、Codex 18 项。
+
+### Notes & Caveats
+- 已安装的 `paper-reading` 副本保持原状。普通更新不重装或升级它，也不自动安装 asd-ste100。移除方式见 `docs/migration.md#paper-reading`。
+- dataviz 是 Claude Code 内置 skill，Codex 没有 dataviz。asd-ste100 面向英文文本，讲解页使用其他语言时，应用它的结构规则。
+- asd-ste100 的配方已在隔离的 agent home 中验证：固定 revision 获取、stage、`managed_files.py install` 与 `status`、部署内容与上游一致，以及 `ste-lint.py --selftest`。
+
 ## [4.1.0] - 2026-09-27
 
 ### Features

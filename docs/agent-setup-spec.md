@@ -46,7 +46,7 @@ scripts/                   确有需要的备份、受控复制、配置合并�
 
 根目录 AGENTS.md/CLAUDE.md 管本仓库的开发与安装工作；要部署到用户 home 的全局指令放在 platforms 下。配置查询与修改由 edit-config 区分目标和操作，普通代码工作不会触发安装；模板在缺少 skill 时提供同一分支工作流的读取入口。查询不写记录、不改配置，也不隐式安装。内容共用的 skills 保留一份源码，平台差异只在确有需要处适配。
 
-源码归属按用户最新选择区分：第三方原版提供第三方上游安装方式，仓库只保存自有 skill 和明确维护的定制衍生版，并保留上游署名。Humanizer、Humanizer-zh、neat-freak 原样副本移出仓库，条目改为从上游安装。paper-reading、storage-analyzer 定制版及 adversarial-review 定制版继续在这里维护。
+源码归属按用户最新选择区分：第三方原版提供第三方上游安装方式，仓库只保存自有 skill 和明确维护的定制衍生版，并保留上游署名。Humanizer、Humanizer-zh、neat-freak 原样副本移出仓库，条目改为从上游安装。storage-analyzer 定制版及 adversarial-review 定制版继续在这里维护。自有的 paper-reading 已于 2026-10-09 退役，见[迁移说明](migration.md#paper-reading)。
 
 handoff 不再独立设置，删除独立目录项和本地定制副本，只作为 Matt 包成员提供。Codex 的 Matt 精选范围加入上游 handoff，合计 20 项；其他版本与成员约束保持有效。旧 handoff ID 记录迁移关系，不自动扩大或覆盖已有用户安装。
 

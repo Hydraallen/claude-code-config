@@ -88,7 +88,7 @@
 
 | ID | 安装项与用途 | Claude | Codex | Claude 推荐 | Codex 推荐 |
 | --- | --- | --- | --- | --- | --- |
-| paper-reading | 论文阅读、证据检查与 HTML 报告 | [本地 skill](platforms/claude/README.md#local-skills) | [本地 skill](platforms/codex/README.md#local-skills) | 推荐 | 推荐 |
+| asd-ste100 | ASD-STE100 简化技术英语写作规则与 linter；结合 Claude Code 内置的 dataviz 可完成原 paper-reading 的论文讲解 | [上游安装](platforms/sources.md#asd-ste100) | [上游安装](platforms/sources.md#asd-ste100) | 推荐 | 推荐 |
 | ai-research | AI Research 整包：分词、微调、后训练、推理服务、分布式训练与优化；两端统一 31 项，成员见下方 | [原生插件组合](platforms/claude/README.md#ai-research) | [原生兼容插件组合](platforms/codex/plugins.md)；[源码后备](platforms/sources.md#ai-research) | — | — |
 | deepxiv-cli | DeepXiv 论文检索与阅读 | [固定源码](platforms/sources.md#deepxiv) | [固定源码](platforms/sources.md#deepxiv) | — | — |
 | deepxiv-trending-digest | DeepXiv 热门论文摘要 | [固定源码](platforms/sources.md#deepxiv) | [固定源码](platforms/sources.md#deepxiv) | — | — |
@@ -146,6 +146,7 @@
 - 两端的旧更新项对应 `edit-config`；Codex 独立 handoff 已并入原本推荐的 Matt 包，不另计一次。
 - 2026-09-17 按作者要求移除 Codex 的 explorer、reviewer、docs-researcher 自定义预设，推荐由 22 项减为 19 项；原生子 agent 能力继续可用，旧安装按[迁移说明](docs/migration.md#codex-agent-presets)处理。
 - 2026-09-17 按作者要求从两端移除 GitHub MCP 安装入口及该条目的插件替代渠道，Codex 推荐由 19 项减为 18 项；Claude 原本未推荐此项。旧 `github` 记录按[迁移说明](docs/migration.md#github-mcp)处理。
+- 2026-10-09 按作者要求退役 `paper-reading`，`asd-ste100` 接替它在 Academic Research 中的位置与两端推荐，两端推荐数不变。旧 `paper-reading` 记录按[迁移说明](docs/migration.md#paper-reading)处理。
 - Claude 的 frontend-design 仍按原菜单标记推荐，已选 examples 整包时复用其中成员，避免重复安装。
 - AI Research 的六组在两端菜单中均默认关闭，合包后仍不标记推荐。main/settings.json 中启用插件的布尔值不替代交互菜单默认选择。
 - Lark / Feishu、Claude-Mem、PUA 已退役，不出现在推荐名单。其他原本关闭的选项继续可选，不因目录改动加入推荐。

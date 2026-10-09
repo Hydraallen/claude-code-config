@@ -12,7 +12,6 @@ One repository for [Claude Code](https://claude.com/claude-code) and [Codex](htt
 
 ![Claude Code Demo](images/claude-code-demo.png)
 
-- [paper-reading skill — *Attention Is All You Need*](docs/Attention_Is_All_You_Need.md)
 - [adversarial-review skill — worked example](docs/adversarial-review-showcase.md)
 
 ## Quick Start
@@ -25,7 +24,7 @@ Open this checkout in Claude or Codex, or share **the URL of the repository page
 
 The agent shows only your target agent's supported options directly in the conversation, with useful descriptions and recommendations. If the client offers a real multi-select question tool, choose options by category there; otherwise reply with multiple numbers, names or a description of what you want. The agent respects the tool's actual limits and reuses choices you already made. A plugin bundle gets one number and lists its members; capabilities included in that bundle are not installed twice. Author recommendations follow the recorded legacy main/Codex installer defaults and subsequent changes, with [explicit mappings](catalog.md#recommendations): 20 Claude and 18 Codex recommendations in this release. Recommendations do not select items for you.
 
-For later changes, say “add paper-reading”, “update my previous selections” or “remove storage-analyzer”. Existing choices are reused; omitting an installed item never uninstalls it. Both agents use `edit-config` for configuration queries, additions, edits, removals, repairs and updates. It tracks this repository’s `main` branch. Queries are read-only; if the skill is absent, the global instructions link to the same workflow.
+For later changes, say “add asd-ste100”, “update my previous selections” or “remove storage-analyzer”. Existing choices are reused; omitting an installed item never uninstalls it. Both agents use `edit-config` for configuration queries, additions, edits, removals, repairs and updates. It tracks this repository’s `main` branch. Queries are read-only; if the skill is absent, the global instructions link to the same workflow.
 
 Native plugin/MCP commands are preferred; the agent chooses source installation when the documented scope or client requires it. You do not need to choose between npx, plugins and skill copies yourself. Codex setup disables external-agent auto-import so installations follow your selections. Windows and WSL are detected and configured separately; App/CLI installations sharing a home are reused.
 
@@ -117,7 +116,7 @@ The tables retain the original categories and merge the Claude and Codex capabil
 
 | Item | Source | What It Does | Claude | Codex |
 | --- | --- | --- | --- | --- |
-| **paper-reading** | [Repository](skills/paper-reading/) | Research paper reading, figure extraction, evidence checks and HTML reports | Bundled skill ★ | Bundled skill ★ |
+| **asd-ste100** | [danyuchn/asd-ste100-skill](https://github.com/danyuchn/asd-ste100-skill) | ASD-STE100 Simplified Technical English writing rules and linter; with Claude Code's built-in dataviz it covers the paper explanations of the retired paper-reading | Upstream install ★ | Upstream install ★ |
 | **AI Research skills** | [AI Research](https://github.com/Orchestra-Research/AI-research-SKILLs) | One bundle: tokenization, fine-tuning, post-training, inference, distributed training and optimization; [the same 31 members on both agents](catalog.md#ai-research-members) | 6 native plugins | 6 compatible plugins / source |
 | **deepxiv-cli** | [DeepXiv](https://github.com/DeepXiv/deepxiv_sdk) | arXiv / PMC hybrid paper search and reading CLI | Selected source | Selected source |
 | **deepxiv-trending-digest** | [DeepXiv](https://github.com/DeepXiv/deepxiv_sdk) | Markdown digests of recently trending papers | Selected source | Selected source |

@@ -1,5 +1,24 @@
 # Changelog
 
+## [4.2.0] - 2026-10-09
+
+### Features
+- Add `asd-ste100` ([danyuchn/asd-ste100-skill](https://github.com/danyuchn/asd-ste100-skill), MIT, pinned at `32511c6992ecb5f1971e46a2943f2e6adceedafe`) for Claude and Codex. It takes the place of `paper-reading` in Academic Research, including its recommendation on both agents. `platforms/sources.md#asd-ste100` records the upstream install methods and a pinned-revision recipe that deploys `SKILL.md`, `LICENSE`, `references/`, `examples/` and `scripts/` to `skills/asd-ste100`.
+- The paper explanations that `paper-reading` produced are now done with `/asd-ste100` together with Claude Code's built-in `/dataviz`. The agent reads the whole paper, writes the explanation with the asd-ste100 structural rules, and charts the numbers that the paper reports with the dataviz procedure.
+
+### Removed
+- `paper-reading`: the skill source (`skills/paper-reading/`), its six test files and their helper, the `e2e` marker in `pytest.ini`, the *Attention Is All You Need* showcase (`docs/Attention_Is_All_You_Need.md`, its Chinese version and `docs/images/`), the showcase links in both READMEs, and the "Paper Reading" section of the Codex AGENTS template.
+- `scripts/README.md` uses storage-analyzer in the managed-files examples.
+
+### Design Rationale
+- The author compared the template-based paper-reading reports with a paper explanation written in a session that used only `/asd-ste100` and `/dataviz`, and preferred the second. That page took its quality from writing rules (a glossary, one claim per sentence, the paper's hedges kept, a labeled reader-analysis section) and from the paper's own figures and numbers. A separate paper-reading template added no value over these two skills.
+- asd-ste100 is a third-party skill, so this repository keeps only its upstream source and recipe. The catalogue keeps 39 active IDs and 20 Claude / 18 Codex recommendations.
+
+### Notes & Caveats
+- Installed `paper-reading` copies stay in place. Ordinary updates do not reinstall or upgrade them and do not install asd-ste100 automatically. Removal follows `docs/migration.md#paper-reading`.
+- dataviz is built into Claude Code. Codex has no dataviz. asd-ste100 is written for English text; for pages in other languages, apply its structural rules.
+- The asd-ste100 recipe was checked in an isolated agent home: pinned fetch, staging, `managed_files.py install` and `status`, deployed content identical to upstream, and `ste-lint.py --selftest`.
+
 ## [4.1.0] - 2026-09-27
 
 ### Features

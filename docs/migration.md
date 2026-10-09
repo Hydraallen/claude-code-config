@@ -56,7 +56,8 @@ root lessons.md 保留本仓库纠错历史，安装使用各自 platforms/claud
 
 | 内容 | 当前维护方式 |
 | --- | --- |
-| paper-reading、edit-config | 自有源码保存在本仓库；两端共用 edit-config |
+| edit-config | 自有源码保存在本仓库，两端共用 |
+| paper-reading | 2026-10-09 退役，源码、测试与示例文档移出仓库；见[退役说明](#paper-reading) |
 | storage-analyzer、adversarial-review | 保留定制源码及上游署名；Codex 历史 adversarial-review 仍不作为安装项 |
 | humanizer、humanizer-zh、neat-freak | 移除原样副本，稳定 ID 与能力保留；从 [第三方上游](../platforms/sources.md#writing) 安装 |
 | handoff | 移除独立副本与选择，统一使用 Matt 包中的上游成员 |
@@ -101,6 +102,13 @@ Codex 关闭 `desktop.external-agent-import-sync-enabled`。旧 `model_instructi
 ## 条目退役与改名
 
 活动目录现为 39 个 ID。更新遇到目录中消失的已选 ID 时，保留其现状与记录并提示处理方式，用户明确要求后才迁移或卸载。以后每次改名、替换或退役在此追加映射。
+
+<a id="paper-reading"></a>
+### paper-reading 退役
+
+2026-10-09 按作者要求从仓库移除 `paper-reading` 的源码、测试与示例文档（`docs/Attention_Is_All_You_Need*.md` 及其图片）。原有的论文讲解改用 `/asd-ste100` 结合 Claude Code 内置的 `/dataviz` 完成：agent 读论文全文，按 asd-ste100 的结构规则写讲解，按 dataviz 的流程绘制论文报告的数字。第三方的 `asd-ste100` 接替 paper-reading 在 Academic Research 中的位置与两端推荐，从[上游](../platforms/sources.md#asd-ste100)安装。Codex 没有 dataviz。
+
+已有 `paper-reading` 选择标记为退役，保留实际安装状态、来源与文件记录。普通更新不重装或升级它，也不自动安装 asd-ste100。用户明确要求卸载时，核实归属与本地修改，用文件工具移除未修改的自管副本，其他副本保留并说明状态。
 
 <a id="github-mcp"></a>
 ### GitHub MCP 退役

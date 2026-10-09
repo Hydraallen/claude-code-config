@@ -73,7 +73,7 @@ claude plugin list --json
 <a id="local-skills"></a>
 ## 本地 skills
 
-共享目录 ../../skills 下的 paper-reading 是自有 skill，storage-analyzer 是保留上游署名的本仓库定制版，分别完整复制到目标 skills 同名目录。Humanizer、Humanizer-zh、neat-freak 从 [上游安装](../sources.md#writing)，不再从本仓库复制。
+共享目录 ../../skills 下的 storage-analyzer 是保留上游署名的本仓库定制版，完整复制到目标 skills 同名目录。Humanizer、Humanizer-zh、neat-freak 从 [上游安装](../sources.md#writing)，不再从本仓库复制。asd-ste100 从 [上游安装](../sources.md#asd-ste100)，与 Claude Code 内置的 dataviz 结合可完成原 paper-reading 的论文讲解。paper-reading 已退役，见[迁移说明](../../docs/migration.md#paper-reading)。
 
 本目录 skills/adversarial-review 是 Claude 专属版本，安装到 skills/adversarial-review。共享 ../../skills/edit-config 完整部署到 skills/edit-config，处理配置查询与增删改，跟踪本仓库 main 分支；具体来源冲突与更新流程由该 skill 定义。安装全局指令不会暗中补装它；模板也提供同一工作流的读取入口。旧更新 skill 见[迁移说明](../../docs/migration.md#edit-config)。上游获取的 DeepXiv、ResearchStudio、lieflat-charts 见 [共享源码说明](../sources.md)。
 

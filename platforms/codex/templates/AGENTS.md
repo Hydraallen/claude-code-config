@@ -73,7 +73,3 @@ When making version-level changes to a project (new features, major refactors, a
 ## Code Review
 
 Whenever a code review is needed — whether explicitly requested by the user or triggered by a workflow — use the selected `code-review` skill from `mattpocock/skills` when available. If it is absent, explain the prerequisite and review using available tools; install it only when selected. In Codex sessions, do not invoke `adversarial-review` and do not spawn reviewers through `claude -p`; use the Matt Pocock two-axis Standards/Spec review workflow directly.
-
-## Paper Reading
-
-- Use the `paper-reading` skill for research paper tasks when selected and installed
