@@ -1177,11 +1177,12 @@ ppt-master|Editable PPTX from PDF/DOCX/URL/Markdown; needs pip install (hugohe3)
     MENU_GROUP_HINTS+=("disk usage analysis · default off")
     MENU_GROUP_ITEMS+=("storage-analyzer|Read-only disk usage analysis with interactive report (skill)|0|skill-storage-analyzer")
 
-    # Group 8: Academic Research (AI Research bundle + ResearchStudio + DeepXiv + paper-reading)
+    # Group 8: Academic Research (AI Research bundle + ResearchStudio + DeepXiv + paper-reading + asd-ste100)
     MENU_GROUP_LABELS+=("Academic Research")
     MENU_GROUP_HINTS+=("paper reading, AI Research bundle, ResearchStudio & DeepXiv skills")
     MENU_GROUP_ITEMS+=("paper-reading|Research paper summarization (skill)|1|skill-paper-reading
 cheatsheet-creator|Exam cheatsheet from lectures/homework/past exams (skill)|1|skill-cheatsheet-creator
+asd-ste100|ASD-STE100 Simplified Technical English writing rules & linter (danyuchn, pinned; needs python3)|0|skill-asd-ste100
 AI Research bundle|6 plugins / 31 skills: tokenization, fine-tuning, post-training, inference, distributed, optimization|0|ai-research
 ResearchStudio Idea|idea_spark, paper_search, scoop_check (microsoft/ResearchStudio, pinned; needs python3)|0|researchstudio-idea
 deepxiv-cli|arXiv/PMC paper search & reading CLI skill|0|deepxiv-cli
@@ -1322,6 +1323,7 @@ apply_menu_id() {
         # Pinned upstream skills (fetched, staged, recorded in agent-config/files.json)
         skill-humanizer-zh)     SELECTED_UPSTREAM_SKILLS+=("humanizer-zh") ;;
         skill-neat-freak)       SELECTED_UPSTREAM_SKILLS+=("neat-freak") ;;
+        skill-asd-ste100)       SELECTED_UPSTREAM_SKILLS+=("asd-ste100") ;;
         lieflat-charts)         SELECTED_UPSTREAM_SKILLS+=("lieflat-charts") ;;
         researchstudio-idea)    SELECTED_UPSTREAM_SKILLS+=("researchstudio-idea") ;;
         # AI Research: one item, six category plugins
@@ -3876,7 +3878,7 @@ install_image_gen() {
 
 # ============================================================
 # Pinned third-party skills (humanizer-zh, neat-freak, lieflat-charts,
-# ResearchStudio Idea).
+# ResearchStudio Idea, asd-ste100).
 #
 # These are NOT vendored. Each is fetched from its upstream repository at the
 # revision pinned in platforms/sources.md, staged the same way the agent-guided
@@ -3896,6 +3898,7 @@ UPSTREAM_SKILL_ITEMS=(
     "humanizer-zh|https://github.com/op7418/Humanizer-zh|91f3d394db8419c20d67ebe22a96cf8fee0a404b||humanizer-zh"
     "neat-freak|https://github.com/KKKKhazix/khazix-skills|2b4a645cfdc894156ae347d897723562f719ce95|neat-freak|neat-freak"
     "lieflat-charts|https://github.com/larashero3-dotcom/lieflat-charts|eace082a317b696c5570c25826a53a7fa113e984|templates examples scripts agents|lieflat-charts"
+    "asd-ste100|https://github.com/danyuchn/asd-ste100-skill|32511c6992ecb5f1971e46a2943f2e6adceedafe|references examples scripts|asd-ste100"
     "researchstudio-idea|https://github.com/microsoft/ResearchStudio|0597891df1a153b8e4cbdc8c1c685f43a0a6abcf|ResearchStudio-Idea/skills/idea_spark ResearchStudio-Idea/skills/paper_search ResearchStudio-Idea/skills/scoop_check|idea_spark paper_search scoop_check"
 )
 
@@ -4033,6 +4036,18 @@ stage_upstream_skill() {
             if [[ ! -e "$stage/neat-freak/LICENSE" && -f "$checkout/LICENSE" ]]; then
                 cp "$checkout/LICENSE" "$stage/neat-freak/LICENSE" || return 1
             fi
+            ;;
+        asd-ste100)
+            # Root SKILL.md + LICENSE and the three runtime directories;
+            # README.md and .git are not deployed (platforms/sources.md#asd-ste100).
+            [[ -f "$checkout/SKILL.md" ]] || { error "asd-ste100: SKILL.md missing upstream"; return 1; }
+            mkdir -p "$stage/asd-ste100" && cp "$checkout/SKILL.md" "$stage/asd-ste100/" || return 1
+            [[ -f "$checkout/LICENSE" ]] && { cp "$checkout/LICENSE" "$stage/asd-ste100/" || return 1; }
+            local sub
+            for sub in references examples scripts; do
+                [[ -d "$checkout/$sub" ]] || { error "asd-ste100: $sub/ missing upstream"; return 1; }
+                cp -Rp "$checkout/$sub" "$stage/asd-ste100/$sub" || return 1
+            done
             ;;
         lieflat-charts)
             py="$(managed_python)" || return 1
@@ -6431,6 +6446,7 @@ catalog_id_for_menu_id() {
         skill-storage-analyzer)      echo "storage-analyzer" ;;
         skill-paper-reading)         echo "paper-reading" ;;
         skill-cheatsheet-creator)    echo "cheatsheet-creator" ;;
+        skill-asd-ste100)            echo "asd-ste100" ;;
         ai-research)                 echo "ai-research" ;;
         researchstudio-idea)         echo "researchstudio-idea" ;;
         deepxiv-cli|deepxiv-trending-digest|deepxiv-baseline-table) echo "$1" ;;
@@ -6542,6 +6558,7 @@ menu_id_selected_this_run() {
         skill-mattpocock)    $INSTALL_MATTPOCOCK ;;
         skill-humanizer-zh)  is_upstream_skill_selected humanizer-zh ;;
         skill-neat-freak)    is_upstream_skill_selected neat-freak ;;
+        skill-asd-ste100)    is_upstream_skill_selected asd-ste100 ;;
         lieflat-charts)      is_upstream_skill_selected lieflat-charts ;;
         researchstudio-idea) is_upstream_skill_selected researchstudio-idea ;;
         skill-*)             [[ "$skills" == *"|${id#skill-}|"* ]] ;;
@@ -6578,7 +6595,7 @@ selection_item_json() {
                 paths+=("skills/$name")
                 [[ -d "$CLAUDE_DIR/skills/$name" ]] || status="failed"
             done ;;
-        skill-humanizer-zh|skill-neat-freak|lieflat-charts|researchstudio-idea)
+        skill-humanizer-zh|skill-neat-freak|skill-asd-ste100|lieflat-charts|researchstudio-idea)
             local item="${id#skill-}"
             for name in $(upstream_skill_field "$item" targets); do
                 paths+=("skills/$name")
@@ -6608,7 +6625,7 @@ selection_item_json() {
     fi
     local rev=""
     case "$id" in
-        skill-humanizer-zh|skill-neat-freak|lieflat-charts|researchstudio-idea)
+        skill-humanizer-zh|skill-neat-freak|skill-asd-ste100|lieflat-charts|researchstudio-idea)
             rev="$(upstream_skill_field "${id#skill-}" rev)" ;;
     esac
     jq -cn --arg menu "$id" --arg status "$status" --arg rev "$rev" --argjson extra "$extra" \
@@ -7035,7 +7052,7 @@ detect_menu_item_state() {
                 is_kept_mattpocock_skill "$name" && [[ -d "$CLAUDE_DIR/skills/$name" ]] && return 0
             done < "$manifest"
             return 1 ;;
-        skill-humanizer-zh|skill-neat-freak|lieflat-charts|researchstudio-idea)
+        skill-humanizer-zh|skill-neat-freak|skill-asd-ste100|lieflat-charts|researchstudio-idea)
             local targets
             targets="$(upstream_skill_field "${id#skill-}" targets)" || return 1
             for name in $targets; do

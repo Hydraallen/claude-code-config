@@ -2,6 +2,23 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.3.1] - 2026-10-13
+
+### Features
+- **合并上游 awesome-agent-config v4.2.0。** 上游新增 `asd-ste100`（[danyuchn/asd-ste100-skill](https://github.com/danyuchn/asd-ste100-skill)，MIT，固定在 `32511c6992ecb5f1971e46a2943f2e6adceedafe`）：ASD-STE100 简化技术英语写作规则与 `ste-lint.py` 检查脚本。`platforms/sources.md#asd-ste100` 记录上游安装方式，以及把 `SKILL.md`、`LICENSE`、`references/`、`examples/`、`scripts/` 部署到 `skills/asd-ste100` 的固定 revision 配方。
+- **asd-ste100 在本 fork 中为可选项。** catalog 与两份 README 把它列在 Academic Research，不标推荐。两个脚本安装器提供菜单项 `skill-asd-ste100`（默认关闭）：`install.sh --only skill-asd-ste100` / `install.ps1 -Only skill-asd-ste100` 获取固定 revision，按 agent 配方 stage 相同文件，并通过 `scripts/managed_files.py` 部署，方式与 neat-freak、humanizer-zh 相同。
+- **保留 paper-reading（fork 覆盖）。** 上游 v4.2.0 退役 `paper-reading`，删除其源码、测试、pytest 的 `e2e` 标记与 Codex AGENTS 模板中的「Paper Reading」一节。本 fork 全部保留，并保留其 catalog 条目、推荐与脚本菜单项（`skill-paper-reading`，默认开启）。
+
+### Design Rationale
+- 上游比较两种输出后，用 `/asd-ste100` 加 Claude Code 内置的 `/dataviz` 取代 paper-reading。本 fork 作者继续使用 paper-reading，因此不采用其退役；asd-ste100 作为独立的写作规则 skill 并列加入。
+- asd-ste100 不标推荐且默认关闭，Claude（29 项）与 Codex（18 项）推荐数不变，已有选择不会扩大。
+- asd-ste100 仍是第三方来源：安装器获取固定 revision，不在仓库内保存副本。
+
+### Notes & Caveats
+- 上游 `docs/migration.md#paper-reading` 的退役说明改写为本 fork 的处理方式；已安装的 `paper-reading` 副本照常维护。
+- 脚本安装 asd-ste100 需要 git 与 python3 3.8+；`scripts/ste-lint.py` 只依赖 Python 标准库。该 skill 面向英文文本。
+- `--all` 与其他固定 revision 的上游 skill 一样，也会获取 asd-ste100。
+
 ## [4.3.0] - 2026-10-13
 
 ### Features

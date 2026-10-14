@@ -21,6 +21,7 @@
 | Humanizer | https://github.com/blader/humanizer | 9862685f575c65a8247f90369951df1b3416e3d6 |
 | Humanizer-zh | https://github.com/op7418/Humanizer-zh | 91f3d394db8419c20d67ebe22a96cf8fee0a404b |
 | neat-freak | https://github.com/KKKKhazix/khazix-skills | 2b4a645cfdc894156ae347d897723562f719ce95 |
+| asd-ste100 | https://github.com/danyuchn/asd-ste100-skill | 32511c6992ecb5f1971e46a2943f2e6adceedafe |
 
 在新的临时目录获取源码。例如下面是 Bash 参数形式；PowerShell 使用同样参数及其变量语法。`source_url`、`revision`、`checkout` 由当前所选项确定；不要修改用户现有 checkout。
 
@@ -70,6 +71,22 @@ python3 scripts/managed_files.py --root "$target_dir" install "$checkout/<skill-
 需要固定 revision、自定义 home，或 CLI 无法满足目标路径时，使用上游同样支持的手动方案：按本页获取步骤下载表中 revision，在临时 stage 准备上述完整范围（保留执行位及许可），再通过文件工具部署。这仍从第三方原仓库安装，没有本仓库 vendored 副本。逐一验证所有资源的来源及目标路径。
 
 Humanizer 当前上游为 3.0.0，旧内置版本为 2.2.0；原生包只含 humanizer 这一项。Claude 使用插件；Codex 0.153.4 会忽略其根目录 skill 入口，按上面的源码配方安装，详见[兼容性说明](codex/plugins.md)。已有副本迁移先说明版本与调用名变化（Claude 插件调用名为 `/humanizer:humanizer`），保留本地修改并由用户选择迁移。neat-freak 的运行源码继续保持上述已核对的固定 revision。
+
+<a id="asd-ste100"></a>
+## asd-ste100
+
+第三方原版（MIT），本仓库仅维护上游入口与部署配方，没有原版副本。两端都可安装。论文讲解在 Claude Code 中结合内置的 dataviz（无需安装）；Codex 没有 dataviz。
+
+上游提供两种安装方式：Skills CLI `npx skills add danyuchn/asd-ste100-skill`，以及 `git clone https://github.com/danyuchn/asd-ste100-skill ~/.claude/skills/asd-ste100`。Skills CLI 的注意事项同 [Humanizer 一节](#writing)；上游说明它会发送匿名安装统计，设置 `DISABLE_TELEMETRY=1` 可关闭。git clone 得到的是跟随上游的工作副本，不固定 revision。
+
+需要固定 revision、自定义 home 或 Codex 目标路径时，按本页获取步骤下载表中 revision，sparse 范围为 `references examples scripts`（cone 模式同时保留根文件）。在临时 stage 准备根目录 SKILL.md、LICENSE 以及 references/、examples/、scripts/ 的完整内容，保留执行位，不复制 README.md 和 `.git`，再部署：
+
+```sh
+python3 scripts/managed_files.py --root "$target_dir" --dry-run install "$stage" skills/asd-ste100 --item asd-ste100 --origin "$source_url@$revision"
+python3 scripts/managed_files.py --root "$target_dir" install "$stage" skills/asd-ste100 --item asd-ste100 --origin "$source_url@$revision"
+```
+
+`scripts/ste-lint.py` 只依赖 Python 标准库。paper-reading 不随此项安装或移除；上游已退役它，本 fork 保留，见[迁移说明](../docs/migration.md#paper-reading)。本 fork 的脚本安装器以菜单项 `skill-asd-ste100`（默认关闭）按上述固定 revision 与文件范围安装。
 
 <a id="anthropic"></a>
 ## Anthropic

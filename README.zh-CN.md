@@ -82,7 +82,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 
 Agent 会在当前对话中只展示目标 agent 支持的完整选项，附上用途与推荐。客户端有真正的多选问答工具时，按分类勾选；没有时，直接回复多个编号、名称或自然语言选择。Agent 会遵守工具的实际限制，并沿用你已经明确的选择。插件整包占一个编号并列出成员，包内已有能力不会再重复安装。作者推荐依据已记录的旧 main/Codex 安装菜单默认项及后续调整，[映射关系](catalog.md#recommendations)已注明。推荐标记不代表你已同意安装。
 
-之后直接说“添加 paper-reading”“更新我上次选择的内容”或“移除 storage-analyzer”。已有选择会沿用，没有提到的已安装项不会被卸载。两端统一使用 `edit-config` 查询、增删改、修复和更新配置，跟踪本仓库的 `main` 分支。查询只读；未安装 skill 时，全局指令提供同一工作流的读取入口。
+之后直接说“添加 asd-ste100”“更新我上次选择的内容”或“移除 storage-analyzer”。已有选择会沿用，没有提到的已安装项不会被卸载。两端统一使用 `edit-config` 查询、增删改、修复和更新配置，跟踪本仓库的 `main` 分支。查询只读；未安装 skill 时，全局指令提供同一工作流的读取入口。
 
 优先使用原生插件/MCP 命令；所选范围或 client 需要时，agent 再按仓库说明采用源码安装。你无需自己判断 npx、插件和 skill 复制渠道。Codex 安装会关闭外部 agent 自动导入，使安装内容遵循你的选择。Windows 与 WSL 分别检测配置，共用 home 的 App/CLI 会复用已有安装。
 
@@ -187,6 +187,7 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 | --- | --- | --- | --- | --- |
 | **paper-reading** | [本仓库](skills/paper-reading/) | 论文阅读、图表提取、证据检查与 HTML 报告 | 内置 skill ★ | 内置 skill ★ |
 | **cheatsheet-creator** *（fork）* | [本仓库](skills/cheatsheet-creator/) | 从课件、作业和往年试卷生成考试速查表 | 内置 skill ★ | — |
+| **asd-ste100** | [danyuchn/asd-ste100-skill](https://github.com/danyuchn/asd-ste100-skill) | ASD-STE100 简化技术英语写作规则与 linter；本 fork 中为可选项，与 paper-reading 并列 | 上游安装 | 上游安装 |
 | **AI Research skills** | [AI Research](https://github.com/Orchestra-Research/AI-research-SKILLs) | 一个整包：分词、微调、后训练、推理服务、分布式训练与优化；[两端共用 31 项成员](catalog.md#ai-research-members) | 6 个原生插件 | 6 个兼容插件 / 源码 |
 | **deepxiv-cli** | [DeepXiv](https://github.com/DeepXiv/deepxiv_sdk) | arXiv / PMC 论文混合检索与阅读 CLI | 精选源码 | 精选源码 |
 | **deepxiv-trending-digest** | [DeepXiv](https://github.com/DeepXiv/deepxiv_sdk) | 近期热门论文的 Markdown 摘要 | 精选源码 | 精选源码 |

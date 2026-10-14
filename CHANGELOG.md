@@ -1,5 +1,22 @@
 # Changelog
 
+## [4.3.1] - 2026-10-13
+
+### Features
+- **Merged upstream awesome-agent-config v4.2.0.** Upstream adds `asd-ste100` ([danyuchn/asd-ste100-skill](https://github.com/danyuchn/asd-ste100-skill), MIT, pinned at `32511c6992ecb5f1971e46a2943f2e6adceedafe`): ASD-STE100 Simplified Technical English writing rules and the `ste-lint.py` linter. `platforms/sources.md#asd-ste100` records the upstream install methods and a pinned-revision recipe that deploys `SKILL.md`, `LICENSE`, `references/`, `examples/` and `scripts/` to `skills/asd-ste100`.
+- **asd-ste100 is an optional item in this fork.** The catalogue and both READMEs list it in Academic Research without a recommendation. Both script installers offer it as `skill-asd-ste100` (default off): `install.sh --only skill-asd-ste100` / `install.ps1 -Only skill-asd-ste100` fetch the pinned revision, stage the same files as the agent recipe and publish them through `scripts/managed_files.py`, like neat-freak and humanizer-zh.
+- **paper-reading is kept (fork override).** Upstream v4.2.0 retires `paper-reading` and removes its source, tests, the `e2e` pytest marker and the Codex AGENTS "Paper Reading" section. This fork keeps all of them, together with its catalogue rows, recommendation and script menu item (`skill-paper-reading`, default on).
+
+### Design Rationale
+- Upstream replaced paper-reading with `/asd-ste100` plus Claude Code's built-in `/dataviz` after comparing the two outputs. The fork author keeps paper-reading in use, so its retirement is not applied. asd-ste100 is added alongside it as a separate writing-rules skill.
+- asd-ste100 is not marked recommended and is off by default, so the Claude (29) and Codex (18) recommendation counts are unchanged and existing selections do not grow.
+- asd-ste100 stays a third-party source: the installers fetch the pinned revision and do not vendor it.
+
+### Notes & Caveats
+- Upstream's `docs/migration.md#paper-reading` retirement note is rewritten to describe the fork's decision; installed `paper-reading` copies are maintained as before.
+- asd-ste100 needs git and python3 3.8+ for the script install; `scripts/ste-lint.py` uses only the Python standard library. It is written for English text.
+- `--all` now also fetches asd-ste100, as it does for the other pinned upstream skills.
+
 ## [4.3.0] - 2026-10-13
 
 ### Features

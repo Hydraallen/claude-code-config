@@ -112,6 +112,7 @@
 | --- | --- | --- | --- | --- | --- |
 | paper-reading | 论文阅读、证据检查与 HTML 报告 | [本地 skill](platforms/claude/README.md#local-skills) | [本地 skill](platforms/codex/README.md#local-skills) | 推荐 | 推荐 |
 | cheatsheet-creator | *fork*：根据讲义、作业与往年试卷生成考试速查表 | [本地 skill](platforms/claude/README.md#local-skills) | — | 推荐 | — |
+| asd-ste100 | ASD-STE100 简化技术英语写作规则与 linter；*fork*：作为可选项与 paper-reading 并列，不标推荐 | [上游安装](platforms/sources.md#asd-ste100) | [上游安装](platforms/sources.md#asd-ste100) | — | — |
 | ai-research | AI Research 整包：分词、微调、后训练、推理服务、分布式训练与优化；两端统一 31 项，成员见下方 | [原生插件组合](platforms/claude/README.md#ai-research) | [原生兼容插件组合](platforms/codex/plugins.md)；[源码后备](platforms/sources.md#ai-research) | — | — |
 | deepxiv-cli | DeepXiv 论文检索与阅读 | [固定源码](platforms/sources.md#deepxiv) | [固定源码](platforms/sources.md#deepxiv) | — | — |
 | deepxiv-trending-digest | DeepXiv 热门论文摘要 | [固定源码](platforms/sources.md#deepxiv) | [固定源码](platforms/sources.md#deepxiv) | — | — |
@@ -172,6 +173,7 @@
 - 2026-09-17 按作者要求移除 Codex 的 explorer、reviewer、docs-researcher 自定义预设，推荐由 22 项减为 19 项；原生子 agent 能力继续可用，旧安装按[迁移说明](docs/migration.md#codex-agent-presets)处理。
 - 2026-09-17 按作者要求从两端移除 GitHub MCP 安装入口及该条目的插件替代渠道，Codex 推荐由 19 项减为 18 项；Claude 原本未推荐此项。旧 `github` 记录按[迁移说明](docs/migration.md#github-mcp)处理。
 - 上游 Claude 的 frontend-design 按原菜单标记推荐；本 fork 不为 Claude 单独提供该项（fork 覆盖），因此 Claude 推荐中不再计入，使用 examples 整包中的成员。
+- 上游 v4.2.0（2026-10-09）退役 `paper-reading`，由 `asd-ste100` 接替其位置与两端推荐。本 fork 覆盖此变更：保留 `paper-reading` 及其推荐，`asd-ste100` 作为不推荐、默认关闭的可选项加入，两端推荐数不变（见[迁移说明](docs/migration.md#paper-reading)）。
 - AI Research 的六组在两端菜单中均默认关闭，合包后仍不标记推荐。main/settings.json 中启用插件的布尔值不替代交互菜单默认选择。
 - Claude-Mem、PUA 与 GitHub MCP 已退役，不出现在目录或推荐名单；本 fork 的脚本安装器会主动卸载它们（见[迁移说明](docs/migration.md#removed-integrations)）。上游同时退役了 Lark / Feishu；本 fork 保留 `lark`，默认关闭且不推荐。其他原本关闭的选项继续可选，不因目录改动加入推荐。
 - **Fork 推荐**：标注 *fork* 的条目按 `install.sh` 菜单的默认开启项标记 Claude 推荐（search-agent、shell-wrapper、backend-glm、backend-or、feature-dev、ralph-loop、commit-commands、ecc、update-config、cheatsheet-creator）。上游条目沿用上游推荐，只去掉本 fork 不提供的 frontend-design，因此本 fork 的 Claude 推荐共 29 项。脚本菜单的默认值与上游推荐存在已知差异：Python / TypeScript / Go 规则在脚本中默认开启，neat-freak 与 adversarial-review 在脚本中默认关闭；两条路径各按自己的默认值展示。

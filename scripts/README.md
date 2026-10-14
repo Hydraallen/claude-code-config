@@ -16,8 +16,8 @@ Use an available Python 3.10+ interpreter (including a verified app-provided run
 Use an explicit absolute target directory. Examples assume Bash; on PowerShell use the same argument list with the verified Python command and quoted Windows paths.
 
 ```sh
-python3 scripts/managed_files.py --root "$target_dir" --dry-run install skills/paper-reading skills/paper-reading --item paper-reading --origin "$source_revision"
-python3 scripts/managed_files.py --root "$target_dir" install skills/paper-reading skills/paper-reading --item paper-reading --origin "$source_revision"
+python3 scripts/managed_files.py --root "$target_dir" --dry-run install skills/storage-analyzer skills/storage-analyzer --item storage-analyzer --origin "$source_revision"
+python3 scripts/managed_files.py --root "$target_dir" install skills/storage-analyzer skills/storage-analyzer --item storage-analyzer --origin "$source_revision"
 ```
 
 The complete directory is copied and verified, including assets/references/scripts. Existing identical external content is reused without claiming ownership. Different unowned or locally modified content is preserved with an error; inspect and discuss a concrete migration before any replacement. Symbolic links require explicit manual inspection.
@@ -25,7 +25,7 @@ The complete directory is copied and verified, including assets/references/scrip
 ```sh
 python3 scripts/managed_files.py --root "$target_dir" status
 python3 scripts/managed_files.py --root "$target_dir" seed-lessons --agent codex
-python3 scripts/managed_files.py --root "$target_dir" remove skills/paper-reading
+python3 scripts/managed_files.py --root "$target_dir" remove skills/storage-analyzer
 ```
 
 Use `--agent claude` for a Claude home. Each agent has its own blank template under `platforms/<agent>/templates/lessons.md`; the helper never infers the agent from a directory name. Existing lessons are always preserved, including when upgrading from the previous shared blank template. Never deploy the repository's project lessons as global memory.

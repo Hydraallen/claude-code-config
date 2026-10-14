@@ -606,6 +606,7 @@ function Get-MenuGroups {
         @{ Label = "Academic Research"; Hint = "paper reading, AI Research bundle, ResearchStudio & DeepXiv skills"; Items = @(
             @{ Label = "paper-reading";   Desc = "Research paper summarization (skill)"; Default = $true; Id = "skill-paper-reading" }
             @{ Label = "cheatsheet-creator"; Desc = "Exam cheatsheet from lectures/homework/past exams (skill)"; Default = $true; Id = "skill-cheatsheet-creator" }
+            @{ Label = "asd-ste100";      Desc = "ASD-STE100 Simplified Technical English writing rules & linter (danyuchn, pinned; needs Python)"; Default = $false; Id = "skill-asd-ste100" }
             @{ Label = "AI Research bundle"; Desc = "6 plugins / 31 skills: tokenization, fine-tuning, post-training, inference, distributed, optimization"; Default = $false; Id = "ai-research" }
             @{ Label = "ResearchStudio Idea"; Desc = "idea_spark, paper_search, scoop_check (microsoft/ResearchStudio, pinned; needs Python)"; Default = $false; Id = "researchstudio-idea" }
             @{ Label = "deepxiv-cli";      Desc = "arXiv/PMC paper search & reading CLI skill"; Default = $false; Id = "deepxiv-cli" }
@@ -702,6 +703,7 @@ function ConvertTo-MenuSelection {
             "skill-humanizer"      { $result.Plugins = $true; $result.SelectedPlugins += "humanizer@humanizer" }
             "skill-humanizer-zh"   { $result.UpstreamSkills += "humanizer-zh" }
             "skill-neat-freak"     { $result.UpstreamSkills += "neat-freak" }
+            "skill-asd-ste100"     { $result.UpstreamSkills += "asd-ste100" }
             "lieflat-charts"       { $result.UpstreamSkills += "lieflat-charts" }
             "researchstudio-idea"  { $result.UpstreamSkills += "researchstudio-idea" }
             "ai-research"          { $result.Plugins = $true; $result.SelectedPlugins += $PLUGINS_AI_RESEARCH }
@@ -2299,7 +2301,7 @@ function Install-ImageGen {
 }
 
 # --- Pinned third-party skills ---------------------------------------------
-# humanizer-zh, neat-freak, lieflat-charts and ResearchStudio Idea are NOT
+# humanizer-zh, neat-freak, lieflat-charts, ResearchStudio Idea and asd-ste100 are NOT
 # vendored. Each is fetched at the revision pinned in platforms\sources.md,
 # staged like the agent-guided recipe (scripts\stage_lieflat.py,
 # scripts\adapt_researchstudio.py) and published through
@@ -2315,6 +2317,7 @@ $UPSTREAM_SKILL_ITEMS = @(
     @{ Item = "humanizer-zh"; Url = "https://github.com/op7418/Humanizer-zh"; Rev = "91f3d394db8419c20d67ebe22a96cf8fee0a404b"; Sparse = @(); Targets = @("humanizer-zh") }
     @{ Item = "neat-freak"; Url = "https://github.com/KKKKhazix/khazix-skills"; Rev = "2b4a645cfdc894156ae347d897723562f719ce95"; Sparse = @("neat-freak"); Targets = @("neat-freak") }
     @{ Item = "lieflat-charts"; Url = "https://github.com/larashero3-dotcom/lieflat-charts"; Rev = "eace082a317b696c5570c25826a53a7fa113e984"; Sparse = @("templates", "examples", "scripts", "agents"); Targets = @("lieflat-charts") }
+    @{ Item = "asd-ste100"; Url = "https://github.com/danyuchn/asd-ste100-skill"; Rev = "32511c6992ecb5f1971e46a2943f2e6adceedafe"; Sparse = @("references", "examples", "scripts"); Targets = @("asd-ste100") }
     @{ Item = "researchstudio-idea"; Url = "https://github.com/microsoft/ResearchStudio"; Rev = "0597891df1a153b8e4cbdc8c1c685f43a0a6abcf"; Sparse = @("ResearchStudio-Idea/skills/idea_spark", "ResearchStudio-Idea/skills/paper_search", "ResearchStudio-Idea/skills/scoop_check"); Targets = @("idea_spark", "paper_search", "scoop_check") }
 )
 
@@ -2468,6 +2471,19 @@ function New-UpstreamSkillStage {
             $evals = Join-Path $d "evals"; if (Test-Path -LiteralPath $evals) { Remove-Item -LiteralPath $evals -Recurse -Force }
             if (-not (Test-Path -LiteralPath (Join-Path $d "LICENSE")) -and (Test-Path -LiteralPath (Join-Path $Checkout "LICENSE"))) {
                 Copy-Item -LiteralPath (Join-Path $Checkout "LICENSE") -Destination (Join-Path $d "LICENSE")
+            }
+        }
+        "asd-ste100" {
+            # Root SKILL.md + LICENSE and the three runtime directories;
+            # README.md and .git are not deployed (platforms\sources.md#asd-ste100).
+            if (-not (Test-Path -LiteralPath (Join-Path $Checkout "SKILL.md"))) { Write-Err "asd-ste100: SKILL.md missing upstream"; return $false }
+            $d = Join-Path $Stage "asd-ste100"; New-Item -ItemType Directory -Path $d -Force | Out-Null
+            Copy-Item -LiteralPath (Join-Path $Checkout "SKILL.md") -Destination $d
+            if (Test-Path -LiteralPath (Join-Path $Checkout "LICENSE")) { Copy-Item -LiteralPath (Join-Path $Checkout "LICENSE") -Destination $d }
+            foreach ($sub in @("references", "examples", "scripts")) {
+                $src = Join-Path $Checkout $sub
+                if (-not (Test-Path -LiteralPath $src -PathType Container)) { Write-Err "asd-ste100: $sub missing upstream"; return $false }
+                Copy-Item -LiteralPath $src -Destination (Join-Path $d $sub) -Recurse
             }
         }
         "lieflat-charts" {
@@ -3578,7 +3594,7 @@ $CATALOG_ID_FOR_MENU_ID = @{
     "plug-document-skills" = @("documents"); "plug-example-skills" = @("examples"); "skill-humanizer" = @("humanizer")
     "skill-humanizer-zh" = @("humanizer-zh"); "lieflat-charts" = @("lieflat-charts"); "plug-frontend-slides" = @("frontend-slides")
     "plug-ppt-master" = @("ppt-master"); "skill-storage-analyzer" = @("storage-analyzer"); "skill-paper-reading" = @("paper-reading")
-    "skill-cheatsheet-creator" = @("cheatsheet-creator"); "ai-research" = @("ai-research"); "researchstudio-idea" = @("researchstudio-idea")
+    "skill-cheatsheet-creator" = @("cheatsheet-creator"); "skill-asd-ste100" = @("asd-ste100"); "ai-research" = @("ai-research"); "researchstudio-idea" = @("researchstudio-idea")
     "deepxiv-cli" = @("deepxiv-cli"); "deepxiv-trending-digest" = @("deepxiv-trending-digest"); "deepxiv-baseline-table" = @("deepxiv-baseline-table")
     "mcp" = @("playwright-mcp"); "mcp-lark" = @("lark")
 }
@@ -3654,7 +3670,7 @@ function Get-SelectionItemRecord {
         $pm = (ConvertTo-MenuSelection -Ids @($Id) -FullSelection $false).SelectedPlugins
         $selectors = @($pm)
     }
-    $upItem = switch ($Id) { "skill-humanizer-zh" { "humanizer-zh" } "skill-neat-freak" { "neat-freak" } "lieflat-charts" { "lieflat-charts" } "researchstudio-idea" { "researchstudio-idea" } default { "" } }
+    $upItem = switch ($Id) { "skill-humanizer-zh" { "humanizer-zh" } "skill-neat-freak" { "neat-freak" } "skill-asd-ste100" { "asd-ste100" } "lieflat-charts" { "lieflat-charts" } "researchstudio-idea" { "researchstudio-idea" } default { "" } }
     if ($upItem) {
         $entry = Get-UpstreamSkillItem -Item $upItem
         $paths = @($entry.Targets | ForEach-Object { "skills/$_" })
@@ -3794,7 +3810,7 @@ function Clear-ScriptSelectionRecords {
 function Test-MenuIdEffective {
     param([string]$Id, [hashtable]$Ctx)
     $skillName = if ($Id -like "skill-*") { $Id.Substring(6) } else { "" }
-    $upstream = @{ "skill-humanizer-zh" = "humanizer-zh"; "skill-neat-freak" = "neat-freak"; "lieflat-charts" = "lieflat-charts"; "researchstudio-idea" = "researchstudio-idea" }
+    $upstream = @{ "skill-humanizer-zh" = "humanizer-zh"; "skill-neat-freak" = "neat-freak"; "skill-asd-ste100" = "asd-ste100"; "lieflat-charts" = "lieflat-charts"; "researchstudio-idea" = "researchstudio-idea" }
     $langs = @{ "rules-python" = "python"; "rules-ts" = "typescript"; "rules-go" = "golang" }
     if ($Id -eq "claude-md") { return $Ctx.ClaudeMd }
     if ($Id -eq "settings") { return $Ctx.Settings }
@@ -4052,7 +4068,7 @@ function Test-MenuItemInstalled {
     Set-StrictMode -Off   # dynamic JSON properties; scoped to this function
     $settings = $null
     if ($Id -in @("statusline", "lessons")) { $settings = Get-JsonFileObject -Path (Join-Path $CLAUDE_DIR "settings.json") }
-    $upstream = @{ "skill-humanizer-zh" = "humanizer-zh"; "skill-neat-freak" = "neat-freak"; "lieflat-charts" = "lieflat-charts"; "researchstudio-idea" = "researchstudio-idea" }
+    $upstream = @{ "skill-humanizer-zh" = "humanizer-zh"; "skill-neat-freak" = "neat-freak"; "skill-asd-ste100" = "asd-ste100"; "lieflat-charts" = "lieflat-charts"; "researchstudio-idea" = "researchstudio-idea" }
     $langs = @{ "rules-python" = "python"; "rules-ts" = "typescript"; "rules-go" = "golang" }
     if ($Id -eq "claude-md") { return (Test-Path -LiteralPath (Join-Path $CLAUDE_DIR "CLAUDE.md") -PathType Leaf) }
     if ($Id -eq "settings") { return (Test-Path -LiteralPath (Join-Path $CLAUDE_DIR "settings.json") -PathType Leaf) }

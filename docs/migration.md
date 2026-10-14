@@ -47,7 +47,7 @@ root lessons.md 保留本仓库纠错历史，安装使用各自 platforms/claud
 
 | 内容 | 当前维护方式 |
 | --- | --- |
-| paper-reading、edit-config | 自有源码保存在本仓库；两端共用 edit-config |
+| paper-reading、edit-config | 自有源码保存在本仓库；两端共用 edit-config。上游已退役 paper-reading，本 fork 保留，见[说明](#paper-reading) |
 | storage-analyzer、adversarial-review | 保留定制源码及上游署名；Codex 历史 adversarial-review 仍不作为安装项 |
 | humanizer、humanizer-zh、neat-freak | 移除原样副本，稳定 ID 与能力保留；从 [第三方上游](../platforms/sources.md#writing) 安装 |
 | handoff | 移除独立副本与选择，统一使用 Matt 包中的上游成员 |
@@ -106,6 +106,13 @@ Codex 关闭 `desktop.external-agent-import-sync-enabled`。旧 `model_instructi
 | PowerShell `hooks`（StatusLine） | 改为 `statusline`；旧 ID 仍被接受 |
 
 新增的默认关闭项：`skill-neat-freak`、`lieflat-charts`、`skill-storage-analyzer`（Storage 分组，`--all` 不包含）、`researchstudio-idea`、`ai-research`。前四个需要 python3 3.8+ 与 git。`scripts/cleanup-claude-data.sh --include-mem` 仍被接受，但已无作用。
+
+<a id="paper-reading"></a>
+### paper-reading（上游退役，本 fork 保留）
+
+上游 awesome-agent-config v4.2.0（2026-10-09）移除了 `paper-reading` 的源码、测试与示例文档，改用 `/asd-ste100` 结合 Claude Code 内置的 `/dataviz` 完成论文讲解，并由第三方的 `asd-ste100` 接替它在 Academic Research 中的位置与两端推荐。
+
+本 fork（4.3.1 合并该版本）不采用这次退役：`skills/paper-reading/`、其测试、catalog 条目与推荐、脚本菜单项 `skill-paper-reading`（默认开启）以及 Codex AGENTS 模板中的「Paper Reading」一节均保留，已有 `paper-reading` 选择照常更新。`asd-ste100` 作为不推荐、默认关闭的可选项加入，从[上游](../platforms/sources.md#asd-ste100)安装，脚本安装器菜单 ID 为 `skill-asd-ste100`。普通更新不会自动安装 asd-ste100。
 
 <a id="github-mcp"></a>
 ### GitHub MCP 退役
