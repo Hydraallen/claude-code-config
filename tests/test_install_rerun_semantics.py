@@ -4,8 +4,11 @@ on interactive runs only, and additive --all / --only / non-interactive runs.
 Every run uses a throwaway HOME, a stubbed `claude` CLI (records its calls and
 keeps plugins / marketplaces / MCP servers as files), a stubbed `npx` and a
 `git` wrapper that fakes the DeepXiv clone and refuses every other clone, so
-nothing touches the network or the real ~/.claude. The interactive selector is
-driven through install.sh's internal ACCC_TEST_MENU_IDS hook.
+nothing touches the network or the real ~/.claude. The Lark MCP service layer
+(`npm`, `node`, `launchctl`, `systemctl`, `security`, the localhost `curl`
+health check, `uname -s`) is stubbed too, so no real LaunchAgent, systemd unit
+or Keychain item is ever created. The interactive selector is driven through
+install.sh's internal ACCC_TEST_MENU_IDS hook.
 """
 
 from __future__ import annotations
@@ -22,6 +25,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 INSTALL_SH = ROOT / "install.sh"
 REAL_GIT = shutil.which("git") or "/usr/bin/git"
+REAL_CURL = shutil.which("curl") or "/usr/bin/curl"
+REAL_UNAME = shutil.which("uname") or "/usr/bin/uname"
 # Run with INSTALL_TEST_BASH=/bin/bash to exercise macOS's bash 3.2.
 BASH = os.environ.get("INSTALL_TEST_BASH", "bash")
 
@@ -94,7 +99,20 @@ elif rest[:2] == ["plugin", "update"]:
     pass
 elif rest[:2] == ["mcp", "list"]:
     for name, srv in load(cfg, {}).get("mcpServers", {}).items():
-        print(f"{name}: {srv.get('command', '')} {' '.join(srv.get('args', []))} - Connected")
+        target = srv.get("url") or f"{srv.get('command', '')} {' '.join(srv.get('args', []))}"
+        print(f"{name}: {target} - Connected")
+elif rest[:2] == ["mcp", "add-json"]:
+    name, spec = [a for a in args[2:] if a not in ("--scope", "user")][:2]
+    data = load(cfg, {})
+    data.setdefault("mcpServers", {})[name] = json.loads(spec)
+    save(cfg, data)
+elif rest[:2] == ["mcp", "add"] and os.environ.get("FAKE_CLAUDE_MCP_ADD_FAIL") == "1":
+    sys.exit(1)
+elif rest[:2] == ["mcp", "add"] and "http" in args and "--" not in args:
+    name, url = [a for a in args[2:] if a not in ("--scope", "user", "--transport", "http")][:2]
+    data = load(cfg, {})
+    data.setdefault("mcpServers", {})[name] = {"type": "http", "url": url}
+    save(cfg, data)
 elif rest[:2] == ["mcp", "add"]:
     sep = args.index("--")
     name = [a for a in args[2:sep] if a not in ("--scope", "user", "--transport", "stdio")][0]
@@ -147,6 +165,125 @@ fi
 exec "__REAL_GIT__" "$@"
 '''
 
+# --- Lark MCP service layer --------------------------------------------------
+# State lives under $HOME/.stub; every call is appended to <name>-calls.log.
+
+NPM_STUB = r'''#!/usr/bin/env bash
+set -u
+echo "$*" >> "$HOME/.stub/npm-calls.log"
+root="$HOME/.stub/npm-global/lib/node_modules"
+case "${1-}" in
+    root) mkdir -p "$root"; echo "$root" ;;
+    install)
+        for a in "$@"; do spec="$a"; done
+        pkg="$root/${spec%@*}"
+        mkdir -p "$pkg/dist"
+        printf '{"name":"%s","version":"%s"}\n' "${spec%@*}" "${spec##*@}" > "$pkg/package.json"
+        echo '// stub' > "$pkg/dist/cli.js" ;;
+esac
+exit 0
+'''
+
+NODE_STUB = r'''#!/usr/bin/env bash
+case "${1-}" in
+    -p) echo 22 ;;
+    --version) echo v22.0.0 ;;
+esac
+exit 0
+'''
+
+LAUNCHCTL_STUB = r'''#!/usr/bin/env bash
+echo "$*" >> "$HOME/.stub/launchctl-calls.log"
+loaded="$HOME/.stub/launchd-loaded"
+case "${1-}" in
+    print) [[ -f "$loaded" ]] || exit 113 ;;
+    bootstrap) [[ "${FAKE_LAUNCHCTL_FAIL:-}" == 1 ]] && exit 5; touch "$loaded" ;;
+    bootout) [[ -f "$loaded" ]] || exit 3; rm -f "$loaded" ;;
+esac
+exit 0
+'''
+
+SYSTEMCTL_STUB = r'''#!/usr/bin/env bash
+echo "$*" >> "$HOME/.stub/systemctl-calls.log"
+active="$HOME/.stub/systemd-active"
+args=" $* "
+case "$args" in
+    *" show-environment "*) [[ "${FAKE_NO_SYSTEMD_USER:-}" == 1 ]] && exit 1 ;;
+    *" is-active "*) [[ -f "$active" ]] || exit 3 ;;
+    *" restart "*) touch "$active" ;;
+    *" disable "*) rm -f "$active" ;;
+esac
+exit 0
+'''
+
+SECURITY_STUB = r'''#!/usr/bin/env python3
+import json, os, shlex, sys
+from pathlib import Path
+
+home = Path(os.environ["HOME"])
+store = home / ".stub" / "keychain.json"
+with (home / ".stub" / "security-calls.log").open("a") as fh:
+    fh.write(" ".join(sys.argv[1:]) + "\n")
+items = json.loads(store.read_text()) if store.exists() else {}
+
+def opt(args, flag):
+    return args[args.index(flag) + 1] if flag in args else ""
+
+def run(args):
+    key = f"{opt(args, '-s')}|{opt(args, '-a')}"
+    if args[0] == "add-generic-password":
+        items[key] = opt(args, "-w")
+        store.write_text(json.dumps(items))
+    elif args[0] == "find-generic-password":
+        if key not in items or opt(args, "-a") == os.environ.get("FAKE_KEYCHAIN_HIDE"):
+            sys.exit(44)
+        print(items[key])
+    elif args[0] == "delete-generic-password":
+        if items.pop(key, None) is None:
+            sys.exit(44)
+        store.write_text(json.dumps(items))
+
+args = sys.argv[1:]
+if args[:1] == ["-i"]:
+    for line in sys.stdin:
+        if line.strip():
+            run(shlex.split(line))
+else:
+    run(args)
+'''
+
+CURL_STUB = r'''#!/usr/bin/env bash
+# Answer the lark-mcp health check; pass every other request to the real curl.
+for a in "$@"; do
+    if [[ "$a" == http://127.0.0.1:* ]]; then
+        echo "$*" >> "$HOME/.stub/curl-calls.log"
+        [[ "${FAKE_LARK_HEALTH:-ok}" == ok ]] || exit 7
+        echo 'event: message'
+        echo 'data: {"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"stub","version":"0"}},"jsonrpc":"2.0","id":1}'
+        exit 0
+    fi
+done
+exec "__REAL_CURL__" "$@"
+'''
+
+UNAME_STUB = r'''#!/usr/bin/env bash
+if [[ -n "${FAKE_UNAME:-}" && "${1-}" == "-s" ]]; then
+    echo "$FAKE_UNAME"
+    exit 0
+fi
+exec "__REAL_UNAME__" "$@"
+'''
+
+SERVICE_STUBS = {
+    "npm": NPM_STUB,
+    "node": NODE_STUB,
+    "launchctl": LAUNCHCTL_STUB,
+    "systemctl": SYSTEMCTL_STUB,
+    "security": SECURITY_STUB,
+    "curl": CURL_STUB.replace("__REAL_CURL__", REAL_CURL),
+    "uname": UNAME_STUB.replace("__REAL_UNAME__", REAL_UNAME),
+}
+
 ZSHRC = textwrap.dedent(
     """\
     export KEEP_ME=1
@@ -166,24 +303,28 @@ class Env:
         self.bin = tmp / "bin"
         (self.home / ".stub").mkdir(parents=True)
         self.bin.mkdir()
-        for name, body in (("claude", CLAUDE_STUB), ("npx", NPX_STUB), ("git", GIT_STUB.replace("__REAL_GIT__", REAL_GIT))):
+        stubs = {"claude": CLAUDE_STUB, "npx": NPX_STUB, "git": GIT_STUB.replace("__REAL_GIT__", REAL_GIT), **SERVICE_STUBS}
+        for name, body in stubs.items():
             path = self.bin / name
             path.write_text(body)
             path.chmod(0o755)
         (self.home / ".zshrc").write_text(ZSHRC)
 
-    def run(self, *args: str, menu: str | None = None, state_out: bool = False) -> subprocess.CompletedProcess:
+    def run(self, *args: str, menu: str | None = None, state_out: bool = False,
+            extra: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         env = {
             "HOME": str(self.home),
             "PATH": f"{self.bin}:{os.environ.get('PATH', '/usr/bin:/bin')}",
             "TMPDIR": str(self.home / ".stub"),
             "NET_TIMEOUT": "20",
             "LANG": "C",
+            "ACCC_LARK_HEALTH_TRIES": "2",
         }
         if menu is not None:
             env["ACCC_TEST_MENU_IDS"] = menu
         if state_out:
             env["ACCC_TEST_MENU_STATE_OUT"] = str(self.home / ".stub" / "menu-state.txt")
+        env.update(extra or {})
         (self.home / ".stub" / "claude-calls.log").write_text("")
         result = subprocess.run(
             [BASH, str(INSTALL_SH), *args],

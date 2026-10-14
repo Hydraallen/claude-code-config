@@ -1,5 +1,29 @@
 # Changelog
 
+## [4.3.0] - 2026-10-13
+
+### Features
+- **Lark / Feishu MCP runs as one shared localhost service.** `install.sh --only mcp-lark` installs `@larksuiteoapi/lark-mcp@0.5.1` globally (`npm i -g`; version in `LARK_MCP_VERSION`) and runs it in streamable HTTP mode on `127.0.0.1:3100`: a LaunchAgent (`com.claude-code-config.lark-mcp`, RunAtLoad + KeepAlive, logs in `~/Library/Logs/lark-mcp*.log`) on macOS, a systemd user unit (`lark-mcp.service`, Restart=on-failure) on Linux and on WSL with systemd. Claude Code is registered with `claude mcp add --scope user --transport http lark-mcp http://127.0.0.1:3100/mcp`. `LARK_MCP_PORT` selects another port at install time; the port is saved in `~/.config/lark-mcp/env`.
+- **The App Secret is no longer in argv.** macOS keeps it in the login Keychain (service `claude-code-config.lark-mcp`, written through `security -i` on stdin); Linux / WSL keep it in `~/.config/lark-mcp/env` (chmod 600, `XDG_CONFIG_HOME` respected). The secret prompt no longer echoes (`read -rs`).
+- **Health check and fallback.** After starting the service the installer POSTs an MCP `initialize` with curl (up to about 15 s). Without launchd / a `systemctl --user` session, or when the check fails, it removes the service and registers the stdio launcher `~/.config/lark-mcp/run.sh`, which reads the env file (and the Keychain on macOS) and execs the global package. When the npm global prefix is not writable the installer prints how to fix it and the launcher uses `npx` instead.
+- **Migration and ownership.** A re-run replaces this installer's earlier `npx ... -a ... -s ...` registration, reading the App ID and Secret from it, and reuses saved credentials without prompting. `mcp_is_ours` also recognizes the http URL and the launcher path when the marker `~/.config/lark-mcp/installed-by-claude-code-config` exists. A `lark-mcp` entry with any other command is left in place.
+- **Removal.** Unticking the item or `--uninstall` removes the registration, the LaunchAgent / systemd unit, `~/.config/lark-mcp/` and the Keychain item. The selection record's `lark` item now carries `lark.mode` (`shared` / `stdio`) and, for shared, `url`, `service` and `healthy`.
+- `scripts/check_mcp.py --url <http endpoint>` checks an MCP initialize over streamable HTTP.
+
+### Design Rationale
+- Each per-session lark-mcp process uses about 1 GB of RAM. lark-mcp 0.5.1's streamable mode creates a new server per `POST /mcp` request (stateless), so concurrent sessions can share one process.
+- The service binds to 127.0.0.1 and has no authentication; this was accepted for single-user machines and is documented.
+- WSL without systemd and hosts without a user session manager keep working through the stdio launcher instead of failing.
+- On rerun, an unchanged plist / unit / env file does not restart a healthy service, so open sessions are not interrupted. A widened `LARK_TOOLS` and extra keys such as `LARK_DOMAIN` in the env file are kept.
+
+### Notes & Caveats
+- Native Windows (`install.ps1`) is unchanged and stays per-session stdio via `npx`.
+- The localhost port lets any local process call Lark as the app. On shared hosts use the per-session stdio registration (docs/LARK-MCP.md, step 4b).
+- `lark-mcp` entries added by hand are not migrated; remove them with `claude mcp remove lark-mcp --scope user` and re-run.
+- Removal leaves the global npm package installed (`npm rm -g @larksuiteoapi/lark-mcp`).
+- The systemd unit does not enable linger, so the service runs only while the user has a session.
+- Tests: the install harness now stubs `npm`, `node`, `launchctl`, `systemctl`, `security`, the localhost `curl` health check and `uname -s`; `tests/test_install_lark_mcp.py` covers launchd, systemd, WSL fallback, health-check fallback, unwritable npm prefix, migration, ownership and removal.
+
 ## [4.2.10] - 2026-10-07
 
 ### Features

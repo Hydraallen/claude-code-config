@@ -2,6 +2,30 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.3.0] - 2026-10-13
+
+### Features
+- **Lark / 飞书 MCP 以一个本地共享服务运行。** `install.sh --only mcp-lark` 用 `npm i -g` 全局安装 `@larksuiteoapi/lark-mcp@0.5.1`（版本号在 `LARK_MCP_VERSION`），并在 `127.0.0.1:3100` 以 streamable HTTP 模式运行：macOS 上为 LaunchAgent（`com.claude-code-config.lark-mcp`，RunAtLoad + KeepAlive，日志在 `~/Library/Logs/lark-mcp*.log`），Linux 及启用 systemd 的 WSL 上为 systemd 用户单元（`lark-mcp.service`，Restart=on-failure）。Claude Code 的注册为 `claude mcp add --scope user --transport http lark-mcp http://127.0.0.1:3100/mcp`。安装时可用 `LARK_MCP_PORT` 指定其他端口，端口写入 `~/.config/lark-mcp/env`。
+- **App Secret 不再出现在命令行参数中。** macOS 存入登录钥匙串（服务名 `claude-code-config.lark-mcp`，经 stdin 由 `security -i` 写入）；Linux / WSL 存入 `~/.config/lark-mcp/env`（权限 600，遵循 `XDG_CONFIG_HOME`）。输入 Secret 时不再回显（`read -rs`）。
+- **健康检查与回退。** 启动服务后，安装器用 curl 发送 MCP `initialize`（最长约 15 秒）。没有 launchd / `systemctl --user` 会话，或检查失败时，删除服务并注册 stdio 启动脚本 `~/.config/lark-mcp/run.sh`；该脚本读取 env 文件（macOS 上读取钥匙串）并执行全局安装的包。npm 全局目录不可写时，安装器给出修复方法，启动脚本改用 `npx`。
+- **迁移与归属。** 重跑时替换本安装器旧版注册的 `npx ... -a ... -s ...` 条目，并从中读取 App ID 和 Secret；已保存凭据时不再询问。存在标记文件 `~/.config/lark-mcp/installed-by-claude-code-config` 时，`mcp_is_ours` 也识别 http URL 和启动脚本路径。其他命令的 `lark-mcp` 条目保持不变。
+- **移除。** 取消勾选或 `--uninstall` 会删除注册、LaunchAgent / systemd 单元、`~/.config/lark-mcp/` 及钥匙串条目。选择记录的 `lark` 项新增 `lark.mode`（`shared` / `stdio`），共享模式下还有 `url`、`service` 和 `healthy`。
+- `scripts/check_mcp.py --url <http 端点>` 通过 streamable HTTP 检查 MCP initialize。
+
+### Design Rationale
+- 每个按会话启动的 lark-mcp 进程约占 1 GB 内存。lark-mcp 0.5.1 的 streamable 模式对每个 `POST /mcp` 请求新建 server（无状态），多个会话可以共用一个进程。
+- 服务只监听 127.0.0.1，没有鉴权；在单用户机器上接受这一点，并写入文档。
+- 未启用 systemd 的 WSL 和没有用户会话管理器的主机通过 stdio 启动脚本继续可用，不会安装失败。
+- 重跑时，若 plist / 单元 / env 文件没有变化且服务健康，不重启服务，已打开的会话不受影响。env 文件中放宽过的 `LARK_TOOLS` 以及 `LARK_DOMAIN` 等额外键会保留。
+
+### Notes & Caveats
+- 原生 Windows（`install.ps1`）没有变化，仍通过 `npx` 按会话 stdio 运行。
+- 本地端口允许本机任何进程以应用身份调用飞书。多人共用的主机请使用按会话 stdio 注册（docs/LARK-MCP.zh-CN.md 第 4b 节）。
+- 手动添加的 `lark-mcp` 条目不会迁移；先 `claude mcp remove lark-mcp --scope user` 再重跑。
+- 移除时保留全局 npm 包（`npm rm -g @larksuiteoapi/lark-mcp`）。
+- systemd 单元不启用 linger，服务只在用户有会话时运行。
+- 测试：安装测试框架新增 `npm`、`node`、`launchctl`、`systemctl`、`security`、本地 `curl` 健康检查及 `uname -s` 的桩；`tests/test_install_lark_mcp.py` 覆盖 launchd、systemd、WSL 回退、健康检查回退、npm 目录不可写、迁移、归属判断与移除。
+
 ## [4.2.10] - 2026-10-07
 
 ### Features

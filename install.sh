@@ -514,6 +514,8 @@ every run removes retired items (github plugin + GitHub MCP, claude-mem, PUA)
 and their leftovers (plugin caches/data, ~/.claude-mem, ~/.claude.json usage
 records; set ACCC_KEEP_CLAUDE_MEM_DATA=1 to keep ~/.claude-mem).
 --all installs every item except the opt-in storage-analyzer skill.
+Lark/Feishu MCP (mcp-lark) runs as one shared service on 127.0.0.1:3100
+(LARK_MCP_PORT=<port> picks another port) and falls back to per-session stdio.
 
 Examples:
     $(basename "$0")                                 # Interactive selector
@@ -559,8 +561,24 @@ WRAPPER_PREEXISTED=false
 # Which lark-mcp tool preset to register. Without -t the package defaults to
 # preset.default, and upstream's own FAQ lists "token limit exceeded after
 # starting the MCP service" as a known problem whose documented fix is this very
-# flag. preset.light is the smallest set; widen it in ~/.claude.json later.
+# flag. preset.light is the smallest set; widen LARK_TOOLS in the lark-mcp env
+# file later (a re-run keeps it).
 LARK_MCP_PRESET="preset.light"
+# Pinned lark-mcp release, installed globally (npm i -g) for the shared service
+# and the stdio launcher.
+LARK_MCP_VERSION="0.5.1"
+# The shared service listens on 127.0.0.1 only. LARK_MCP_PORT overrides the
+# port at install time; the chosen port is saved in the lark-mcp env file.
+LARK_MCP_PORT_REQUESTED="${LARK_MCP_PORT:-}"
+LARK_MCP_DEFAULT_PORT=3100
+LARK_CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/lark-mcp"
+LARK_LAUNCHD_LABEL="com.claude-code-config.lark-mcp"
+LARK_KEYCHAIN_SERVICE="claude-code-config.lark-mcp"
+LARK_SYSTEMD_UNIT="lark-mcp.service"
+# ACCC_TEST_SYSTEMD_RUN_DIR is an internal test hook.
+LARK_SYSTEMD_RUN_DIR="${ACCC_TEST_SYSTEMD_RUN_DIR:-/run/systemd/system}"
+# Set by install_lark_mcp for the "Next steps" summary.
+LARK_MCP_STATUS=""
 # WSL only: Playwright runs as a Windows-side MCP server (Windows node.exe) so it
 # drives the Chrome installed on Windows instead of a Linux Chromium.
 WSL_BROWSER="${ACCC_WSL_BROWSER:-auto}"
@@ -1176,11 +1194,11 @@ deepxiv-baseline-table|Baseline comparison table from papers|0|deepxiv-baseline-
     #   plugin uses — and a user-scope entry shadows the plugin's, so enabling
     #   both leaves the plugin one silently never started. Pick this only if
     #   you deselect the playwright plugin in the Plugins group.
-    #   Lark/Feishu needs App ID/Secret credentials and ~1GB RAM per session.
+    #   Lark/Feishu needs App ID/Secret credentials; it runs as one shared ~1GB service.
     MENU_GROUP_LABELS+=("MCP Servers")
     MENU_GROUP_HINTS+=("")
     MENU_GROUP_ITEMS+=("Playwright MCP|Standalone server — shadows the playwright plugin, pick only without it|0|mcp
-Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret, ~1GB RAM/session|0|mcp-lark")
+Lark/Feishu MCP|Feishu/Lark integration — needs App ID/Secret; one shared ~1GB localhost service|0|mcp-lark")
 
 }
 
@@ -4693,6 +4711,568 @@ wsl_remove_windows_files() {
     fi
 }
 
+# --- Lark MCP: one shared localhost service, stdio fallback -----------------
+#
+# Shared mode runs a single lark-mcp (streamable HTTP, bound to 127.0.0.1)
+# under launchd (macOS) or a systemd user unit (Linux / WSL with systemd), and
+# every Claude session connects to it over http instead of starting its own
+# ~1 GB node process. Without a usable service manager, or when the service
+# fails its health check, Claude starts the same pinned package per session
+# through $LARK_WRAPPER (stdio). The App Secret never appears in argv: it lives
+# in the login Keychain on macOS and in the chmod 600 env file elsewhere.
+#
+# Files (all owned by this installer once $LARK_MARKER exists):
+#   $LARK_CONF_DIR/env      APP_ID, [APP_SECRET], LARK_TOOLS, LARK_MCP_PORT
+#   $LARK_CONF_DIR/run.sh   launcher: run.sh [stdio|http]
+#   ~/Library/LaunchAgents/$LARK_LAUNCHD_LABEL.plist   (macOS)
+#   ~/.config/systemd/user/$LARK_SYSTEMD_UNIT           (Linux / WSL)
+
+LARK_ENV_FILE="$LARK_CONF_DIR/env"
+LARK_WRAPPER="$LARK_CONF_DIR/run.sh"
+LARK_MARKER="$LARK_CONF_DIR/installed-by-claude-code-config"
+LARK_PLIST="$HOME/Library/LaunchAgents/$LARK_LAUNCHD_LABEL.plist"
+LARK_UNIT_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$LARK_SYSTEMD_UNIT"
+# Values written unquoted into the env file, which both sh and systemd read.
+LARK_VALUE_RE='^[A-Za-z0-9._~+/=-]+$'
+
+_lark_conf_get() {
+    [[ -f "$LARK_ENV_FILE" ]] || return 0
+    sed -n "s/^$1=//p" "$LARK_ENV_FILE" | tail -n 1
+}
+
+_lark_valid_port() {
+    [[ "$1" =~ ^[0-9]+$ ]] && (( 10#$1 >= 1024 && 10#$1 <= 65535 ))
+}
+
+# Port recorded by the last install (what an existing registration points at).
+lark_saved_port() {
+    local p
+    p="$(_lark_conf_get LARK_MCP_PORT)"
+    _lark_valid_port "$p" && echo "$p" || echo "$LARK_MCP_DEFAULT_PORT"
+}
+
+# Port for this install: LARK_MCP_PORT from the environment, else the saved one.
+lark_port() {
+    if [[ -n "$LARK_MCP_PORT_REQUESTED" ]] && _lark_valid_port "$LARK_MCP_PORT_REQUESTED"; then
+        echo "$LARK_MCP_PORT_REQUESTED"
+    else
+        lark_saved_port
+    fi
+}
+
+_sh_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+_xml_escape() {
+    printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+# Quote one argument for a systemd ExecStart= line.
+_systemd_quote() {
+    printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g' -e 's/\$/$$/g')"
+}
+
+# Write $2 to file $1 (mode $3) atomically. Returns 0 when the content changed.
+_lark_write_file() {
+    local dest="$1" content="$2" mode="$3" tmp
+    if [[ -f "$dest" ]] && [[ "$(cat "$dest")" == "$content" ]]; then
+        chmod "$mode" "$dest"
+        return 1
+    fi
+    mkdir -p "$(dirname "$dest")"
+    tmp="$(mktemp "$dest.tmp.XXXXXX")"
+    chmod "$mode" "$tmp"
+    printf '%s\n' "$content" > "$tmp"
+    mv -f "$tmp" "$dest"
+    return 0
+}
+
+_lark_is_macos() { [[ "$(uname -s 2>/dev/null)" == Darwin ]]; }
+
+# URL of the last http registration this installer made (kept in the marker,
+# so ownership survives a port change whose registration failed).
+_lark_registered_url() {
+    [[ -f "$LARK_MARKER" ]] || return 0
+    sed -n 's/^REGISTERED_URL=//p' "$LARK_MARKER" | tail -n 1
+}
+
+_lark_record_registration() {
+    printf 'REGISTERED_URL=%s\n' "$1" > "$LARK_MARKER"
+}
+
+# 0 when $1 holds an http registration of our service or our wrapper command.
+# The npx form (lark-mcp before 4.3.0) is recognized by mcp_is_ours itself.
+lark_entry_is_ours() {
+    local cfg="$HOME/.claude.json"
+    [[ -f "$LARK_MARKER" && -f "$cfg" ]] && command -v jq &>/dev/null || return 1
+    jq -e --arg url "http://127.0.0.1:$(lark_saved_port)/mcp" --arg reg "$(_lark_registered_url)" \
+        --arg w "$LARK_WRAPPER" '
+        (.mcpServers["lark-mcp"]? // null) as $s
+        | ($s.url? // "") as $u
+        | $s != null
+          and ($u == $url or ($reg != "" and $u == $reg) or (($s.command? // "") == $w))
+    ' "$cfg" >/dev/null 2>&1
+}
+
+# Set LARK_APP_ID / LARK_APP_SECRET from this installer's saved settings (the
+# secret from the Keychain on macOS), else from an old npx registration of
+# ours that carried them in argv (-a/-s) or env. Returns 1 when none is found.
+lark_saved_credentials() {
+    local id secret="" cfg="$HOME/.claude.json" pair
+    id="$(_lark_conf_get APP_ID)"
+    if [[ -n "$id" ]]; then
+        secret="$(_lark_conf_get APP_SECRET)"
+        if [[ -z "$secret" ]] && _lark_is_macos && command -v security &>/dev/null; then
+            secret="$(security find-generic-password -s "$LARK_KEYCHAIN_SERVICE" -a "$id" -w 2>/dev/null || true)"
+        fi
+    fi
+    if [[ -z "$id" || -z "$secret" ]] && [[ -f "$cfg" ]] && mcp_is_ours lark-mcp; then
+        pair="$(jq -r '
+            (.mcpServers["lark-mcp"] // {}) as $s
+            | ($s.args // [] | map(tostring)) as $a
+            | ([range(0; ($a | length) - 1) | select($a[.] == "-a" or $a[.] == "--app-id") | $a[. + 1]][0]
+                // $s.env.APP_ID // ""),
+              ([range(0; ($a | length) - 1) | select($a[.] == "-s" or $a[.] == "--app-secret") | $a[. + 1]][0]
+                // $s.env.APP_SECRET // "")
+        ' "$cfg" 2>/dev/null || true)"
+        id="$(sed -n 1p <<< "$pair")"
+        secret="$(sed -n 2p <<< "$pair")"
+    fi
+    [[ -n "$id" && -n "$secret" ]] || return 1
+    LARK_APP_ID="$id"
+    LARK_APP_SECRET="$secret"
+}
+
+lark_prompt_credentials() {
+    local id="" secret=""
+    echo ""
+    info "Lark MCP requires Feishu App credentials:"
+    info "  Get them from: https://open.feishu.cn/app"
+    echo -n "  App ID: " > /dev/tty
+    read -r id </dev/tty
+    echo -n "  App Secret (input hidden): " > /dev/tty
+    read -rs secret </dev/tty
+    echo "" > /dev/tty
+    LARK_APP_ID="$id"
+    LARK_APP_SECRET="$secret"
+}
+
+# Install @larksuiteoapi/lark-mcp@$LARK_MCP_VERSION globally unless that exact
+# version is already there; set LARK_NODE / LARK_CLI (absolute paths). Returns
+# 1 with LARK_FALLBACK_REASON set when node/npm are missing, the global prefix
+# is not writable, or npm fails.
+lark_install_global() {
+    local root pkg cur target major
+    LARK_NODE="" LARK_CLI="" LARK_PACKAGE_UPDATED=false
+    if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
+        LARK_FALLBACK_REASON="node / npm not found on PATH"
+        return 1
+    fi
+    major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+    if [[ "$major" =~ ^[0-9]+$ ]] && (( major < 20 )); then
+        warn "lark-mcp $LARK_MCP_VERSION declares Node.js >= 20; found $(node --version 2>/dev/null)"
+    fi
+    root="$(npm root -g 2>/dev/null || true)"
+    if [[ -z "$root" ]]; then
+        LARK_FALLBACK_REASON="npm root -g failed"
+        return 1
+    fi
+    pkg="$root/@larksuiteoapi/lark-mcp"
+    cur="$(jq -r '.version // empty' "$pkg/package.json" 2>/dev/null || true)"
+    if [[ "$cur" != "$LARK_MCP_VERSION" ]]; then
+        target="$root"
+        [[ -d "$target" ]] || target="$(dirname "$root")"
+        if [[ ! -w "$target" ]]; then
+            LARK_FALLBACK_REASON="the npm global prefix is not writable ($target)"
+            return 1
+        fi
+        info "Installing @larksuiteoapi/lark-mcp@$LARK_MCP_VERSION globally (npm i -g)..."
+        if ! npm install -g --no-fund --no-audit "@larksuiteoapi/lark-mcp@$LARK_MCP_VERSION" >/dev/null 2>&1; then
+            LARK_FALLBACK_REASON="npm install -g @larksuiteoapi/lark-mcp@$LARK_MCP_VERSION failed"
+            return 1
+        fi
+        LARK_PACKAGE_UPDATED=true
+    fi
+    if [[ ! -f "$pkg/dist/cli.js" ]]; then
+        LARK_FALLBACK_REASON="$pkg/dist/cli.js missing after npm install"
+        return 1
+    fi
+    LARK_NODE="$(command -v node)"
+    LARK_CLI="$pkg/dist/cli.js"
+}
+
+# Store the App Secret in the login Keychain. `security -i` reads the command
+# from stdin, so the secret stays out of the process list.
+lark_keychain_store() {
+    command -v security &>/dev/null || return 1
+    printf 'add-generic-password -U -s %s -a %s -w %s\n' \
+        "$LARK_KEYCHAIN_SERVICE" "$LARK_APP_ID" "$LARK_APP_SECRET" | security -i >/dev/null 2>&1 || true
+    [[ "$(security find-generic-password -s "$LARK_KEYCHAIN_SERVICE" -a "$LARK_APP_ID" -w 2>/dev/null)" == "$LARK_APP_SECRET" ]]
+}
+
+# Write the env file and the launcher. Returns 0 when either changed. A widened
+# LARK_TOOLS and any other line the user added (LARK_DOMAIN, ...) are kept.
+lark_write_config() {
+    local secret_in_file="$1" port="$2" changed=1 env wrapper launcher tools extra=""
+    tools="$(_lark_conf_get LARK_TOOLS)"
+    [[ "$tools" =~ ^[A-Za-z0-9._,-]+$ ]] || tools="$LARK_MCP_PRESET"
+    if [[ -f "$LARK_ENV_FILE" ]]; then
+        extra="$(grep -vE '^(#|[[:space:]]*$|APP_ID=|APP_SECRET=|LARK_TOOLS=|LARK_MCP_PORT=)' "$LARK_ENV_FILE" || true)"
+    fi
+    env="# lark-mcp settings written by claude-code-config install.sh
+APP_ID=$LARK_APP_ID"
+    $secret_in_file && env+="
+APP_SECRET=$LARK_APP_SECRET"
+    env+="
+LARK_TOOLS=$tools
+LARK_MCP_PORT=$port"
+    [[ -n "$extra" ]] && env+="
+$extra"
+    if [[ -n "$LARK_CLI" ]]; then
+        launcher="set -- $(_sh_quote "$LARK_NODE") $(_sh_quote "$LARK_CLI")"
+    else
+        launcher="set -- npx -y $(_sh_quote "@larksuiteoapi/lark-mcp@$LARK_MCP_VERSION")"
+    fi
+    wrapper="#!/bin/sh
+# lark-mcp launcher written by claude-code-config install.sh.
+# Usage: run.sh [stdio|http]. Settings come from the env file next to this
+# script; on macOS the App Secret is read from the login Keychain.
+set -e
+mode=\"\${1:-stdio}\"
+set -a
+. $(_sh_quote "$LARK_ENV_FILE")
+set +a
+if [ -z \"\${APP_SECRET:-}\" ] && [ -x /usr/bin/security ]; then
+    APP_SECRET=\"\$(/usr/bin/security find-generic-password -s $(_sh_quote "$LARK_KEYCHAIN_SERVICE") -a \"\$APP_ID\" -w)\"
+    export APP_SECRET
+fi
+$launcher
+if [ \"\$mode\" = http ]; then
+    exec \"\$@\" mcp -m streamable --host 127.0.0.1 -p \"\$LARK_MCP_PORT\"
+fi
+exec \"\$@\" mcp -m stdio"
+    mkdir -p "$LARK_CONF_DIR"
+    chmod 700 "$LARK_CONF_DIR"
+    _lark_write_file "$LARK_ENV_FILE" "$env" 600 && changed=0
+    _lark_write_file "$LARK_WRAPPER" "$wrapper" 700 && changed=0
+    return $changed
+}
+
+# Load (or reload when $1 is true or the plist changed) the LaunchAgent.
+lark_start_launchd() {
+    local force="$1" uid plist logs
+    if ! command -v launchctl &>/dev/null; then
+        LARK_FALLBACK_REASON="launchctl not found"
+        return 1
+    fi
+    uid="$(id -u)"
+    logs="$HOME/Library/Logs"
+    plist="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+<!-- Written by claude-code-config install.sh (Lark MCP shared service). -->
+<plist version=\"1.0\">
+<dict>
+    <key>Label</key>
+    <string>$LARK_LAUNCHD_LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$(_xml_escape "$LARK_WRAPPER")</string>
+        <string>http</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$(_xml_escape "$logs/lark-mcp.log")</string>
+    <key>StandardErrorPath</key>
+    <string>$(_xml_escape "$logs/lark-mcp.err.log")</string>
+</dict>
+</plist>"
+    mkdir -p "$logs"
+    _lark_write_file "$LARK_PLIST" "$plist" 644 && force=true
+    if ! $force && launchctl print "gui/$uid/$LARK_LAUNCHD_LABEL" >/dev/null 2>&1; then
+        return 0
+    fi
+    launchctl bootout "gui/$uid/$LARK_LAUNCHD_LABEL" >/dev/null 2>&1 || true
+    # bootout returns before the job is fully gone; bootstrap can briefly fail.
+    if ! retry 3 1 "launchctl bootstrap $LARK_LAUNCHD_LABEL" \
+        launchctl bootstrap "gui/$uid" "$LARK_PLIST" >/dev/null 2>&1; then
+        LARK_FALLBACK_REASON="launchctl bootstrap failed"
+        return 1
+    fi
+}
+
+lark_systemd_available() {
+    [[ -d "$LARK_SYSTEMD_RUN_DIR" ]] && command -v systemctl &>/dev/null \
+        && systemctl --user show-environment >/dev/null 2>&1
+}
+
+lark_start_systemd() {
+    local force="$1" port="$2" unit
+    unit="# Written by claude-code-config install.sh (Lark MCP shared service).
+[Unit]
+Description=Lark/Feishu MCP server on 127.0.0.1 (claude-code-config)
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=${LARK_ENV_FILE//%/%%}
+ExecStart=$(_systemd_quote "$LARK_NODE") $(_systemd_quote "$LARK_CLI") mcp -m streamable --host 127.0.0.1 -p $port
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target"
+    _lark_write_file "$LARK_UNIT_FILE" "$unit" 644 && force=true
+    if ! systemctl --user daemon-reload >/dev/null 2>&1 \
+        || ! systemctl --user enable "$LARK_SYSTEMD_UNIT" >/dev/null 2>&1; then
+        LARK_FALLBACK_REASON="systemctl --user enable $LARK_SYSTEMD_UNIT failed"
+        return 1
+    fi
+    if $force || ! systemctl --user is-active --quiet "$LARK_SYSTEMD_UNIT" 2>/dev/null; then
+        if ! systemctl --user restart "$LARK_SYSTEMD_UNIT" >/dev/null 2>&1; then
+            LARK_FALLBACK_REASON="systemctl --user restart $LARK_SYSTEMD_UNIT failed"
+            return 1
+        fi
+    fi
+}
+
+# POST an MCP initialize to $1; retried for up to $2 attempts, 1 s apart.
+lark_health_check() {
+    local url="$1" tries="${2:-${ACCC_LARK_HEALTH_TRIES:-15}}" i=1 out body
+    command -v curl &>/dev/null || return 1
+    body='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude-code-config-install","version":"1"}}}'
+    while :; do
+        # --noproxy: an http_proxy in the environment must not intercept localhost.
+        out="$(curl -sS -m 5 --noproxy '*' -X POST -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' --data "$body" "$url" 2>/dev/null || true)"
+        [[ "$out" == *'"serverInfo"'* ]] && return 0
+        (( i >= tries )) && return 1
+        i=$((i + 1))
+        sleep 1
+    done
+}
+
+# Stop and delete our LaunchAgent / systemd unit (tolerates missing pieces).
+lark_stop_service() {
+    if [[ -f "$LARK_PLIST" ]] && grep -q "claude-code-config" "$LARK_PLIST" 2>/dev/null; then
+        command -v launchctl &>/dev/null && \
+            launchctl bootout "gui/$(id -u)/$LARK_LAUNCHD_LABEL" >/dev/null 2>&1 || true
+        rm -f "$LARK_PLIST"
+    fi
+    if [[ -f "$LARK_UNIT_FILE" ]] && grep -q "claude-code-config" "$LARK_UNIT_FILE" 2>/dev/null; then
+        if command -v systemctl &>/dev/null; then
+            systemctl --user disable --now "$LARK_SYSTEMD_UNIT" >/dev/null 2>&1 || true
+        fi
+        rm -f "$LARK_UNIT_FILE"
+        command -v systemctl &>/dev/null && systemctl --user daemon-reload >/dev/null 2>&1 || true
+    fi
+}
+
+# Remove the service, launcher, settings and Keychain item this installer
+# created. The global npm package is left installed.
+lark_remove_local_setup() {
+    local id
+    [[ -f "$LARK_MARKER" ]] || return 0
+    if $DRY_RUN; then
+        info "Would stop the lark-mcp service and remove $LARK_CONF_DIR (and its Keychain item)"
+        return 0
+    fi
+    id="$(_lark_conf_get APP_ID)"
+    lark_stop_service
+    if [[ -n "$id" ]] && _lark_is_macos && command -v security &>/dev/null; then
+        security delete-generic-password -s "$LARK_KEYCHAIN_SERVICE" -a "$id" >/dev/null 2>&1 || true
+    fi
+    rm -f "$LARK_ENV_FILE" "$LARK_WRAPPER" "$LARK_MARKER"
+    rmdir "$LARK_CONF_DIR" 2>/dev/null || true
+    ok "Removed the lark-mcp service, launcher and saved credentials"
+}
+
+# One-line JSON describing the current lark-mcp registration (selection record).
+lark_status_json() {
+    local cfg="$HOME/.claude.json" kind="" service="" healthy=false url
+    [[ -f "$cfg" ]] && command -v jq &>/dev/null || { echo '{}'; return 0; }
+    url="$(jq -r '.mcpServers["lark-mcp"].url // empty' "$cfg" 2>/dev/null || true)"
+    if [[ -n "$url" ]]; then
+        kind="shared"
+        [[ -f "$LARK_PLIST" ]] && service="launchd"
+        [[ -f "$LARK_UNIT_FILE" ]] && service="systemd"
+        lark_health_check "$url" 1 && healthy=true
+        jq -cn --arg s "$service" --arg u "$url" --argjson h "$healthy" \
+            '{mode: "shared", url: $u, healthy: $h} + (if $s != "" then {service: $s} else {} end)'
+        return 0
+    fi
+    if [[ "$(jq -r '.mcpServers["lark-mcp"].command // empty' "$cfg" 2>/dev/null)" == "$LARK_WRAPPER" ]]; then
+        echo '{"mode":"stdio"}'
+    elif mcp_is_ours lark-mcp; then
+        echo '{"mode":"stdio-npx"}'
+    elif mcp_registered lark-mcp; then
+        echo '{"mode":"foreign"}'
+    else
+        echo '{}'
+    fi
+}
+
+# Register lark-mcp: replace our older registration (npx / other mode / other
+# port), keep a foreign one, and skip when nothing changed.
+lark_register() {
+    local wanted current previous="" cfg="$HOME/.claude.json"
+    if [[ "$1" == http ]]; then
+        wanted="$(jq -cn --arg u "$2" '{type: "http", url: $u}')"
+        current="$(jq -c '.mcpServers["lark-mcp"] // null | if . == null then null else {type, url} end' "$cfg" 2>/dev/null || echo null)"
+    else
+        wanted="$(jq -cn --arg c "$2" '{command: $c, args: []}')"
+        current="$(jq -c '.mcpServers["lark-mcp"] // null | if . == null then null else {command, args: (.args // [])} end' "$cfg" 2>/dev/null || echo null)"
+    fi
+    if [[ "$current" == "$wanted" ]]; then
+        ok "MCP server lark-mcp already registered ($1)"
+        return 0
+    fi
+    if mcp_registered lark-mcp; then
+        previous="$(jq -c '.mcpServers["lark-mcp"]' "$cfg" 2>/dev/null || true)"
+        claude mcp remove lark-mcp --scope user >/dev/null 2>&1 || true
+        info "Replaced the previous lark-mcp registration"
+    fi
+    if [[ "$1" == http ]]; then
+        retry 3 3 "Add MCP server lark-mcp" claude mcp add --scope user --transport http lark-mcp "$2" >/dev/null 2>&1 && return 0
+    else
+        retry 3 3 "Add MCP server lark-mcp" claude mcp add --scope user --transport stdio lark-mcp -- "$2" >/dev/null 2>&1 && return 0
+    fi
+    # Put the old entry back rather than leaving no lark-mcp at all.
+    if [[ -n "$previous" && "$previous" != null ]] && ! mcp_registered lark-mcp; then
+        if claude mcp add-json --scope user lark-mcp "$previous" >/dev/null 2>&1; then
+            warn "Restored the previous lark-mcp registration"
+        else
+            warn "Could not restore the previous lark-mcp registration: $previous"
+        fi
+    fi
+    return 1
+}
+
+install_lark_mcp() {
+    local port service="" secret_in_file=true changed=false url
+    if $DRY_RUN; then
+        info "Would install @larksuiteoapi/lark-mcp@$LARK_MCP_VERSION globally and register lark-mcp" \
+            "(shared service on 127.0.0.1:$(lark_port), per-session stdio fallback)"
+        return 0
+    fi
+    if mcp_registered lark-mcp && ! mcp_is_ours lark-mcp; then
+        ok "MCP server lark-mcp was not registered by this installer — left in place"
+        return 0
+    fi
+    local old_url old_id
+    old_url="$(jq -r '.mcpServers["lark-mcp"].url // empty' "$HOME/.claude.json" 2>/dev/null || true)"
+    # An older marker (4.3.0 before this field) records nothing; note the URL
+    # now, before the env file's port can change.
+    if [[ -n "$old_url" && -f "$LARK_MARKER" && -z "$(_lark_registered_url)" ]]; then
+        _lark_record_registration "$old_url"
+    fi
+    old_id="$(_lark_conf_get APP_ID)"
+    LARK_APP_ID="" LARK_APP_SECRET="" LARK_FALLBACK_REASON=""
+    if lark_saved_credentials; then
+        info "Lark MCP: reusing the saved credentials for App ID $LARK_APP_ID"
+    elif ! can_interact; then
+        warn "Skipping lark-mcp (requires interactive credential input)"
+        warn "  Run interactively to set it up: ./install.sh --only mcp-lark"
+        return 0
+    else
+        lark_prompt_credentials
+        if [[ -z "$LARK_APP_ID" || -z "$LARK_APP_SECRET" ]]; then
+            warn "Empty credentials — skipping lark-mcp (re-run ./install.sh --only mcp-lark later)"
+            return 0
+        fi
+    fi
+    if [[ ! "$LARK_APP_ID" =~ $LARK_VALUE_RE || ! "$LARK_APP_SECRET" =~ $LARK_VALUE_RE ]]; then
+        warn "Lark App ID / Secret contain unexpected characters — skipping lark-mcp"
+        (( INSTALL_WARNINGS++ )) || true
+        return 0
+    fi
+    if [[ -n "$LARK_MCP_PORT_REQUESTED" ]] && ! _lark_valid_port "$LARK_MCP_PORT_REQUESTED"; then
+        warn "LARK_MCP_PORT=$LARK_MCP_PORT_REQUESTED is not a port in 1024-65535 — using $(lark_saved_port)"
+    fi
+    port="$(lark_port)"
+    url="http://127.0.0.1:$port/mcp"
+
+    if lark_install_global; then
+        $LARK_PACKAGE_UPDATED && changed=true
+        if _lark_is_macos; then
+            service="launchd"
+        elif [[ "$(uname -s 2>/dev/null)" == Linux ]] && lark_systemd_available; then
+            service="systemd"
+        elif is_wsl; then
+            LARK_FALLBACK_REASON="this WSL distro has no systemd user session (enable systemd in /etc/wsl.conf)"
+        else
+            LARK_FALLBACK_REASON="no systemd user session (systemctl --user) available"
+        fi
+    else
+        warn "Lark MCP: $LARK_FALLBACK_REASON"
+        warn "  Make the npm global prefix writable without sudo, e.g.:"
+        warn "    npm config set prefix ~/.npm-global && export PATH=\"\$HOME/.npm-global/bin:\$PATH\""
+        warn "  then re-run ./install.sh --only mcp-lark. Using npx per session for now."
+        (( INSTALL_WARNINGS++ )) || true
+    fi
+
+    mkdir -p "$LARK_CONF_DIR"
+    chmod 700 "$LARK_CONF_DIR"
+    if _lark_is_macos && command -v security &>/dev/null; then
+        # A new App ID would otherwise leave the old one's Keychain item behind.
+        if [[ -n "$old_id" && "$old_id" != "$LARK_APP_ID" ]]; then
+            security delete-generic-password -s "$LARK_KEYCHAIN_SERVICE" -a "$old_id" >/dev/null 2>&1 || true
+        fi
+        if lark_keychain_store; then
+            secret_in_file=false
+        else
+            warn "Could not store the App Secret in the login Keychain — keeping it in $LARK_ENV_FILE (chmod 600)"
+        fi
+    fi
+    lark_write_config "$secret_in_file" "$port" && changed=true
+    [[ -f "$LARK_MARKER" ]] || : > "$LARK_MARKER"
+
+    local mode="stdio"
+    if [[ -n "$service" ]]; then
+        if "lark_start_$service" "$changed" "$port" && lark_health_check "$url"; then
+            mode="shared"
+        else
+            LARK_FALLBACK_REASON="${LARK_FALLBACK_REASON:-the $service service did not answer an MCP initialize on $url}"
+            lark_stop_service
+        fi
+    else
+        # A service from an earlier run (e.g. npm prefix became unwritable).
+        lark_stop_service
+    fi
+
+    if [[ "$mode" == shared ]]; then
+        if lark_register http "$url"; then
+            _lark_record_registration "$url"
+            ok "MCP server lark-mcp: shared $service service at $url"
+            LARK_MCP_STATUS="shared $service service at $url (healthy)"
+        else
+            warn "MCP server lark-mcp could not be added, skipping"
+        fi
+        return 0
+    fi
+    warn "Lark MCP uses per-session stdio (each Claude session starts its own lark-mcp): $LARK_FALLBACK_REASON"
+    if lark_register stdio "$LARK_WRAPPER"; then
+        ok "MCP server lark-mcp: stdio via $LARK_WRAPPER"
+        LARK_MCP_STATUS="per-session stdio via $LARK_WRAPPER — $LARK_FALLBACK_REASON"
+    else
+        warn "MCP server lark-mcp could not be added, skipping"
+    fi
+}
+
+# Unchecked Lark item: remove our registration, then the local service files
+# unless a registration (foreign, or one we failed to remove) is still present.
+remove_deselected_lark() {
+    local ours=false
+    mcp_is_ours lark-mcp && ours=true
+    remove_deselected_mcp lark-mcp
+    if { $DRY_RUN && $ours; } || ! mcp_registered lark-mcp; then
+        lark_remove_local_setup
+    fi
+}
+
 install_mcp() {
     info "Installing MCP servers..."
 
@@ -4706,38 +5286,9 @@ install_mcp() {
         claude mcp list 2>/dev/null | grep -q "^${1}:" 2>/dev/null
     }
 
-    # Lark MCP — opt-in only (default off). Prompt for credentials in
-    # interactive mode, skip in non-interactive. Not installed unless the user
-    # explicitly selected the "Lark/Feishu MCP" item (or passed --all).
-    if ! $INSTALL_LARK; then
-        :  # Lark not selected — skip entirely
-    elif $DRY_RUN; then
-        info "Would add MCP server: lark-mcp (stdio)"
-    else
-        if _mcp_exists lark-mcp; then
-            ok "MCP server lark-mcp already exists, skipping"
-        elif ! can_interact; then
-            warn "Skipping lark-mcp (requires interactive credential input)"
-            warn "  Run interactively to set up, or add manually:"
-            warn "  claude mcp add --scope user --transport stdio lark-mcp -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET> -t $LARK_MCP_PRESET"
-        else
-            echo ""
-            info "Lark MCP requires Feishu App credentials:"
-            info "  Get them from: https://open.feishu.cn/app"
-            local lark_app_id="" lark_app_secret=""
-            echo -n "  App ID: " > /dev/tty
-            read -r lark_app_id </dev/tty
-            echo -n "  App Secret: " > /dev/tty
-            read -r lark_app_secret </dev/tty
-            if [[ -z "$lark_app_id" || -z "$lark_app_secret" ]]; then
-                warn "Empty credentials — skipping lark-mcp (add manually later)"
-            elif retry 3 3 "Add MCP server lark-mcp" claude mcp add --scope user --transport stdio lark-mcp \
-                -- npx -y @larksuiteoapi/lark-mcp mcp -a "$lark_app_id" -s "$lark_app_secret" -t "$LARK_MCP_PRESET" 2>/dev/null; then
-                ok "MCP server added: lark-mcp"
-            else
-                warn "MCP server lark-mcp could not be added, skipping"
-            fi
-        fi
+    # Lark MCP — opt-in only (default off); see install_lark_mcp.
+    if $INSTALL_LARK; then
+        install_lark_mcp
     fi
 
     # Playwright MCP
@@ -6011,7 +6562,7 @@ menu_id_selected_this_run() {
 # Echo a JSON object describing item $1 after the run: status plus the native
 # selectors / skill paths / pinned upstream revision it covers.
 selection_item_json() {
-    local id="$1" status="installed" pkg name
+    local id="$1" status="installed" pkg name extra='{}'
     local -a selectors=() paths=()
     case "$id" in
         claude-md)       [[ -f "$CLAUDE_DIR/CLAUDE.md" ]] || status="failed"; paths=("CLAUDE.md") ;;
@@ -6042,7 +6593,12 @@ selection_item_json() {
         ai-research)      selectors=("${PLUGINS_AI_RESEARCH[@]}") ;;
         plug-*)           selectors=("$(plug_id_to_pkg "$id")") ;;
         mcp)              jq -e '.mcpServers.playwright' "$HOME/.claude.json" &>/dev/null || status="pending" ;;
-        mcp-lark)         jq -e '.mcpServers["lark-mcp"]' "$HOME/.claude.json" &>/dev/null || status="pending" ;;
+        mcp-lark)
+            if jq -e '.mcpServers["lark-mcp"]' "$HOME/.claude.json" &>/dev/null; then
+                extra="$(lark_status_json)"
+            else
+                status="pending"
+            fi ;;
     esac
     if [[ ${#selectors[@]} -gt 0 ]]; then
         local ok_count=0
@@ -6055,14 +6611,15 @@ selection_item_json() {
         skill-humanizer-zh|skill-neat-freak|lieflat-charts|researchstudio-idea)
             rev="$(upstream_skill_field "${id#skill-}" rev)" ;;
     esac
-    jq -cn --arg menu "$id" --arg status "$status" --arg rev "$rev" \
+    jq -cn --arg menu "$id" --arg status "$status" --arg rev "$rev" --argjson extra "$extra" \
         --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --argjson selectors "$(printf '%s\n' ${selectors[@]+"${selectors[@]}"} | jq -R 'select(length > 0)' | jq -cs .)" \
         --argjson paths "$(printf '%s\n' ${paths[@]+"${paths[@]}"} | jq -R 'select(length > 0)' | jq -cs .)" \
         '{source: "script", menu_id: $menu, status: $status, updated: $now}
          + (if ($selectors | length) > 0 then {selectors: $selectors} else {} end)
          + (if ($paths | length) > 0 then {paths: $paths} else {} end)
-         + (if $rev != "" then {upstream_revision: $rev} else {} end)'
+         + (if $rev != "" then {upstream_revision: $rev} else {} end)
+         + (if ($extra | length) > 0 then {lark: $extra} else {} end)'
 }
 
 # Catalog IDs that have a row in this source's catalog.md.
@@ -6402,7 +6959,7 @@ mcp_is_ours() {
     local cfg="$HOME/.claude.json" pkg
     pkg="$(mcp_package_for "$1")"
     [[ -n "$pkg" && -f "$cfg" ]] && command -v jq &>/dev/null || return 1
-    jq -e --arg n "$1" --arg p "$pkg" --arg wp "\\${pkg//\//\\}\\" '
+    if jq -e --arg n "$1" --arg p "$pkg" --arg wp "\\${pkg//\//\\}\\" '
         (.mcpServers[$n]? // null) as $s
         | $s != null
           and (
@@ -6411,7 +6968,11 @@ mcp_is_ours() {
             or ((($s.command? // "") | tostring | test("/node\\.exe$"))
               and (($s.args? // []) | map(tostring) | any(contains("\\claude-code-config\\") and contains($wp))))
           )
-    ' "$cfg" >/dev/null 2>&1
+    ' "$cfg" >/dev/null 2>&1; then
+        return 0
+    fi
+    # lark-mcp since 4.3.0: http service URL or launcher path, plus our marker.
+    [[ "$1" == lark-mcp ]] && lark_entry_is_ours
 }
 
 # 0 when $1 is this installer's WSL registration (Windows node.exe).
@@ -6725,7 +7286,7 @@ reconcile_deselected() {
     fi
     $INSTALL_MATTPOCOCK || remove_deselected_mattpocock
     $INSTALL_MCP || remove_deselected_mcp playwright
-    $INSTALL_LARK || remove_deselected_mcp lark-mcp
+    $INSTALL_LARK || remove_deselected_lark
     $INSTALL_STATUSLINE || remove_deselected_statusline
     $INSTALL_LESSONS || remove_deselected_lessons_hook
     $CO_AUTHOR || remove_deselected_co_author
@@ -6758,6 +7319,7 @@ uninstall() {
     echo "  - $CLAUDE_DIR/hooks/ (installer-managed only)"
     echo "  - Installed plugins (requires claude CLI)"
     echo "  - MCP servers: playwright, lark-mcp (if present; requires claude CLI)"
+    echo "  - lark-mcp service (LaunchAgent / systemd user unit), its launcher, settings and Keychain item"
     echo "  - Retired-plugin leftovers: plugin caches/data of retired marketplaces, stale plugins/cache/temp_git_*,"
     echo "    ~/.claude-mem (claude-mem data), retired usage records in ~/.claude.json (backed up first)"
     [[ -f "$VERSION_STAMP_FILE" ]] && echo "  - $VERSION_STAMP_FILE"
@@ -6893,6 +7455,8 @@ uninstall() {
     else
         warn "Claude CLI not found — cannot uninstall plugins or MCP servers"
     fi
+    # Service, launcher, settings and Keychain item do not need the claude CLI.
+    lark_remove_local_setup
     # After the plugin uninstalls, so leftovers of a just-removed retired
     # plugin are swept too. Same "retired and no longer installed" gates.
     prune_retired_leftovers || true
@@ -7833,20 +8397,18 @@ main() {
     fi
     echo "  $((step++)). Customize CLAUDE.md for your specific projects"
     shell_wrapper_source_hint "$step" && step=$((step + 1))
-    if $INSTALL_LARK; then
-        echo "  $((step++)). Lark/Feishu MCP is installed but needs a Feishu app you create yourself."
-        echo "      飞书 MCP 已安装，但还需要你自己在开放平台建一个应用并填入凭证。"
+    if $INSTALL_LARK && [[ -n "$LARK_MCP_STATUS" ]]; then
+        echo "  $((step++)). Lark/Feishu MCP: $LARK_MCP_STATUS"
+        echo "       check / 验证:  claude mcp list      # expect 'Connected' / 期待显示已连接"
+        echo "       Service status and logs / 服务状态与日志: docs/LARK-MCP.md#shared-service"
+    elif $INSTALL_LARK; then
+        echo "  $((step++)). Lark/Feishu MCP needs a Feishu app you create yourself."
+        echo "      飞书 MCP 还需要你自己在开放平台建一个应用并填入凭证。"
         echo "       1. app / 建应用:  https://open.feishu.cn/  ->  开发者后台  ->  创建企业自建应用"
         echo "       2. key / 取凭证:  应用左栏「凭证与基础信息」里的 App ID (cli_...) 和 App Secret"
         echo "       3. 权限 / scopes: 「权限管理 -> 开通权限」。免审权限即时生效；"
         echo "                          需审核权限还要「版本管理与发布 -> 创建版本 -> 申请线上发布」+ 管理员审批"
-        echo "       4. add / 添加:"
-        echo "            claude mcp add lark-mcp --scope user -- \\"
-        echo "              npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET> -t $LARK_MCP_PRESET"
-        echo "          The '--' is required: 'claude mcp add' also uses -s (for --scope) and would eat your secret."
-        echo "          '--' 不能省：claude mcp add 自己也用 -s（表示 --scope），会把你的 secret 吃掉。"
-        echo "          '-t $LARK_MCP_PRESET' keeps the tool list small; the default preset can blow the context window."
-        echo "          '-t $LARK_MCP_PRESET' 限制暴露的工具数量；默认预设会撑爆上下文。"
+        echo "       4. add / 添加:  ./install.sh --only mcp-lark   # prompts for App ID / Secret / 提示输入凭证"
         echo "       5. check / 验证:  claude mcp list      # expect 'Connected' / 期待显示已连接"
         echo "       Full guide / 完整指引: docs/LARK-MCP.md  (中文: docs/LARK-MCP.zh-CN.md)"
     fi

@@ -125,7 +125,7 @@
 | --- | --- | --- | --- | --- | --- |
 | openai-docs | OpenAI 官方文档 MCP | — | [MCP](platforms/codex/README.md#mcp) | — | 推荐 |
 | playwright-mcp | *fork*：独立 `@playwright/mcp` 服务；与 playwright 插件同名并会遮蔽它，二者只选其一 | [MCP](platforms/claude/README.md#mcp) | — | — | — |
-| lark | *fork 保留*（上游已退役）：Lark / 飞书 OpenAPI MCP；需 App ID / Secret，每个会话约 1 GB 内存，不推荐 | [MCP](platforms/claude/README.md#mcp) | — | — | — |
+| lark | *fork 保留*（上游已退役）：Lark / 飞书 OpenAPI MCP；需 App ID / Secret，不推荐。install.sh 在 macOS / Linux / WSL 上以 127.0.0.1 共享服务运行（约 1 GB，只占一次），无服务管理器时回退为按会话 stdio；Windows 为按会话 stdio | [MCP](platforms/claude/README.md#mcp) | — | — | — |
 
 <a id="members"></a>
 ## 整包成员

@@ -7,7 +7,7 @@
 | Server | Transport | Default | Purpose |
 |--------|-----------|---------|---------|
 | **playwright** | stdio | **off (opt-in)** | Browser automation via `@playwright/mcp` |
-| **[Lark-MCP](https://github.com/larksuite/lark-openapi-mcp)** | stdio | **off (opt-in)** | Official Feishu/Lark OpenAPI — call Lark platform APIs from AI assistants |
+| **[Lark-MCP](https://github.com/larksuite/lark-openapi-mcp)** | http (shared localhost service); stdio fallback and on Windows | **off (opt-in)** | Official Feishu/Lark OpenAPI — call Lark platform APIs from AI assistants |
 
 Both are opt-in; a default install registers neither.
 
@@ -18,8 +18,16 @@ leaves the plugin one silently never started — `claude mcp list` shows a singl
 only if you deselect that plugin. To undo an existing duplicate:
 `claude mcp remove playwright`.
 
-Lark-MCP is off because it requires Feishu App credentials and each session it
-runs costs roughly 1 GB of RAM.
+Lark-MCP is off because it requires Feishu App credentials. On macOS, Linux and
+WSL with systemd, `install.sh` runs it as one shared service on
+`127.0.0.1:3100` (LaunchAgent / systemd user unit) that every session connects
+to over HTTP, so the roughly 1 GB of RAM is paid once rather than per session.
+Without a service manager, or when the service fails its health check, it falls
+back to a per-session stdio launcher; native Windows (`install.ps1`) stays
+per-session stdio via `npx`. The localhost port has no authentication: any
+local process can call Lark as the app, which is acceptable on a single-user
+machine. Service files, logs and migration:
+[docs/LARK-MCP.md#shared-service](../docs/LARK-MCP.md#shared-service).
 
 Only `playwright` ships in the [`mcp-servers.json`](./mcp-servers.json) template,
 which the `claude.zsh` wrapper auto-loads on each launch if you copy it to
@@ -76,10 +84,11 @@ Windows (install.ps1) are unchanged.
 ```bash
 # Both servers are opt-in. Pick them in the interactive selector, or add one directly:
 ./install.sh --only mcp          # standalone Playwright MCP (skip the playwright plugin)
-./install.sh --only mcp-lark     # Lark/Feishu MCP; prompts for App ID / Secret on a terminal
+./install.sh --only mcp-lark     # Lark/Feishu MCP shared service; prompts for App ID / Secret on a terminal
+LARK_MCP_PORT=3200 ./install.sh --only mcp-lark   # same, on another localhost port
 
-# Or add Lark/Feishu manually:
-claude mcp add lark-mcp --scope user -- npx -y @larksuiteoapi/lark-mcp mcp -a YOUR_APP_ID -s YOUR_APP_SECRET -t preset.light
+# Or add Lark/Feishu manually (per-session stdio, as install.ps1 does on Windows):
+claude mcp add lark-mcp --scope user -- npx -y @larksuiteoapi/lark-mcp@0.5.1 mcp -a YOUR_APP_ID -s YOUR_APP_SECRET -t preset.light
 ```
 
 Replace `YOUR_APP_ID` and `YOUR_APP_SECRET` with your Feishu app credentials ([open.feishu.cn](https://open.feishu.cn/)).

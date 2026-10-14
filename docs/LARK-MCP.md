@@ -55,7 +55,23 @@ are two documented ways to work anyway: use the **developer's own
 `user_access_token`** (see step 5), or configure a **测试企业** (test tenant),
 where calls are review-free.
 
-## 4. Add it to Claude Code — the minimal version
+## 4. Add it to Claude Code with the installer (macOS, Linux, WSL)
+
+```bash
+./install.sh --only mcp-lark      # or tick "Lark/Feishu MCP" in the selector
+```
+
+The installer asks for the App ID and the App Secret (typed without echo) on
+your terminal, installs `@larksuiteoapi/lark-mcp@0.5.1` globally with
+`npm i -g`, and sets up the [shared service](#shared-service): one lark-mcp
+process on `127.0.0.1:3100` that every Claude session connects to over HTTP,
+instead of one ~1 GB process per session. A re-run reuses the saved
+credentials and does not prompt again.
+
+Native Windows (`install.ps1`) keeps the per-session stdio registration from
+the next section.
+
+## 4b. Add it by hand — the minimal version
 
 ```bash
 claude mcp add lark-mcp --scope user -- \
@@ -92,6 +108,67 @@ Precedence is CLI args > env vars > config file > defaults.
 
 Add `-d https://open.larksuite.com`. The flag defaults to
 `https://open.feishu.cn`.
+
+<a id="shared-service"></a>
+## Shared service
+
+| | macOS | Linux / WSL with systemd |
+|---|---|---|
+| Service | LaunchAgent `~/Library/LaunchAgents/com.claude-code-config.lark-mcp.plist` (RunAtLoad, KeepAlive) | `~/.config/systemd/user/lark-mcp.service` (Restart=on-failure, no linger) |
+| App Secret | login Keychain, service `claude-code-config.lark-mcp`, account = App ID | `APP_SECRET` in `~/.config/lark-mcp/env` (chmod 600) |
+| Settings | `~/.config/lark-mcp/env`: `APP_ID`, `LARK_TOOLS`, `LARK_MCP_PORT` | same file |
+| Logs | `~/Library/Logs/lark-mcp.log`, `~/Library/Logs/lark-mcp.err.log` | `journalctl --user -u lark-mcp` |
+
+`~/.config` follows `XDG_CONFIG_HOME`. Claude Code is registered with
+`claude mcp add --scope user --transport http lark-mcp http://127.0.0.1:3100/mcp`.
+The server binds to `127.0.0.1` only. Pick another port at install time with
+`LARK_MCP_PORT=3200 ./install.sh --only mcp-lark`; the port is saved in the env
+file. To widen the tool preset or switch to international Lark, edit
+`LARK_TOOLS` or add `LARK_DOMAIN=https://open.larksuite.com` in the env file and
+restart the service; a re-run keeps both.
+
+**Security:** the localhost port has no authentication. Any process running on
+the machine can call Lark through it with the app's identity. That is
+acceptable on a single-user machine; on a shared host, use the stdio
+registration from step 4b instead.
+
+Status, logs and restart:
+
+```bash
+# all platforms: MCP initialize against the service
+python3 scripts/check_mcp.py --timeout 10 --url http://127.0.0.1:3100/mcp
+
+# macOS
+launchctl print gui/$(id -u)/com.claude-code-config.lark-mcp | head -20
+tail -f ~/Library/Logs/lark-mcp.err.log
+launchctl kickstart -k gui/$(id -u)/com.claude-code-config.lark-mcp   # restart
+
+# Linux / WSL
+systemctl --user status lark-mcp
+journalctl --user -u lark-mcp -f
+systemctl --user restart lark-mcp
+```
+
+The installer's selection record (`~/.claude/agent-config/selection.json`,
+item `lark`) also stores the mode and whether the service answered.
+
+**Fallback.** When there is no service manager (WSL without systemd, no
+`systemctl --user` session), or the service does not answer an MCP
+`initialize` within about 15 seconds, the installer removes the service and
+registers `~/.config/lark-mcp/run.sh` as a stdio server instead. Each Claude
+session then starts its own lark-mcp again, but the secret still stays out of
+the command line. The installer prints the reason. To use the shared service
+in WSL, enable systemd (`[boot]` / `systemd=true` in `/etc/wsl.conf`, then
+`wsl --shutdown`) and re-run. When the npm global prefix is not writable, the
+installer prints how to fix it (`npm config set prefix ~/.npm-global`) and the
+launcher uses `npx` until you re-run.
+
+**Migrating an existing registration.** If `lark-mcp` was registered by an
+earlier version of this installer (`npx -y @larksuiteoapi/lark-mcp ... -a ...
+-s ...`), `./install.sh --only mcp-lark` reads the App ID and Secret from that
+entry, replaces it, and does not prompt. A `lark-mcp` entry you added yourself
+with another command is left in place; remove it first
+(`claude mcp remove lark-mcp --scope user`) and re-run to switch.
 
 ## 5. App identity vs user identity
 
@@ -170,8 +247,23 @@ fails, re-run the server command by hand with `--debug`.
 
 ## Removing it
 
+Untick the item in the installer's selector, or run `./install.sh --uninstall`.
+Either removes the registration, stops and deletes the LaunchAgent or systemd
+unit, deletes `~/.config/lark-mcp/` and the Keychain item. The global npm
+package stays; remove it with `npm rm -g @larksuiteoapi/lark-mcp`.
+
+By hand:
+
 ```bash
-claude mcp remove lark-mcp
+claude mcp remove lark-mcp --scope user
+# macOS
+launchctl bootout gui/$(id -u)/com.claude-code-config.lark-mcp
+rm ~/Library/LaunchAgents/com.claude-code-config.lark-mcp.plist
+security delete-generic-password -s claude-code-config.lark-mcp
+# Linux / WSL
+systemctl --user disable --now lark-mcp && rm ~/.config/systemd/user/lark-mcp.service
+# all
+rm -r ~/.config/lark-mcp
 ```
 
 Upstream: <https://github.com/larksuite/lark-openapi-mcp>

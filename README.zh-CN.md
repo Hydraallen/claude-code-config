@@ -63,7 +63,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 
 - 安装器目录内的插件（包括 code-review 和 codex）会被卸载，不再被任何剩余插件需要的 marketplace 也会移除（`claude-plugins-official` 除外）。你自己安装的插件保留，除非传入 `--prune-foreign-plugins`。把所有插件项都取消勾选，会卸载全部目录内插件。
 - skill、语言规则、writing-style 规则、DeepXiv skill、搜索 agent、Matt skills 和固定版本的上游 skill 会被删除。你改过的副本会先移到 `~/.claude/agent-config/backups/<时间戳>-deselect/`（固定版本上游 skill 移到 `agent-config/backups/<id>/`），安装器会提示。
-- Playwright 和 Lark MCP 服务只在其命令与安装器注册的一致时（`npx @playwright/mcp` / `npx @larksuiteoapi/lark-mcp`，WSL 中为 Windows `node.exe` 条目）才移除；你自己注册的同名服务保留，并给出警告。
+- Playwright 和 Lark MCP 服务只在其命令与安装器注册的一致时（`npx @playwright/mcp` / `npx @larksuiteoapi/lark-mcp`、Lark 共享服务 URL 或启动脚本，WSL 中为 Windows `node.exe` 条目）才移除；你自己注册的同名服务保留，并给出警告。
 - StatusLine：删除 `statusLine` 设置（仅当它运行 `~/.claude/hooks/statusline.sh`）和这个脚本。Lessons：删除 SessionStart hook，保留 `lessons.md`。Co-authored-by：把 `includeCoAuthoredBy` 设为 `false`。
 - 启动器（Shell wrapper，且所有模型后端都未勾选）：删除 `claude.zsh`、`system-prompt.txt`，以及 `~/.zshrc` 中完全一致的 `source ~/.claude/claude.zsh` 这一行（先备份 rc 文件；其他写法只给警告）。`profiles/` 和 `default-profile` 存有你的 API key，始终保留，取消勾选某个后端时也一样。
 - CLAUDE.md 和 settings.json 不会被删除；取消勾选只表示安装器不再更新它们。
@@ -200,7 +200,7 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 | --- | --- | --- | --- | --- |
 | **OpenAI docs** | [OpenAI](https://developers.openai.com/mcp) | OpenAI 官方开发文档 | — | MCP ★ |
 | **Playwright MCP** *（fork）* | [本仓库](mcp/README.md) | 独立的 `@playwright/mcp` 服务；与 playwright 插件同名并会遮蔽它，二者只选其一 | MCP | — |
-| **Lark / 飞书 MCP** *（fork）* | [larksuite](https://github.com/larksuite/lark-openapi-mcp) | 飞书 / Lark 集成，上游已退役、本 fork 保留；需要 App ID / Secret，每会话约占 1 GB 内存，因此默认关闭。分步指引：[LARK-MCP](docs/LARK-MCP.zh-CN.md) | MCP | — |
+| **Lark / 飞书 MCP** *（fork）* | [larksuite](https://github.com/larksuite/lark-openapi-mcp) | 飞书 / Lark 集成，上游已退役、本 fork 保留；需要 App ID / Secret，因此默认关闭。install.sh 在 macOS / Linux / 启用 systemd 的 WSL 上以一个本地共享服务运行（约 1 GB 内存只占一次，不再按会话计），无法使用服务时回退为按会话 stdio；Windows 仍按会话运行。分步指引：[LARK-MCP](docs/LARK-MCP.zh-CN.md) | MCP | — |
 
 
 完整包成员见 [catalog.md](catalog.md#members)，源码 revision 与适配见 [sources.md](platforms/sources.md)。存储分析的定制记录在 [UPSTREAM.md](skills/storage-analyzer/UPSTREAM.md)，已通过 [khazix-skills#50](https://github.com/KKKKhazix/khazix-skills/pull/50) 提交上游。Context7、Playwright 统一放在开发集成；独立的 Playwright MCP 供不装 playwright 插件的用户使用。

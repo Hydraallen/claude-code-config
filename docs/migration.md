@@ -132,7 +132,7 @@ Codex 关闭 `desktop.external-agent-import-sync-enabled`。旧 `model_instructi
 
 2026-09-13 上游按作者要求移除 `claude-mem`、`pua`（pua / pua-en / pua-ja）以及 `lark`（Lark / Feishu MCP）的活动条目、安装配方及相关模板；2026-09-17 又移除 GitHub MCP（见[上节](#github-mcp)）。新安装不再提供 claude-mem、PUA 与 GitHub MCP。旧记录中的这些 ID 标记为退役，查询仍可报告实际状态；普通更新不重新安装或升级它们。
 
-**Fork 说明：Lark 保留。** 本 fork 保留 `lark`：脚本菜单 `mcp-lark`（默认关闭）、[mcp/](../mcp/README.md)、[LARK-MCP 指南](LARK-MCP.zh-CN.md) 不变，agent 路径的配方见 [Claude 操作说明](../platforms/claude/README.md#mcp)。已有的 `lark` 记录继续有效，不需要迁移。
+**Fork 说明：Lark 保留。** 本 fork 保留 `lark`：脚本菜单 `mcp-lark`（默认关闭）、[mcp/](../mcp/README.md)、[LARK-MCP 指南](LARK-MCP.zh-CN.md) 不变，agent 路径的配方见 [Claude 操作说明](../platforms/claude/README.md#mcp)。已有的 `lark` 记录继续有效，不需要迁移。4.3.0 起 install.sh 把 Lark 改为本地共享服务；重跑 `./install.sh --only mcp-lark` 会把本安装器旧版注册的 `npx` 条目替换为共享服务（或 stdio 启动脚本），凭据从旧条目读取，见 [LARK-MCP 共享服务](LARK-MCP.zh-CN.md#shared-service)。
 
 **Fork 脚本路径主动卸载。** agent 路径只在用户明确要求时卸载；脚本安装器则在每次运行（包括 `--only`）时主动清理：
 

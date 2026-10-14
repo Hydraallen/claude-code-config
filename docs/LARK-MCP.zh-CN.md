@@ -48,7 +48,20 @@ App ID 长这样：`cli_xxxxxxxxxxxxxxxx`。
 **开发者本人的 `user_access_token`**（见第 5 节），或者配置一个**测试企业**，
 在测试企业里调用免审。
 
-## 4. 添加到 Claude Code —— 最小可用版
+## 4. 用安装器添加到 Claude Code（macOS、Linux、WSL）
+
+```bash
+./install.sh --only mcp-lark      # 或在交互菜单里勾选 "Lark/Feishu MCP"
+```
+
+安装器在终端里询问 App ID 和 App Secret（Secret 输入不回显），用 `npm i -g`
+全局安装 `@larksuiteoapi/lark-mcp@0.5.1`，并配置[共享服务](#shared-service)：
+`127.0.0.1:3100` 上只运行一个 lark-mcp 进程，所有 Claude 会话通过 HTTP 连接它，
+不再每个会话各启动一个约 1 GB 的进程。重跑时复用已保存的凭据，不再询问。
+
+原生 Windows（`install.ps1`）仍使用下一节的按会话 stdio 注册。
+
+## 4b. 手动添加 —— 最小可用版
 
 ```bash
 claude mcp add lark-mcp --scope user -- \
@@ -82,6 +95,57 @@ claude mcp add lark-mcp --scope user \
 ### 国际版 Lark
 
 加上 `-d https://open.larksuite.com`。该参数默认值是 `https://open.feishu.cn`。
+
+<a id="shared-service"></a>
+## 共享服务
+
+| | macOS | Linux / 启用 systemd 的 WSL |
+|---|---|---|
+| 服务 | LaunchAgent `~/Library/LaunchAgents/com.claude-code-config.lark-mcp.plist`（RunAtLoad、KeepAlive） | `~/.config/systemd/user/lark-mcp.service`（Restart=on-failure，不启用 linger） |
+| App Secret | 登录钥匙串，服务名 `claude-code-config.lark-mcp`，账户为 App ID | `~/.config/lark-mcp/env` 中的 `APP_SECRET`（权限 600） |
+| 设置 | `~/.config/lark-mcp/env`：`APP_ID`、`LARK_TOOLS`、`LARK_MCP_PORT` | 同一文件 |
+| 日志 | `~/Library/Logs/lark-mcp.log`、`~/Library/Logs/lark-mcp.err.log` | `journalctl --user -u lark-mcp` |
+
+`~/.config` 遵循 `XDG_CONFIG_HOME`。Claude Code 的注册命令为
+`claude mcp add --scope user --transport http lark-mcp http://127.0.0.1:3100/mcp`。
+服务只监听 `127.0.0.1`。安装时可用 `LARK_MCP_PORT=3200 ./install.sh --only mcp-lark`
+指定其他端口，端口写入 env 文件。要放宽工具预设或切换到国际版 Lark，在 env 文件中修改
+`LARK_TOOLS` 或添加 `LARK_DOMAIN=https://open.larksuite.com`，然后重启服务；重跑安装器会保留这两项。
+
+**安全说明：** 本地端口没有鉴权，本机上的任何进程都能通过它以应用身份调用飞书。
+单用户机器上可以接受；多人共用的主机请改用第 4b 节的 stdio 注册。
+
+状态、日志与重启：
+
+```bash
+# 所有平台：向服务发送 MCP initialize
+python3 scripts/check_mcp.py --timeout 10 --url http://127.0.0.1:3100/mcp
+
+# macOS
+launchctl print gui/$(id -u)/com.claude-code-config.lark-mcp | head -20
+tail -f ~/Library/Logs/lark-mcp.err.log
+launchctl kickstart -k gui/$(id -u)/com.claude-code-config.lark-mcp   # 重启
+
+# Linux / WSL
+systemctl --user status lark-mcp
+journalctl --user -u lark-mcp -f
+systemctl --user restart lark-mcp
+```
+
+安装器的选择记录（`~/.claude/agent-config/selection.json` 的 `lark` 项）也记录模式以及服务是否响应。
+
+**回退。** 没有可用的服务管理器（WSL 未启用 systemd、没有 `systemctl --user` 会话），
+或服务在约 15 秒内没有响应 MCP `initialize` 时，安装器删除服务，改为把
+`~/.config/lark-mcp/run.sh` 注册为 stdio 服务。此时每个 Claude 会话重新各自启动
+lark-mcp，但 secret 仍不出现在命令行中。安装器会打印回退原因。要在 WSL 中使用共享服务，
+先启用 systemd（在 `/etc/wsl.conf` 写入 `[boot]` / `systemd=true`，再执行
+`wsl --shutdown`），然后重跑。npm 全局目录不可写时，安装器给出修复方法
+（`npm config set prefix ~/.npm-global`），在重跑之前启动脚本使用 `npx`。
+
+**迁移已有注册。** 如果 `lark-mcp` 是旧版安装器注册的（`npx -y @larksuiteoapi/lark-mcp ... -a ... -s ...`），
+`./install.sh --only mcp-lark` 会从该条目读取 App ID 和 Secret、替换注册，不再询问。
+你自己用其他命令添加的 `lark-mcp` 保持不变；要切换，先执行
+`claude mcp remove lark-mcp --scope user`，再重跑。
 
 ## 5. 应用身份 vs 用户身份
 
@@ -155,8 +219,22 @@ claude mcp get lark-mcp
 
 ## 卸载
 
+在安装器菜单中取消勾选，或执行 `./install.sh --uninstall`。两者都会删除注册、停止并删除
+LaunchAgent 或 systemd 单元、删除 `~/.config/lark-mcp/` 和钥匙串条目。全局 npm 包保留，
+可用 `npm rm -g @larksuiteoapi/lark-mcp` 删除。
+
+手动操作：
+
 ```bash
-claude mcp remove lark-mcp
+claude mcp remove lark-mcp --scope user
+# macOS
+launchctl bootout gui/$(id -u)/com.claude-code-config.lark-mcp
+rm ~/Library/LaunchAgents/com.claude-code-config.lark-mcp.plist
+security delete-generic-password -s claude-code-config.lark-mcp
+# Linux / WSL
+systemctl --user disable --now lark-mcp && rm ~/.config/systemd/user/lark-mcp.service
+# 所有平台
+rm -r ~/.config/lark-mcp
 ```
 
 上游仓库：<https://github.com/larksuite/lark-openapi-mcp>

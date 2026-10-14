@@ -100,9 +100,9 @@ Context7 和 Playwright 通过上述原生插件提供，选择它们时复用�
 | Catalog ID | 注册命令（user scope） | 说明 |
 | --- | --- | --- |
 | playwright-mcp | `claude mcp add --scope user --transport stdio playwright -- npx @playwright/mcp@latest` | fork 条目，与 install.sh 相同。与 playwright 插件同名，user scope 注册会遮蔽插件，只在用户不选 playwright 插件时注册 |
-| lark | `claude mcp add lark-mcp --scope user -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET> -t preset.light` | fork 保留（上游已退役）。需要飞书 / Lark 应用凭据，每个会话约 1 GB 内存，默认不推荐 |
+| lark | macOS / Linux / WSL：用户在自己的终端运行 `./install.sh --only mcp-lark`，注册为 `claude mcp add --scope user --transport http lark-mcp http://127.0.0.1:3100/mcp`（共享服务）；Windows 或手动：`claude mcp add lark-mcp --scope user -- npx -y @larksuiteoapi/lark-mcp@0.5.1 mcp -a <APP_ID> -s <APP_SECRET> -t preset.light` | fork 保留（上游已退役）。需要飞书 / Lark 应用凭据，默认不推荐。共享服务只运行一个进程（约 1 GB），按会话 stdio 则每个会话各占约 1 GB |
 
-Lark 的 `--` 不能省：`claude mcp add` 自己的 `-s` 表示 scope，会吞掉 App Secret。`-t preset.light` 让暴露的工具最少，默认预设可能撑爆上下文。凭据按 INSTALL 的规则处理：由用户在自己的终端运行带真实 App ID / Secret 的命令，不写入聊天、仓库或安装记录；用户未提供时把 `lark` 记为待配置（pending credentials）并给出上面的命令。凭据就绪后用 `python3 scripts/check_mcp.py --timeout 60 -- npx -y @larksuiteoapi/lark-mcp mcp -a <APP_ID> -s <APP_SECRET> -t preset.light` 验证 stdio initialize，再用 `claude mcp list` 确认 `lark-mcp` 已注册。申请凭据、授权与用户身份模式见 [LARK-MCP](../../docs/LARK-MCP.zh-CN.md)。
+Lark 的 `--` 不能省：`claude mcp add` 自己的 `-s` 表示 scope，会吞掉 App Secret。`-t preset.light` 让暴露的工具最少，默认预设可能撑爆上下文。凭据按 INSTALL 的规则处理：由用户在自己的终端运行 `./install.sh --only mcp-lark`（交互输入凭据）或带真实 App ID / Secret 的命令，不写入聊天、仓库或安装记录；用户未提供时把 `lark` 记为待配置（pending credentials）并给出上面的命令。共享服务（LaunchAgent 或 systemd 用户单元，只监听 127.0.0.1，secret 存于钥匙串或权限 600 的 `~/.config/lark-mcp/env`）用 `python3 scripts/check_mcp.py --timeout 10 --url http://127.0.0.1:3100/mcp` 验证 initialize；按会话 stdio 注册用 `python3 scripts/check_mcp.py --timeout 60 -- npx -y @larksuiteoapi/lark-mcp@0.5.1 mcp -a <APP_ID> -s <APP_SECRET> -t preset.light` 验证。之后用 `claude mcp list` 确认 `lark-mcp` 已连接。本地端口没有鉴权，本机任何进程都能以应用身份调用飞书，仅适合单用户机器。服务状态、日志、回退与迁移见 [LARK-MCP](../../docs/LARK-MCP.zh-CN.md#shared-service)。申请凭据、授权与用户身份模式见 [LARK-MCP](../../docs/LARK-MCP.zh-CN.md)。
 
 旧 GitHub MCP 记录按[退役说明](../../docs/migration.md#github-mcp)处理，不再作为安装或更新项。
 

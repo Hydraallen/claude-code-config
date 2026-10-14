@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check a selected stdio MCP initialize handshake without registering the server."""
+"""Check an MCP initialize handshake (stdio command or streamable HTTP URL) without registering the server."""
 import argparse
 import json
 import os
@@ -9,8 +9,12 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 
 USER_AGENT_FUNCTION = "() => navigator.userAgent"
+INITIALIZE_PARAMS = {"protocolVersion": "2025-06-18", "capabilities": {},
+                     "clientInfo": {"name": "agent-config-check", "version": "1.0"}}
 
 
 class Session:
@@ -78,8 +82,7 @@ def check(command, timeout, browser=False):
                                stderr=subprocess.DEVNULL, text=True, bufsize=1, **options)
     session = Session(process, time.monotonic() + timeout)
     try:
-        result = session.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
-                                                "clientInfo": {"name": "agent-config-check", "version": "1.0"}})
+        result = session.request("initialize", INITIALIZE_PARAMS)
         if not isinstance(result, dict) or not result.get("serverInfo") or not result.get("protocolVersion"):
             raise ValueError("Server rejected initialize or returned an incomplete response")
         session.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
@@ -112,20 +115,50 @@ def check(command, timeout, browser=False):
         process.stdout.close()
 
 
+def check_http(url, timeout):
+    """POST initialize to a streamable HTTP endpoint (JSON or SSE response)."""
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": INITIALIZE_PARAMS}).encode()
+    request = urllib.request.Request(url, data=body, method="POST", headers={
+        "Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
+    try:
+        # Local endpoints: never route through an http_proxy from the environment.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=timeout) as response:
+            text = response.read().decode("utf-8", "replace")
+    except urllib.error.URLError as error:
+        raise ValueError(f"{url}: {error}") from error
+    for chunk in [text] + [line[5:] for line in text.splitlines() if line.startswith("data:")]:
+        try:
+            message = json.loads(chunk)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(message, dict) and message.get("id") == 1:
+            if "error" in message:
+                raise ValueError(f"Server rejected initialize: {message['error']}")
+            result = message.get("result", {})
+            if isinstance(result, dict) and result.get("serverInfo") and result.get("protocolVersion"):
+                return {"status": "initialize-passed", "server": result["serverInfo"]}
+    raise ValueError("Server rejected initialize or returned an incomplete response")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--browser", action="store_true",
                         help="Playwright MCP only: open about:blank and report the browser user agent")
+    parser.add_argument("--url", help="Check a streamable HTTP endpoint (e.g. http://127.0.0.1:3100/mcp) instead")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
-    if not command:
-        parser.error("Pass the server command after --")
+    if args.url and (command or args.browser):
+        parser.error("--url takes no server command and no --browser")
+    if not command and not args.url:
+        parser.error("Pass the server command after --, or --url")
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
     try:
-        print(json.dumps(check(command, args.timeout, args.browser)))
+        report = check_http(args.url, args.timeout) if args.url else check(command, args.timeout, args.browser)
+        print(json.dumps(report))
     except (ValueError, OSError) as error:
         print(error, file=sys.stderr)
         sys.exit(1)
