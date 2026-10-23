@@ -3571,6 +3571,63 @@ function Update-InstalledPlugins {
     }
 }
 
+# Install npm dependencies for plugins whose cache directory has none.
+# Mirrors ensure_plugin_dependencies in install.sh: `claude plugin
+# install/update` copies a new version directory without node_modules, so
+# Node-based plugin hooks fail with MODULE_NOT_FOUND. --ignore-scripts keeps
+# package install scripts from running; a failed install removes the partial
+# node_modules so the next run retries.
+function Install-PluginDependencies {
+    $listJson = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
+    if (-not (Test-Path $listJson)) { return }
+    $plugins = $null
+    try {
+        $parsed = Get-Content $listJson -Raw | ConvertFrom-Json
+        if ($parsed.PSObject.Properties['plugins']) { $plugins = $parsed.plugins }
+    } catch { return }
+    if (-not $plugins) { return }
+
+    $missing = @()
+    foreach ($prop in $plugins.PSObject.Properties) {
+        foreach ($entry in @($prop.Value)) {
+            if (-not $entry -or -not $entry.PSObject.Properties['installPath']) { continue }
+            $dir = "$($entry.installPath)"
+            if (-not $dir -or $missing -contains $dir) { continue }
+            $pkgJson = Join-Path $dir "package.json"
+            if (-not (Test-Path -LiteralPath $pkgJson) -or (Test-Path -LiteralPath (Join-Path $dir "node_modules"))) { continue }
+            try { $pkg = Get-Content -LiteralPath $pkgJson -Raw | ConvertFrom-Json } catch { continue }
+            if (-not $pkg -or -not $pkg.PSObject.Properties['dependencies'] -or @($pkg.dependencies.PSObject.Properties).Count -eq 0) { continue }
+            $missing += $dir
+        }
+    }
+    if ($missing.Count -eq 0) { return }
+
+    if ($DryRun) {
+        foreach ($dir in $missing) { Write-Info "Would install plugin npm dependencies: $dir" }
+        return
+    }
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        Write-Warn "npm not found - $($missing.Count) plugin(s) lack npm dependencies; their Node hooks may fail:"
+        foreach ($dir in $missing) { Write-Warn "  $dir" }
+        $script:InstallWarnings++
+        return
+    }
+
+    foreach ($dir in $missing) {
+        $sub = "install"
+        if ((Test-Path -LiteralPath (Join-Path $dir "package-lock.json")) -or (Test-Path -LiteralPath (Join-Path $dir "npm-shrinkwrap.json"))) { $sub = "ci" }
+        Write-Info "Installing plugin npm dependencies: $dir"
+        $r = Invoke-NativeCapture -Exe "npm" -Arguments @("--prefix", $dir, $sub, "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund")
+        if ($r.Code -eq 0) {
+            Write-Ok "Plugin dependencies installed: $(Split-Path (Split-Path $dir -Parent) -Leaf) $(Split-Path $dir -Leaf)"
+        } else {
+            Remove-Item -LiteralPath (Join-Path $dir "node_modules") -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Warn "Could not install npm dependencies in $dir - run: npm --prefix `"$dir`" $sub --omit=dev --ignore-scripts"
+            $script:InstallWarnings++
+        }
+    }
+}
+
 # --- Uninstall -------------------------------------------------------------
 
 # --- Selection record: agent-config\selection.json --------------------------
@@ -4736,6 +4793,7 @@ function Main {
     # Always refresh marketplaces and update installed plugins, even when no
     # plugins were selected this run — keeps third-party plugins current.
     Update-InstalledPlugins -PluginsReinstalled $doPlugins
+    Install-PluginDependencies
     if ($doDeepXiv) { Install-DeepXiv -SelectedDeepXivSkills $deepXivSkills }
 
     # Interactive runs only: remove what is installed but was left unchecked.

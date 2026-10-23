@@ -6391,6 +6391,52 @@ update_installed_plugins() {
     done < <(jq -r '.plugins | keys[]' "$list_json" 2>/dev/null)
 }
 
+# Install npm dependencies for plugins whose cache directory has none.
+# `claude plugin install/update` copies a new version directory without
+# node_modules, so Node-based plugin hooks (e.g. ecc's SessionStart) fail with
+# MODULE_NOT_FOUND until the dependencies are installed. --ignore-scripts keeps
+# package install scripts from running; a failed install removes the partial
+# node_modules so the next run retries instead of seeing it as complete.
+ensure_plugin_dependencies() {
+    local list_json="$HOME/.claude/plugins/installed_plugins.json"
+    command -v jq &>/dev/null && [[ -f "$list_json" ]] || return 0
+    local dir missing=()
+    while IFS= read -r dir; do
+        [[ -n "$dir" && -f "$dir/package.json" && ! -d "$dir/node_modules" ]] || continue
+        jq -e '(.dependencies // {}) | length > 0' "$dir/package.json" &>/dev/null || continue
+        missing+=("$dir")
+    done < <(jq -r '.plugins[]?[]?.installPath // empty' "$list_json" 2>/dev/null | sort -u)
+    (( ${#missing[@]} > 0 )) || return 0
+
+    if $DRY_RUN; then
+        for dir in "${missing[@]}"; do
+            info "Would install plugin npm dependencies: $dir"
+        done
+        return 0
+    fi
+    if ! command -v npm &>/dev/null; then
+        warn "npm not found — ${#missing[@]} plugin(s) lack npm dependencies; their Node hooks may fail:"
+        for dir in "${missing[@]}"; do warn "  $dir"; done
+        (( INSTALL_WARNINGS++ )) || true
+        return 0
+    fi
+
+    local sub
+    for dir in "${missing[@]}"; do
+        sub=install
+        [[ -f "$dir/package-lock.json" || -f "$dir/npm-shrinkwrap.json" ]] && sub=ci
+        info "Installing plugin npm dependencies: $dir"
+        if with_timeout "$NET_TIMEOUT" npm --prefix "$dir" "$sub" \
+            --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null; then
+            ok "Plugin dependencies installed: $(basename "$(dirname "$dir")") $(basename "$dir")"
+        else
+            rm -rf "$dir/node_modules"
+            warn "Could not install npm dependencies in $dir — run: npm --prefix \"$dir\" $sub --omit=dev --ignore-scripts"
+            (( INSTALL_WARNINGS++ )) || true
+        fi
+    done
+}
+
 # ============================================================
 # Selection record: ~/.claude/agent-config/selection.json
 #
@@ -8377,6 +8423,7 @@ main() {
     # Always refresh marketplaces and update installed plugins, even when no
     # plugins were selected this run — keeps third-party plugins current.
     update_installed_plugins
+    ensure_plugin_dependencies
     $INSTALL_SHELL_WRAPPER && install_shell_wrapper
     $INSTALL_DEEPXIV && install_deepxiv
     # Interactive runs only: remove what is installed but was left unchecked.

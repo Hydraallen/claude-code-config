@@ -1,5 +1,20 @@
 # Changelog
 
+## [4.3.2] - 2026-10-23
+
+### Features
+- **Script installers install missing plugin npm dependencies.** After plugins are installed and updated, `install.sh` (`ensure_plugin_dependencies`) and `install.ps1` (`Install-PluginDependencies`) check every `installPath` in `installed_plugins.json`. A plugin whose `package.json` declares `dependencies` and that has no `node_modules` gets `npm --prefix <dir> ci --omit=dev --ignore-scripts` (`install` when there is no lockfile). This fixes Node-based plugin hooks failing with `MODULE_NOT_FOUND`, for example ecc 2.2.3's SessionStart hook (`Cannot find module 'js-yaml'`).
+
+### Design Rationale
+- `claude plugin install` / `update` creates a new version directory without `node_modules`, and ecc does not install its own dependencies. Running the check after both the install and the update step covers every plugin version this installer writes.
+- A SessionStart hook would also cover upgrades made by Claude Code itself, but it would put a network operation in session startup. The installer-only approach was chosen to keep startup free of npm.
+- `--ignore-scripts` keeps package install scripts from running; versions come from the plugin's own lockfile.
+
+### Notes & Caveats
+- Plugin upgrades done by Claude Code (startup auto-update, `/plugin`, `claude plugin update`) are not covered. Re-run the installer, or run `npm --prefix <plugin dir> ci --omit=dev --ignore-scripts` in the new version directory.
+- Without `npm` the installer only warns and lists the affected directories. A failed install removes the partial `node_modules`, so the next run retries. `install.sh` bounds each install by `NET_TIMEOUT`.
+- `install.ps1` was not executed in this change (no PowerShell on the test machine).
+
 ## [4.3.1] - 2026-10-13
 
 ### Features

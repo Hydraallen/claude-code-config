@@ -2,6 +2,21 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.3.2] - 2026-10-23
+
+### Features
+- **脚本安装器补装插件缺失的 npm 依赖。** 插件安装和更新完成后，`install.sh`（`ensure_plugin_dependencies`）与 `install.ps1`（`Install-PluginDependencies`）检查 `installed_plugins.json` 中每个 `installPath`。`package.json` 声明了 `dependencies` 但没有 `node_modules` 的插件，执行 `npm --prefix <dir> ci --omit=dev --ignore-scripts`（没有 lockfile 时用 `install`）。修复基于 Node 的插件 hook 报 `MODULE_NOT_FOUND`，例如 ecc 2.2.3 的 SessionStart hook（`Cannot find module 'js-yaml'`）。
+
+### Design Rationale
+- `claude plugin install` / `update` 新建的版本目录不含 `node_modules`，ecc 也不会自行安装依赖。检查放在安装和更新两步之后，覆盖本安装器写入的所有插件版本。
+- SessionStart hook 也能覆盖 Claude Code 自己完成的升级，但会在会话启动时引入网络操作。为保持启动过程不运行 npm，只在安装器中处理。
+- `--ignore-scripts` 不运行包的安装脚本；依赖版本由插件自带的 lockfile 决定。
+
+### Notes & Caveats
+- Claude Code 自行完成的插件升级（启动时自动更新、`/plugin`、`claude plugin update`）不在覆盖范围内。需重跑安装器，或在新版本目录中执行 `npm --prefix <插件目录> ci --omit=dev --ignore-scripts`。
+- 没有 `npm` 时只给出警告并列出受影响目录。安装失败会删除残留的 `node_modules`，下次运行重试。`install.sh` 每次安装受 `NET_TIMEOUT` 限制。
+- 本次未实际运行 `install.ps1`（测试机没有 PowerShell）。
+
 ## [4.3.1] - 2026-10-13
 
 ### Features
