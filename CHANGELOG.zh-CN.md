@@ -2,6 +2,20 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.3.3] - 2026-11-01
+
+### Features
+- **Claude settings 模板提高 WebSearch 会话上限。** `platforms/claude/templates/settings.json` 新增 `env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION = "1000"`，两个脚本安装器都会把它合并进 `~/.claude/settings.json`。
+
+### Design Rationale
+- 根据 Claude Code 官方文档（[tools-reference 中的 Session search limit](https://code.claude.com/docs/en/tools-reference#session-search-limit)、[env-vars](https://code.claude.com/docs/en/env-vars)），交互式会话默认可调用 WebSearch 200 次，主会话与所有子agent 共用这一计数；v2.1.290+ 每小时恢复约 100 次。并行运行 16 个研究子agent 时，每个子agent 只用了 10–20 次就到达上限。
+- 该上限只能调高，不能关闭。`1000` 能覆盖大规模并行，同时保留上限。恢复速率（`CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR`）保持默认值。
+
+### Notes & Caveats
+- 需要 Claude Code v2.1.212 或更高版本，旧版本会忽略该变量。
+- 合并 env 块时，用户已有的值优先。如需其他上限，修改 `~/.claude/settings.json` 中的 `env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION`。
+- 使用 `-p` 和 Agent SDK 时，上限按轮次（turn）计算；`/clear` 会重置计数。
+
 ## [4.3.2] - 2026-10-23
 
 ### Features

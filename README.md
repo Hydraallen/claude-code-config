@@ -274,6 +274,7 @@ These are values from the current templates, applied only when the corresponding
 | Claude | `tui` | `fullscreen` | Fullscreen terminal interface |
 | Claude | `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | `1` | Enable the agent-teams experiment |
 | Claude | `env.API_TIMEOUT_MS` / `env.FORCE_AUTOUPDATE_PLUGINS` | `3000000` / `1` | Fork: long API timeout and plugin auto-update |
+| Claude | `env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` | `1000` | Fork: raise the WebSearch cap shared by the session and its subagents (default 200) |
 | Claude | `includeCoAuthoredBy` | `false` | Fork: no co-author trailer unless Co-authored-by is selected |
 | Claude | `permissions.defaultMode` | `auto` | Separate permissions template also contains broad tool allowances |
 | Codex | `model` / `model_reasoning_effort` | `gpt-5.6-sol` / `max` | Model and reasoning effort |

@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.3.3] - 2026-11-01
+
+### Features
+- **The Claude settings template raises the WebSearch session cap.** `platforms/claude/templates/settings.json` sets `env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` to `1000`. Both script installers merge it into `~/.claude/settings.json`.
+
+### Design Rationale
+- According to the Claude Code docs ([tools-reference, Session search limit](https://code.claude.com/docs/en/tools-reference#session-search-limit); [env-vars](https://code.claude.com/docs/en/env-vars)), an interactive session can make 200 WebSearch calls by default. The main conversation and all subagents share that count. On v2.1.290+ the count refills at about 100 calls per hour. When 16 research subagents ran in parallel, each one got only 10–20 searches before the limit was reached.
+- The cap can be raised but not turned off. `1000` covers a large fan-out and still sets a limit. The refill rate (`CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR`) is left at its default.
+
+### Notes & Caveats
+- The variable needs Claude Code v2.1.212 or later. Older versions ignore it.
+- When the env block is merged, a value the user already has takes priority. To use a different cap, edit `env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` in `~/.claude/settings.json`.
+- With `-p` and the Agent SDK, the limit applies per turn. `/clear` resets the count.
+
 ## [4.3.2] - 2026-10-23
 
 ### Features

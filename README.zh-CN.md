@@ -274,6 +274,7 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 | Claude | `tui` | `fullscreen` | 全屏终端界面 |
 | Claude | `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | `1` | 开启 agent teams 实验功能 |
 | Claude | `env.API_TIMEOUT_MS` / `env.FORCE_AUTOUPDATE_PLUGINS` | `3000000` / `1` | Fork：更长的 API 超时与插件自动更新 |
+| Claude | `env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` | `1000` | Fork：提高会话与子agent 共用的 WebSearch 次数上限（默认 200） |
 | Claude | `includeCoAuthoredBy` | `false` | Fork：未选 Co-authored-by 时不加共同作者 |
 | Claude | `permissions.defaultMode` | `auto` | 独立权限模板还包含宽泛的工具放行规则 |
 | Codex | `model` / `model_reasoning_effort` | `gpt-5.6-sol` / `max` | 模型与推理强度 |
