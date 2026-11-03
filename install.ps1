@@ -1207,7 +1207,10 @@ function Install-Settings {
         $baseAllow = if ($incoming.permissions -and $incoming.permissions.allow) { @($incoming.permissions.allow) } else { @() }
         $overAllow = if ($existing.permissions -and $existing.permissions.allow) { @($existing.permissions.allow) } else { @() }
         # Drop MCP rules Claude Code rejects: a glob before the literal mcp__<server>__ prefix (e.g. mcp__* from older installs)
-        $mergedAllow = @($baseAllow + $overAllow | Select-Object -Unique |
+        # Legacy "Read(*)"-style file-tool rules become the bare tool name: Claude Code now reads (*) as a working-directory path glob
+        $mergedAllow = @($baseAllow + $overAllow |
+            ForEach-Object { if ($_ -is [string] -and $_ -cmatch '^(Read|Write|Edit|Glob|Grep|NotebookEdit)\(\*\)$') { $Matches[1] } else { $_ } } |
+            Select-Object -Unique |
             Where-Object { -not ($_ -is [string] -and $_.StartsWith('mcp__') -and $_.Contains('*') -and $_ -notmatch '^mcp__[^*]+__') })
 
         # enabledPlugins: if plugins were interacted with this run, apply the selection

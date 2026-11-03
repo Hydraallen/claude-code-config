@@ -2169,8 +2169,13 @@ _install_settings_from() {
     ($base.env // {}) * ($over.env // {}) as $env |
 
     # permissions.allow: union, minus MCP rules Claude Code rejects (a glob
-    # before the literal mcp__<server>__ prefix, e.g. mcp__* from older installs)
-    (($base.permissions.allow // []) + ($over.permissions.allow // []) | unique
+    # before the literal mcp__<server>__ prefix, e.g. mcp__* from older installs).
+    # Legacy "Read(*)"-style file-tool rules from older installs become the bare
+    # tool name: Claude Code now reads (*) as a working-directory path glob.
+    (($base.permissions.allow // []) + ($over.permissions.allow // [])
+      | map(if type == "string" and test("^(Read|Write|Edit|Glob|Grep|NotebookEdit)\\(\\*\\)$")
+            then sub("\\(\\*\\)$"; "") else . end)
+      | unique
       | map(select((type == "string" and startswith("mcp__") and test("\\*")
                     and (test("^mcp__[^*]+__") | not)) | not))) as $allow |
 

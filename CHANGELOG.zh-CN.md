@@ -2,6 +2,20 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.3.4] - 2026-11-02
+
+### Features
+- **Claude permissions 模板改用不带括号的文件工具名。** `platforms/claude/templates/permissions.json` 的 allow 列表由 `Read(*)` 等改为 `Read`、`Write`、`Edit`、`Glob`、`Grep`、`NotebookEdit`。
+- **脚本安装器迁移旧规则。** `install.sh` / `install.ps1` 合并已有的 `~/.claude/settings.json` 时，把 `permissions.allow` 中的 `Read(*)`、`Write(*)`、`Edit(*)`、`Glob(*)`、`Grep(*)`、`NotebookEdit(*)` 替换为不带括号的工具名。其他设备重新运行安装器的 settings 项（如 `bash install.sh --only settings`）即可更新。
+
+### Design Rationale
+- 新版 Claude Code 把这些规则中的 `(*)` 解析为仅限工作目录的路径通配，并在启动时逐条警告。此时 `Edit(*)`、`Write(*)`、`NotebookEdit(*)` 对工作目录外的路径仍需确认，`Read(*)`、`Glob(*)`、`Grep(*)` 与默认行为相同。不带括号的工具名放行所有路径，与这些规则的原意一致。
+- 若不迁移，allow 列表的并集合并会把已有设置中的旧条目与新条目一起保留，警告仍会出现。
+
+### Notes & Caveats
+- 只改写上述六个完全匹配的条目。带实际路径模式的规则（如 `Edit(src/**)`）以及 `Bash(*)`、`WebFetch(*)`、`WebSearch(*)`、`Task(*)` 保持不变。
+- 本次未执行 `install.ps1`（测试机器没有 PowerShell）。
+
 ## [4.3.3] - 2026-11-01
 
 ### Features

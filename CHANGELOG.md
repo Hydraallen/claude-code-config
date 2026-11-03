@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.3.4] - 2026-11-02
+
+### Features
+- **The Claude permissions template uses bare file-tool names.** `platforms/claude/templates/permissions.json` now allows `Read`, `Write`, `Edit`, `Glob`, `Grep` and `NotebookEdit` instead of `Read(*)` etc.
+- **Script installers migrate the legacy rules.** When `install.sh` / `install.ps1` merge into an existing `~/.claude/settings.json`, `permissions.allow` entries `Read(*)`, `Write(*)`, `Edit(*)`, `Glob(*)`, `Grep(*)` and `NotebookEdit(*)` are replaced with the bare tool name. Re-running the installer with the settings item (for example `bash install.sh --only settings`) updates other machines.
+
+### Design Rationale
+- Current Claude Code reads the `(*)` in these rules as a path glob limited to the working directories and shows a startup warning for each one. `Edit(*)`, `Write(*)` and `NotebookEdit(*)` then still ask for paths outside the working directories, and `Read(*)`, `Glob(*)` and `Grep(*)` add nothing to the defaults. The bare tool name allows every path, which is what the rules were meant to do.
+- Without the migration, the union merge would keep the old entries from existing settings next to the new bare names, and the warning would remain.
+
+### Notes & Caveats
+- Only these six exact entries are rewritten. Rules with a real path pattern, such as `Edit(src/**)`, and `Bash(*)`, `WebFetch(*)`, `WebSearch(*)`, `Task(*)` are left unchanged.
+- `install.ps1` was not executed in this change (no PowerShell on the test machine).
+
 ## [4.3.3] - 2026-11-01
 
 ### Features

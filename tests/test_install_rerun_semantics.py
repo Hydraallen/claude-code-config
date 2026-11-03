@@ -606,3 +606,18 @@ def test_pinned_upstream_skill_detected_and_backed_up_on_deselect(tmp_path: Path
     assert [b.read_text() for b in backups] == ["my edits\n"]
     files = json.loads((e.claude / "agent-config" / "files.json").read_text())["files"]
     assert "skills/neat-freak" not in files
+
+
+def test_settings_merge_migrates_legacy_file_tool_rules(tmp_path: Path) -> None:
+    e = Env(tmp_path)
+    e.claude.mkdir(parents=True)
+    legacy = ["Read(*)", "Write(*)", "Edit(*)", "Glob(*)", "Grep(*)", "NotebookEdit(*)"]
+    (e.claude / "settings.json").write_text(json.dumps(
+        {"permissions": {"allow": ["Bash(git status)", *legacy]}}))
+
+    e.run("--only", "settings")
+
+    allow = e.settings()["permissions"]["allow"]
+    assert not set(legacy) & set(allow), allow
+    assert {"Read", "Write", "Edit", "Glob", "Grep", "NotebookEdit", "Bash(git status)"} <= set(allow)
+    assert len(allow) == len(set(allow))
