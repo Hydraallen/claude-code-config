@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.4.1] - 2026-11-07
+
+### Fixes
+- The `gog` login guidance now suggests `--gmail-scope read-send`. `gog gmail send` returned `403 insufficientPermissions` under `--gmail-scope send` alone, so the earlier suggestion did not work. The guidance also says that archiving, labels, trash and settings need `full`, and that macOS logins belong in a local terminal because the keychain is often locked over SSH.
+
+### Notes & Caveats
+- Text change only; install behaviour is unchanged. `read-send` is inferred from the send path, which resolves the sender before sending, and has not been run against a real account. `full` was confirmed to send, search mail and list calendar events.
+
 ## [4.4.0] - 2026-11-06
 
 ### Features

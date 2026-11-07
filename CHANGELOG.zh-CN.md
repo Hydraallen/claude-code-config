@@ -2,6 +2,14 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.4.1] - 2026-11-07
+
+### Fixes
+- `gog` 登录指引改为建议 `--gmail-scope read-send`。只授权 `--gmail-scope send` 时，`gog gmail send` 返回 `403 insufficientPermissions`，之前的建议无法发信。指引同时写明归档、标签、垃圾箱和设置需要 `full`；macOS 上要在本机终端登录，因为通过 SSH 时 Keychain 常处于锁定状态。
+
+### Notes & Caveats
+- 只改文字，安装行为不变。`read-send` 是根据发信流程（发送前先解析发件人）推断的，尚未用真实账号运行。`full` 已确认可以发信、搜索邮件和列出日历事件。
+
 ## [4.4.0] - 2026-11-06
 
 ### Features
