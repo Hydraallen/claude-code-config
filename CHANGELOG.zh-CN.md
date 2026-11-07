@@ -17,7 +17,7 @@
 - `gog` 登记为仅脚本菜单 ID（`catalog_id_for_menu_id` 为空，列入 `SCRIPT_ONLY_MENU_IDS`），因为 `scripts/check-catalog-sync.sh` 对 Claude 列写明 `install.sh --only <id>` 的 catalog 行有此要求。
 
 ### Notes & Caveats
-- `install.ps1` 不提供 gog（`PS1_MISSING_MENU_IDS`）。Windows 仍为 41 项；`install.sh` 现为 50 项，其中 30 项默认开启。
+- `install.ps1` 不提供 gog（`PS1_MISSING_MENU_IDS`）。Windows 为 42 项；`install.sh` 现为 50 项，其中 30 项默认开启。
 - `--all` 与非交互默认运行不安装 gog；需要勾选或使用 `--only gog`。
 - 预编译 macOS 二进制要求 macOS 15 或更高版本。更旧的 macOS 会失败，并给出说明和 `go install` 命令（需要 Go 1.26 或更高版本）。
 - checksum 文件与压缩包来自同一 release，用于发现下载损坏，不是签名校验。

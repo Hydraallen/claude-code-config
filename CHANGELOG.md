@@ -15,7 +15,7 @@
 - `gog` is registered as a script-only menu ID (empty `catalog_id_for_menu_id`, `SCRIPT_ONLY_MENU_IDS`), because `scripts/check-catalog-sync.sh` requires this for a catalog row whose Claude cell names `install.sh --only <id>`.
 
 ### Notes & Caveats
-- `install.ps1` does not offer gog (`PS1_MISSING_MENU_IDS`). The Windows count stays at 41 items; `install.sh` now offers 50 items, 30 on by default.
+- `install.ps1` does not offer gog (`PS1_MISSING_MENU_IDS`). The Windows count is 42 items; `install.sh` now offers 50 items, 30 on by default.
 - `--all` and the non-interactive default do not install gog; tick it or use `--only gog`.
 - Prebuilt macOS binaries need macOS 15 or later. Older macOS fails with a message and a `go install` command (Go 1.26 or later).
 - The checksum file comes from the same release as the archive. It detects corrupted downloads; it is not a signature check.
