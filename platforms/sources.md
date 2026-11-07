@@ -172,6 +172,11 @@ Client 不支持插件或固定版本条件不满足时，解释后按右列路�
 
 三个独立条目：`skills/deepxiv-cli`、`skills/deepxiv-trending-digest`、`skills/deepxiv-baseline-table`，目标同名。解释后两项的 CLI 前提，复用已存在的 DeepXiv CLI；缺少运行依赖时按上游说明准备并单独报告状态。不会把整个 SDK clone 当成 skill。
 
+<a id="gog"></a>
+## gog（Claude，脚本安装）
+
+上游 https://github.com/openclaw/gogcli （原 steipete/gogcli），许可 MIT。install.sh 的 `GOG_VERSION` 固定为 0.48.0（tag `v0.48.0`），升级时只改这个变量并核实资产名。macOS 有 Homebrew 时用 `brew install openclaw/tap/gogcli`（由 tap 决定版本）；其余情况下载 `gogcli_<version>_<darwin|linux>_<amd64|arm64>.tar.gz`，按同一 release 的 `checksums.txt` 校验后，把压缩包内的 `./gog` 放入 `~/.local/bin`。上游的预编译 macOS 二进制要求 macOS 15 或更高版本。身份判断依据 `gog --help` 中的 `Google CLI for Gmail`；`gog --version` 只输出版本号。授权检查使用 `gog auth list --json --no-input`。本仓库不内置该二进制。
+
 <a id="lieflat"></a>
 ## lieflat-charts（Claude）
 

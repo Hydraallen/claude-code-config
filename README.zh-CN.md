@@ -28,9 +28,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Hydraallen/claude-code-confi
 irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex
 ```
 
-启动两级交互菜单：11 个分组共 48 项，其中 30 项默认开启。Windows 上的 `install.ps1` 提供 10 个分组共 41 项；模型后端、shell wrapper、co-author 与 Matt skills 目前只支持 macOS / Linux。参数（括号内为 PowerShell 写法）：
+启动两级交互菜单：11 个分组共 50 项，其中 30 项默认开启。Windows 上的 `install.ps1` 提供 10 个分组共 42 项；模型后端、shell wrapper、co-author、gog 与 Matt skills 目前只支持 macOS / Linux。参数（括号内为 PowerShell 写法）：
 
-- `--all`（`-All`）：跳过菜单，安装除可选 storage-analyzer 之外的全部条目。增量安装：不删除任何内容。
+- `--all`（`-All`）：跳过菜单，安装除可选 storage-analyzer 和 gog 之外的全部条目。增量安装：不删除任何内容。
 - `--only <ids>`（`-Only`）：只安装列出的菜单项，逗号分隔。增量安装：不删除其他内容、不对账插件、不重建 `enabledPlugins`、不写版本戳。
 - `--list-ids`（`-ListIds`）：列出全部菜单 ID、默认值与分组。
 - `--prune-foreign-plugins`（`-PruneForeignPlugins`）：交互式运行对账时，也处理安装器不管理的插件（见下文）。
@@ -44,7 +44,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
     [3/3]  Language Rules        Python / TypeScript / Go
     [1/3]  Review                code-review（adversarial-review / Codex 需手动勾选）
     [10/11] Workflow             karpathy、superpowers、mattpocock、ecc、update-config、edit-config、neat-freak...
-    [2/2]  Integrations          context7、playwright
+    [2/3]  Integrations          context7、playwright、gog
     [3/5]  Design & Content      document-skills、example-skills、humanizer、humanizer-zh、lieflat-charts
     [0/2]  Slides                frontend-slides、ppt-master
     [0/1]  Storage               storage-analyzer
@@ -74,7 +74,7 @@ irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install
 
 ### 方式 B —— agent 引导安装（Claude 或 Codex）
 
-本 fork 的发布主线为 [Hydraallen/claude-code-config](https://github.com/Hydraallen/claude-code-config) 的 `main`。之前使用上游 Mizoreww/awesome-agent-config 的话，agent 会把它视为不同来源，只有你明确要求才切换，见[迁移说明](docs/migration.md#repository-identity)。只有脚本安装器提供的条目（模型后端、启动器、co-author、搜索 agent、image-gen）由 agent 在你确认后用 `install.sh --only <id>` 安装。
+本 fork 的发布主线为 [Hydraallen/claude-code-config](https://github.com/Hydraallen/claude-code-config) 的 `main`。之前使用上游 Mizoreww/awesome-agent-config 的话，agent 会把它视为不同来源，只有你明确要求才切换，见[迁移说明](docs/migration.md#repository-identity)。只有脚本安装器提供的条目（模型后端、启动器、co-author、gog、搜索 agent、image-gen）由 agent 在你确认后用 `install.sh --only <id>` 安装。
 
 在 Claude 或 Codex 中打开这份 checkout，或把**当前正在阅读的仓库页面 URL**与下面这段请求一起发给 agent。分享分支页面时保留 URL 中的 branch/ref。
 
@@ -156,6 +156,7 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 | --- | --- | --- | --- | --- |
 | **context7** | [Upstash](https://github.com/upstash/context7) | 查询最新库文档 | 原生插件 ★ | 插件 / MCP ★ |
 | **playwright** | [Microsoft](https://github.com/microsoft/playwright-mcp) | 浏览器自动化、E2E 与截图；Codex MCP 固定 0.0.78；WSL 中 install.sh 改为驱动 Windows 的 Chrome（[说明](mcp/README.md#wsl-windows-chrome)） | 原生插件 ★ | MCP ★ |
+| **gog** *（fork）* | [openclaw/gogcli](https://github.com/openclaw/gogcli) | Gmail / Google CLI，仅 macOS / Linux。默认关闭，已安装时自动勾选，从不卸载。登录由用户完成：勾选且没有已授权账号时，运行末尾打印步骤 | 脚本安装器 | — |
 
 ### Design & Content · 设计与内容
 

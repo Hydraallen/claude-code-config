@@ -28,9 +28,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Hydraallen/claude-code-confi
 irm https://raw.githubusercontent.com/Hydraallen/claude-code-config/main/install.ps1 | iex
 ```
 
-Launches a two-level interactive selector: 48 items in 11 groups, 30 of them on by default. On Windows, `install.ps1` offers 41 items in 10 groups; the model backends, shell wrapper, co-author and Matt skills are macOS/Linux only for now. Flags (PowerShell spelling in parentheses):
+Launches a two-level interactive selector: 50 items in 11 groups, 30 of them on by default. On Windows, `install.ps1` offers 42 items in 10 groups; the model backends, shell wrapper, co-author, gog and Matt skills are macOS/Linux only for now. Flags (PowerShell spelling in parentheses):
 
-- `--all` (`-All`): skip the menu and install every item except the opt-in storage-analyzer. Additive: nothing is removed.
+- `--all` (`-All`): skip the menu and install every item except the opt-in storage-analyzer and gog. Additive: nothing is removed.
 - `--only <ids>` (`-Only`): install just the listed menu items, comma-separated. Additive: nothing is removed, plugins are not reconciled, `enabledPlugins` is not rebuilt and the version stamp is not written.
 - `--list-ids` (`-ListIds`): print every menu ID with its default and group.
 - `--prune-foreign-plugins` (`-PruneForeignPlugins`): on an interactive run, also reconcile plugins the installer does not manage (see below).
@@ -44,7 +44,7 @@ Launches a two-level interactive selector: 48 items in 11 groups, 30 of them on 
     [3/3]  Language Rules        Python / TypeScript / Go
     [1/3]  Review                code-review (adversarial-review / Codex opt-in)
     [10/11] Workflow             karpathy, superpowers, mattpocock, ecc, update-config, edit-config, neat-freak...
-    [2/2]  Integrations          context7, playwright
+    [2/3]  Integrations          context7, playwright, gog
     [3/5]  Design & Content      document-skills, example-skills, humanizer, humanizer-zh, lieflat-charts
     [0/2]  Slides                frontend-slides, ppt-master
     [0/1]  Storage               storage-analyzer
@@ -74,7 +74,7 @@ The `Platform:` line at the top of the menu (and at the start of every run) show
 
 ### Option B — agent-guided setup (Claude or Codex)
 
-This fork's release line is [Hydraallen/claude-code-config](https://github.com/Hydraallen/claude-code-config) on `main`. Coming from upstream Mizoreww/awesome-agent-config? The agent treats it as a different source and switches only when you ask; see the [migration notes](docs/migration.md#repository-identity). Items that only the script installer provides (model backends, launcher, co-author, search agent, image-gen) are installed by the agent with `install.sh --only <id>` after you confirm.
+This fork's release line is [Hydraallen/claude-code-config](https://github.com/Hydraallen/claude-code-config) on `main`. Coming from upstream Mizoreww/awesome-agent-config? The agent treats it as a different source and switches only when you ask; see the [migration notes](docs/migration.md#repository-identity). Items that only the script installer provides (model backends, launcher, co-author, gog, search agent, image-gen) are installed by the agent with `install.sh --only <id>` after you confirm.
 
 Open this checkout in Claude or Codex, or share **the URL of the repository page you are reading** along with the request below. Keep its branch/ref when sharing a branch page.
 
@@ -156,6 +156,7 @@ The tables retain the original categories and merge the Claude and Codex capabil
 | --- | --- | --- | --- | --- |
 | **context7** | [Upstash](https://github.com/upstash/context7) | Up-to-date library documentation lookup | Native plugin ★ | Plugin / MCP ★ |
 | **playwright** | [Microsoft](https://github.com/microsoft/playwright-mcp) | Browser automation, E2E testing and screenshots; Codex MCP pinned to 0.0.78; in WSL, install.sh drives the Windows Chrome ([details](mcp/README.md#wsl-windows-chrome)) | Native plugin ★ | MCP ★ |
+| **gog** *(fork)* | [openclaw/gogcli](https://github.com/openclaw/gogcli) | Gmail/Google CLI, macOS/Linux only. Off by default, ticked when already installed, never uninstalled. Login stays manual: the steps print at the end of a run that ticks it with no authorized account | Script installer | — |
 
 ### Design & Content
 

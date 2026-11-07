@@ -74,6 +74,7 @@
 | --- | --- | --- | --- | --- | --- |
 | context7 | 查询最新库文档 | [原生插件](platforms/claude/README.md#plugins) | [原生插件](platforms/codex/README.md#plugins)；[HTTP MCP](platforms/codex/README.md#mcp) | 推荐 | 推荐 |
 | playwright | 浏览器自动化与 E2E | [原生插件](platforms/claude/README.md#plugins) | [固定版本 MCP](platforms/codex/README.md#mcp) | 推荐 | 推荐 |
+| gog | *fork*：Gmail / Google CLI（[openclaw/gogcli](https://github.com/openclaw/gogcli)）；已安装时自动勾选，从不卸载，登录由用户完成；仅 macOS / Linux | [脚本安装](platforms/claude/README.md#script-only)：`install.sh --only gog` | — | — | — |
 
 ## Design & Content · 设计与内容
 

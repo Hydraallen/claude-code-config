@@ -513,7 +513,7 @@ non-interactive default (no tty) are additive and remove nothing, except that
 every run removes retired items (github plugin + GitHub MCP, claude-mem, PUA)
 and their leftovers (plugin caches/data, ~/.claude-mem, ~/.claude.json usage
 records; set ACCC_KEEP_CLAUDE_MEM_DATA=1 to keep ~/.claude-mem).
---all installs every item except the opt-in storage-analyzer skill.
+--all installs every item except the opt-in storage-analyzer skill and gog.
 Lark/Feishu MCP (mcp-lark) runs as one shared service on 127.0.0.1:3100
 (LARK_MCP_PORT=<port> picks another port) and falls back to per-session stdio.
 
@@ -596,6 +596,22 @@ WSL_BROWSER_STATUS=""
 PLATFORM_SUMMARY=""
 CO_AUTHOR=false
 INSTALL_DEEPXIV=false
+INSTALL_GOG=false
+# Pinned gogcli release (openclaw/gogcli). Assets: gogcli_<version>_<os>_<arch>.tar.gz
+# with checksums.txt beside them; the archive holds a single ./gog binary.
+GOG_VERSION="0.48.0"
+GOG_RELEASE_BASE_URL="https://github.com/openclaw/gogcli/releases/download/v${GOG_VERSION}"
+GOG_BREW_FORMULA="openclaw/tap/gogcli"
+GOG_MIN_MACOS_MAJOR=15
+GOG_USER_BIN_DIR="$HOME/.local/bin"
+GOG_PROBE_TIMEOUT="${GOG_PROBE_TIMEOUT:-15}"
+GOG_BREW_TIMEOUT="${GOG_BREW_TIMEOUT:-600}"
+# Outcome of install_gog: present | installed | failed | dry-run.
+GOG_RESULT=""
+GOG_BIN=""
+GOG_FAIL_REASON=""
+GOG_MANUAL_COMMANDS=()
+GOG_COMMANDS=()
 # --only: install just the listed menu IDs, additively (no removals, no plugin
 # reconciliation). ONLY_IDS holds the raw, not yet validated list.
 ONLY_MODE=false
@@ -1155,7 +1171,8 @@ neat-freak|Knowledge, docs & workspace closeout (KKKKhazix/khazix-skills, pinned
     MENU_GROUP_LABELS+=("Integrations")
     MENU_GROUP_HINTS+=("external tools & services")
     MENU_GROUP_ITEMS+=("context7|Real-time library documentation|1|plug-context7
-playwright|Browser automation & E2E testing|1|plug-playwright")
+playwright|Browser automation & E2E testing|1|plug-playwright
+gog|Gmail/Google CLI (openclaw/gogcli); ticked when already installed, never removed; login is manual|0|gog")
 
     # Group 5: Design & Content
     MENU_GROUP_LABELS+=("Design & Content")
@@ -1301,6 +1318,7 @@ apply_menu_id() {
         agents)                 INSTALL_AGENTS=true ;;
         shell-wrapper)          INSTALL_SHELL_WRAPPER=true ;;
         co-author)              CO_AUTHOR=true ;;
+        gog)                    INSTALL_GOG=true ;;
         # Model backends (profile JSON consumed by claude.zsh)
         backend-glm)            INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("glm") ;;
         backend-or)             INSTALL_SHELL_WRAPPER=true; SELECTED_PROFILES+=("or") ;;
@@ -6503,7 +6521,7 @@ catalog_id_for_menu_id() {
         deepxiv-cli|deepxiv-trending-digest|deepxiv-baseline-table) echo "$1" ;;
         mcp)                         echo "playwright-mcp" ;;
         mcp-lark)                    echo "lark" ;;
-        # Script-only: search agent, shell wrapper, co-author, model backends.
+        # Script-only: search agent, shell wrapper, co-author, gog, model backends.
         *)                           echo "" ;;
     esac
 }
@@ -6594,6 +6612,7 @@ menu_id_selected_this_run() {
         agents)              $INSTALL_AGENTS ;;
         shell-wrapper)       $INSTALL_SHELL_WRAPPER ;;
         co-author)           $CO_AUTHOR ;;
+        gog)                 $INSTALL_GOG ;;
         backend-glm|backend-or|backend-gpt|backend-ccr)
             $INSTALL_SHELL_WRAPPER && _in_list "${id#backend-}" ${SELECTED_PROFILES[@]+"${SELECTED_PROFILES[@]}"} ;;
         rules-python|rules-ts|rules-go)
@@ -6852,6 +6871,8 @@ clear_script_selection_records() {
 #   statusline            settings.json statusLine runs ~/.claude/hooks/statusline.sh
 #   lessons               settings.json SessionStart carries the lessons hook
 #   co-author             settings.json includeCoAuthoredBy == true
+#   gog                   a working gogcli binary (ticked on every run while
+#                         present, even after an earlier untick)
 #   CLAUDE.md, settings,  file present (these are kept when unchecked, so a
 #   model backends        previous "unchecked" record wins over the file)
 # Items not detected fall back to their menu default, except those the previous
@@ -7088,6 +7109,7 @@ detect_menu_item_state() {
             return 1 ;;
         shell-wrapper)       [[ -f "$CLAUDE_DIR/claude.zsh" ]] ;;
         co-author)           co_author_enabled ;;
+        gog)                 gog_find >/dev/null ;;
         backend-*)           [[ -f "$CLAUDE_DIR/profiles/${id#backend-}.json" ]] ;;
         rules-python)        [[ -d "$CLAUDE_DIR/rules/python" ]] ;;
         rules-ts)            [[ -d "$CLAUDE_DIR/rules/typescript" ]] ;;
@@ -7358,6 +7380,7 @@ reconcile_deselected() {
     $INSTALL_STATUSLINE || remove_deselected_statusline
     $INSTALL_LESSONS || remove_deselected_lessons_hook
     $CO_AUTHOR || remove_deselected_co_author
+    $INSTALL_GOG || gog_note_kept
     if $INSTALL_SHELL_WRAPPER; then
         warn_default_profile_deselected
     else
@@ -7392,6 +7415,7 @@ uninstall() {
     echo "    ~/.claude-mem (claude-mem data), retired usage records in ~/.claude.json (backed up first)"
     [[ -f "$VERSION_STAMP_FILE" ]] && echo "  - $VERSION_STAMP_FILE"
     echo ""
+    gog_note_kept
 
     if $DRY_RUN; then
         warn "DRY RUN -- nothing will be removed"
@@ -7533,6 +7557,302 @@ uninstall() {
     rm -f "$VERSION_STAMP_FILE"
     echo ""
     ok "Uninstall complete."
+}
+
+# ============================================================
+# gog (openclaw/gogcli): optional third-party Google CLI.
+#
+# The installer only ever adds the binary. It never upgrades or removes an
+# existing copy, never touches its credentials and never starts the OAuth flow.
+# Every external command in this path runs through with_timeout, which closes
+# stdin, so nothing here can prompt or hang.
+# ============================================================
+
+# 0 when $1 is gogcli. `gog --version` prints only "v0.48.0 (commit date)", so
+# the identity comes from the --help description. GOG_HELP=agent would drop that
+# description, and help wraps it at the terminal width: force the full form and
+# squeeze whitespace before matching.
+_gog_is_gogcli() {
+    local bin="$1" out
+    [[ -f "$bin" && -x "$bin" ]] || return 1
+    with_timeout "$GOG_PROBE_TIMEOUT" "$bin" --version >/dev/null 2>&1 || return 1
+    out="$(with_timeout "$GOG_PROBE_TIMEOUT" env GOG_HELP=full NO_COLOR=1 "$bin" --help 2>/dev/null | tr -s '[:space:]' ' ')" || return 1
+    [[ "$out" == *"Google CLI for Gmail"* ]]
+}
+
+# Print the path of a working gogcli. The user bin directory and brew's bin
+# directory are checked too because they may not be on PATH yet.
+gog_find() {
+    local candidate brew_path
+    brew_path="$(command -v brew 2>/dev/null || true)"
+    for candidate in "$(command -v gog 2>/dev/null || true)" "$GOG_USER_BIN_DIR/gog" "${brew_path:+${brew_path%/*}/gog}"; do
+        [[ -n "$candidate" ]] || continue
+        if _gog_is_gogcli "$candidate"; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+_gog_version() {
+    with_timeout "$GOG_PROBE_TIMEOUT" "$1" --version 2>/dev/null | head -n 1 || true
+}
+
+# Record a failed install. $1 is the reason; the remaining arguments are the
+# commands the user can run instead, one per argument.
+_gog_fail() {
+    GOG_RESULT="failed"
+    GOG_FAIL_REASON="$1"
+    shift
+    GOG_MANUAL_COMMANDS=("$@")
+    warn "gog not installed: $GOG_FAIL_REASON"
+    (( INSTALL_WARNINGS++ )) || true
+    return 1
+}
+
+_gog_mark_installed() {
+    GOG_BIN="$1"
+    GOG_RESULT="installed"
+    ok "gog installed at $1 ($(_gog_version "$1"))"
+}
+
+_gog_brew_commands() {
+    GOG_COMMANDS=("brew install $GOG_BREW_FORMULA" "gog --version")
+}
+
+_gog_install_with_brew() {
+    local log no_sudo status=0 found
+    log="$(mktemp "${TMPDIR:-/tmp}/accc-gog-brew.XXXXXX")" || { _gog_brew_commands; _gog_fail "cannot create a temporary file" "${GOG_COMMANDS[@]}"; return 1; }
+    no_sudo="$(mktemp -d "${TMPDIR:-/tmp}/accc-gog-nosudo.XXXXXX")" || { rm -f "$log"; _gog_brew_commands; _gog_fail "cannot create a temporary directory" "${GOG_COMMANDS[@]}"; return 1; }
+    # sudo reads its password from /dev/tty, past the closed stdin. This stand-in
+    # makes a sudo call inside brew fail at once.
+    printf '#!/bin/sh\necho "sudo: a password is required" >&2\nexit 1\n' > "$no_sudo/sudo"
+    chmod +x "$no_sudo/sudo"
+    info "Installing gog: brew install $GOG_BREW_FORMULA"
+    with_timeout "$GOG_BREW_TIMEOUT" env PATH="$no_sudo:$PATH" HOMEBREW_NO_ENV_HINTS=1 \
+        brew install "$GOG_BREW_FORMULA" >"$log" 2>&1 || status=$?
+    local needs_password=false
+    grep -qiE 'sudo|password' "$log" 2>/dev/null && needs_password=true
+    rm -rf "$no_sudo"
+    rm -f "$log"
+    _gog_brew_commands
+    if (( status != 0 )); then
+        if $needs_password; then
+            _gog_fail "brew install needs a password or sudo" "${GOG_COMMANDS[@]}"
+        elif (( status == 124 )); then
+            _gog_fail "brew install timed out after ${GOG_BREW_TIMEOUT}s" "${GOG_COMMANDS[@]}"
+        else
+            _gog_fail "brew install failed (exit $status)" "${GOG_COMMANDS[@]}"
+        fi
+        return 1
+    fi
+    if ! found="$(gog_find)"; then
+        _gog_fail "brew install finished but 'gog --version' did not confirm gogcli" "${GOG_COMMANDS[@]}"
+        return 1
+    fi
+    _gog_mark_installed "$found"
+}
+
+_gog_fetch() {
+    if command -v curl &>/dev/null; then
+        with_timeout "$NET_TIMEOUT" curl -fsSL --connect-timeout 20 "$1" -o "$2"
+    elif command -v wget &>/dev/null; then
+        with_timeout "$NET_TIMEOUT" wget -qO "$2" "$1"
+    else
+        return 1
+    fi
+}
+
+# Set GOG_COMMANDS to the manual form of the release install. $2 = true writes
+# to /usr/local/bin with sudo, for a user bin directory that is not writable.
+_gog_release_commands() {
+    local asset="$1" use_sudo="$2" check="sha256sum -c -" base="$GOG_RELEASE_BASE_URL"
+    [[ "$asset" == *darwin* ]] && check="shasum -a 256 -c -"
+    GOG_COMMANDS=(
+        'cd "$(mktemp -d)"'
+        "curl -fLO $base/$asset"
+        "curl -fLO $base/checksums.txt"
+        "grep ' $asset\$' checksums.txt | $check"
+        "tar -xzf $asset"
+    )
+    if [[ "$use_sudo" == true ]]; then
+        GOG_COMMANDS+=("sudo install -m 0755 gog /usr/local/bin/gog" "/usr/local/bin/gog --version")
+    else
+        GOG_COMMANDS+=('mkdir -p "$HOME/.local/bin"' 'install -m 0755 gog "$HOME/.local/bin/gog"' '"$HOME/.local/bin/gog" --version')
+    fi
+}
+
+# Download, verify and install the pinned release binary from inside work dir
+# $2. $1 is the Go OS name.
+_gog_install_release_in() {
+    local os="$1" work="$2" arch asset expected actual
+    case "$(uname -m 2>/dev/null)" in
+        x86_64|amd64)  arch="amd64" ;;
+        arm64|aarch64) arch="arm64" ;;
+        *) _gog_fail "no gogcli release for architecture $(uname -m 2>/dev/null)"; return 1 ;;
+    esac
+    asset="gogcli_${GOG_VERSION}_${os}_${arch}.tar.gz"
+    if ! mkdir -p "$GOG_USER_BIN_DIR" 2>/dev/null || [[ ! -w "$GOG_USER_BIN_DIR" ]]; then
+        _gog_release_commands "$asset" true
+        _gog_fail "$GOG_USER_BIN_DIR is not writable, so the install needs sudo" "${GOG_COMMANDS[@]}"
+        return 1
+    fi
+    if [[ -e "$GOG_USER_BIN_DIR/gog" ]]; then
+        _gog_fail "$GOG_USER_BIN_DIR/gog exists and is not gogcli; it was not replaced"
+        return 1
+    fi
+    info "Downloading gog $GOG_VERSION ($asset)..."
+    if ! _gog_fetch "$GOG_RELEASE_BASE_URL/checksums.txt" "$work/checksums.txt" \
+        || ! _gog_fetch "$GOG_RELEASE_BASE_URL/$asset" "$work/$asset"; then
+        if [[ "$os" == darwin ]]; then
+            GOG_COMMANDS=('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"')
+            GOG_COMMANDS+=("brew install $GOG_BREW_FORMULA" "gog --version")
+            _gog_fail "the download failed and Homebrew is not installed" "${GOG_COMMANDS[@]}"
+        else
+            _gog_release_commands "$asset" false
+            _gog_fail "could not download $asset" "${GOG_COMMANDS[@]}"
+        fi
+        return 1
+    fi
+    expected="$(awk -v a="$asset" '$2 == a { print $1 }' "$work/checksums.txt" | tr '[:upper:]' '[:lower:]')"
+    if [[ -z "$expected" ]]; then
+        _gog_fail "checksums.txt has no entry for $asset"
+        return 1
+    fi
+    if ! actual="$(sha256_file "$work/$asset")"; then
+        _gog_fail "neither shasum nor sha256sum is available to verify $asset"
+        return 1
+    fi
+    if [[ "$actual" != "$expected" ]]; then
+        _gog_fail "checksum mismatch for $asset; the download was discarded"
+        return 1
+    fi
+    mkdir -p "$work/extract"
+    if ! tar -xzf "$work/$asset" -C "$work/extract" 2>/dev/null \
+        || [[ ! -f "$work/extract/gog" || -L "$work/extract/gog" ]]; then
+        _gog_fail "$asset does not contain the gog binary"
+        return 1
+    fi
+    chmod 755 "$work/extract/gog"
+    if ! _gog_is_gogcli "$work/extract/gog"; then
+        _gog_fail "the downloaded gog binary did not pass 'gog --version' on this system"
+        return 1
+    fi
+    if ! mv -f "$work/extract/gog" "$GOG_USER_BIN_DIR/gog"; then
+        _gog_fail "could not write $GOG_USER_BIN_DIR/gog"
+        return 1
+    fi
+    _gog_mark_installed "$GOG_USER_BIN_DIR/gog"
+}
+
+_gog_install_release() {
+    local work status=0
+    work="$(mktemp -d "${TMPDIR:-/tmp}/accc-gog.XXXXXX")" || { _gog_fail "cannot create a temporary directory"; return 1; }
+    _gog_install_release_in "$1" "$work" || status=$?
+    rm -rf "$work"
+    return $status
+}
+
+# Install gog when ticked and absent. The caller ignores the return status: a
+# failure is reported through GOG_RESULT and the run continues.
+install_gog() {
+    local found os major
+    GOG_RESULT=""
+    if found="$(gog_find)"; then
+        GOG_BIN="$found"
+        GOG_RESULT="present"
+        ok "gog already installed at $found ($(_gog_version "$found")); left as is"
+        return 0
+    fi
+    os="$(uname -s 2>/dev/null || echo unknown)"
+    if $DRY_RUN; then
+        GOG_RESULT="dry-run"
+        if [[ "$os" == Darwin ]] && command -v brew &>/dev/null; then
+            info "Would install gog: brew install $GOG_BREW_FORMULA"
+        else
+            info "Would install gog $GOG_VERSION from the release archive into $GOG_USER_BIN_DIR (checksum verified)"
+        fi
+        return 0
+    fi
+    case "$os" in
+        Darwin)
+            major="$(sw_vers -productVersion 2>/dev/null | cut -d . -f 1 || true)"
+            if [[ "$major" =~ ^[0-9]+$ ]] && (( major < GOG_MIN_MACOS_MAJOR )); then
+                _gog_fail "prebuilt gog binaries require macOS $GOG_MIN_MACOS_MAJOR or later (this is macOS $major); a source build needs Go 1.26 or later" \
+                    "go install github.com/openclaw/gogcli/cmd/gog@v$GOG_VERSION" "gog --version"
+                return 1
+            fi
+            if command -v brew &>/dev/null; then
+                _gog_install_with_brew
+            else
+                _gog_install_release darwin
+            fi ;;
+        Linux) _gog_install_release linux ;;
+        *) _gog_fail "gog is offered on macOS and Linux only (this is $os)"; return 1 ;;
+    esac
+}
+
+# Non-interactive check for an account gog can use. Any error counts as not
+# authorized; entries carrying a read error are not usable accounts.
+gog_has_authorized_account() {
+    local out
+    out="$(with_timeout "$GOG_PROBE_TIMEOUT" "$1" auth list --json --no-input 2>/dev/null)" || return 1
+    if command -v jq &>/dev/null; then
+        jq -e '[.accounts[]? | select((.error // "") == "")] | length > 0' <<< "$out" >/dev/null 2>&1
+    else
+        [[ "$out" == *'"email"'* && "$out" != *'"error"'* ]]
+    fi
+}
+
+# One line for a run that leaves an installed gog alone (unticked or --uninstall).
+gog_note_kept() {
+    local found
+    found="$(gog_find)" || return 0
+    info "gog kept: $found and its credentials stay in place"
+}
+
+gog_summary_line() {
+    $INSTALL_GOG || return 0
+    case "$GOG_RESULT" in
+        installed) ok "gog: installed ($GOG_BIN)" ;;
+        present)   ok "gog: already installed, left as is ($GOG_BIN)" ;;
+        failed)    error "gog: FAILED - $GOG_FAIL_REASON" ;;
+    esac
+}
+
+# Printed last in the run, only when gog was ticked in it.
+print_gog_guidance() {
+    $INSTALL_GOG || return 0
+    $DRY_RUN && return 0
+    local cmd
+    case "$GOG_RESULT" in
+        failed)
+            [[ ${#GOG_MANUAL_COMMANDS[@]} -gt 0 ]] || return 0
+            echo "gog could not be installed by this run ($GOG_FAIL_REASON). To install it, run:"
+            for cmd in "${GOG_MANUAL_COMMANDS[@]}"; do echo "    $cmd"; done
+            echo "Then run './install.sh --only gog' to check it and see the login steps."
+            echo ""
+            ;;
+        installed|present)
+            gog_has_authorized_account "$GOG_BIN" && return 0
+            echo "gog has no authorized Google account. To log in (this installer does not start the login):"
+            if [[ "$(command -v gog 2>/dev/null || true)" != "$GOG_BIN" ]]; then
+                echo "  0. Put gog first on PATH:"
+                echo "       export PATH=\"${GOG_BIN%/*}:\$PATH\""
+            fi
+            echo "  1. In Google Cloud Console, create a project, enable the Gmail API, configure the"
+            echo "     OAuth consent screen, then create a Desktop OAuth client and download its JSON:"
+            echo "       https://console.cloud.google.com/apis/library/gmail.googleapis.com"
+            echo "       https://console.cloud.google.com/auth/clients"
+            echo "  2. gog auth credentials set <client_secret.json>"
+            echo "  3. gog auth add you@gmail.com --services gmail --gmail-scope send"
+            echo "     This grants send only. Reading or organizing mail needs a wider scope:"
+            echo "     --gmail-scope read-send, readonly or full. Without a browser, add --manual."
+            echo "  Keep 'gog gmail send' out of Claude Code allow rules so each send asks for confirmation."
+            echo ""
+            ;;
+    esac
 }
 
 # ============================================================
@@ -8431,6 +8751,7 @@ main() {
     ensure_plugin_dependencies
     $INSTALL_SHELL_WRAPPER && install_shell_wrapper
     $INSTALL_DEEPXIV && install_deepxiv
+    if $INSTALL_GOG; then install_gog || true; fi
     # Interactive runs only: remove what is installed but was left unchecked.
     reconcile_deselected
     write_selection_record || warn "Could not update agent-config/selection.json"
@@ -8456,6 +8777,7 @@ main() {
     else
         ok "Installation complete! ($(get_source_version))"
     fi
+    gog_summary_line
     echo ""
     info "Next steps:"
     local step=1
@@ -8488,6 +8810,7 @@ main() {
         cl_commands_hint "$step"
     fi
     echo ""
+    print_gog_guidance
 }
 
 # Source guard: only run main when executed directly, not when sourced (e.g. by

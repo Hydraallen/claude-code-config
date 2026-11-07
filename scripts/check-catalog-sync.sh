@@ -24,6 +24,7 @@ SCRIPT_ONLY_MENU_IDS=(
     agents          # Jeff read-only search agent
     shell-wrapper   # cl/cl_auto launcher + system prompt
     co-author       # includeCoAuthoredBy
+    gog             # openclaw/gogcli binary
     backend-glm backend-or backend-gpt backend-ccr   # model backend profiles / proxies
 )
 
@@ -39,7 +40,7 @@ ALWAYS_INSTALLED_CATALOG_IDS=(
 
 # install.sh menu IDs that install.ps1 does not offer (macOS/Linux-only features).
 PS1_MISSING_MENU_IDS=(
-    shell-wrapper co-author backend-glm backend-or backend-gpt backend-ccr
+    shell-wrapper co-author gog backend-glm backend-or backend-gpt backend-ccr
     skill-mattpocock
 )
 

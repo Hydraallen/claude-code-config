@@ -1,5 +1,28 @@
 # Changelog
 
+## [4.4.0] - 2026-11-06
+
+### Features
+- **New optional menu item `gog` (Integrations, default off).** `install.sh` can install [gogcli](https://github.com/openclaw/gogcli), the Gmail/Google CLI. macOS with Homebrew uses `brew install openclaw/tap/gogcli`. Linux, or macOS without Homebrew, downloads the pinned release (`GOG_VERSION`, 0.48.0), verifies it against the release `checksums.txt` and places it in `~/.local/bin` without sudo. The install is verified with `gog --version`.
+- **Detection.** A gogcli found on PATH, in `~/.local/bin` or beside `brew` is ticked in the selector on every run. Identity comes from the `Google CLI for Gmail` description in `gog --help`, so an unrelated binary named `gog` is not treated as gogcli.
+- **Final guidance.** When gog is ticked, the end of the run prints either the commands to run yourself (a password, sudo or Homebrew was needed) or the OAuth login steps (`gog auth list --json --no-input` reports no usable account). An authorized or unticked gog prints nothing about auth.
+
+### Design Rationale
+- The installer never uninstalls gog: the binary and its OAuth credentials may serve other tools. Unticking and `--uninstall` print one line saying it was kept.
+- A present gog is not upgraded, so a run cannot change a version the user chose. The pin applies only to a new release-archive install; Homebrew installs what the tap currently ships.
+- The installer never starts the OAuth flow, because login needs a browser and a client the user creates. The suggested `--gmail-scope send` is the narrowest Gmail grant, and `gog gmail send` should stay out of Claude Code allow rules so each send asks for confirmation.
+- A failed gog install is not fatal to the other items. It counts as a warning, and the summary shows `gog: FAILED` with the reason.
+- `gog` is registered as a script-only menu ID (empty `catalog_id_for_menu_id`, `SCRIPT_ONLY_MENU_IDS`), because `scripts/check-catalog-sync.sh` requires this for a catalog row whose Claude cell names `install.sh --only <id>`.
+
+### Notes & Caveats
+- `install.ps1` does not offer gog (`PS1_MISSING_MENU_IDS`). The Windows count stays at 41 items; `install.sh` now offers 50 items, 30 on by default.
+- `--all` and the non-interactive default do not install gog; tick it or use `--only gog`.
+- Prebuilt macOS binaries need macOS 15 or later. Older macOS fails with a message and a `go install` command (Go 1.26 or later).
+- The checksum file comes from the same release as the archive. It detects corrupted downloads; it is not a signature check.
+- An existing non-gogcli file at `~/.local/bin/gog` is not replaced; the install reports a failure instead.
+- A present gog stays pre-ticked after an earlier untick, so it must be unticked again to skip the auth guidance on that run.
+- All tests use stub `gog`, `brew` and `curl` executables. The release download, Homebrew install and real `gog` binary were not run.
+
 ## [4.3.4] - 2026-11-02
 
 ### Features

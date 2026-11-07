@@ -2,6 +2,29 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.4.0] - 2026-11-06
+
+### Features
+- **新增可选菜单项 `gog`（Integrations，默认关闭）。** `install.sh` 可安装 Gmail / Google CLI [gogcli](https://github.com/openclaw/gogcli)。macOS 有 Homebrew 时运行 `brew install openclaw/tap/gogcli`；Linux 或没有 Homebrew 的 macOS 下载固定版本（`GOG_VERSION`，0.48.0），按 release 的 `checksums.txt` 校验后放入 `~/.local/bin`，不需要 sudo。安装后运行 `gog --version` 验证。
+- **检测。** 在 PATH、`~/.local/bin` 或 `brew` 同目录找到 gogcli 时，每次运行都在菜单中自动勾选。身份判断依据 `gog --help` 中的 `Google CLI for Gmail` 描述，同名的无关程序不会被当作 gogcli。
+- **运行末尾的说明。** 勾选 gog 时，运行末尾打印需要用户自己执行的命令（安装需要密码、sudo 或 Homebrew），或 OAuth 登录步骤（`gog auth list --json --no-input` 没有报告可用账号）。已授权或未勾选时不打印任何 auth 内容。
+
+### Design Rationale
+- 安装器不卸载 gog：二进制和 OAuth 凭据可能还供其他工具使用。取消勾选和 `--uninstall` 只打印一行说明已保留。
+- 已安装的 gog 不升级，安装器不会改变用户选定的版本。固定版本只用于新的 release 压缩包安装；Homebrew 安装 tap 当前提供的版本。
+- 安装器不启动 OAuth，因为登录需要浏览器和用户自己创建的客户端。建议的 `--gmail-scope send` 是最窄的 Gmail 授权；`gog gmail send` 不要加入 Claude Code allow 规则，让每次发送都询问确认。
+- gog 安装失败不影响其他条目。失败计为一个警告，汇总中显示 `gog: FAILED` 及原因。
+- `gog` 登记为仅脚本菜单 ID（`catalog_id_for_menu_id` 为空，列入 `SCRIPT_ONLY_MENU_IDS`），因为 `scripts/check-catalog-sync.sh` 对 Claude 列写明 `install.sh --only <id>` 的 catalog 行有此要求。
+
+### Notes & Caveats
+- `install.ps1` 不提供 gog（`PS1_MISSING_MENU_IDS`）。Windows 仍为 41 项；`install.sh` 现为 50 项，其中 30 项默认开启。
+- `--all` 与非交互默认运行不安装 gog；需要勾选或使用 `--only gog`。
+- 预编译 macOS 二进制要求 macOS 15 或更高版本。更旧的 macOS 会失败，并给出说明和 `go install` 命令（需要 Go 1.26 或更高版本）。
+- checksum 文件与压缩包来自同一 release，用于发现下载损坏，不是签名校验。
+- `~/.local/bin/gog` 已存在且不是 gogcli 时不会被替换，安装报告失败。
+- 已安装的 gog 在之前取消勾选后仍会预先勾选，要跳过当次的 auth 说明需要再次取消勾选。
+- 所有测试都使用 stub 的 `gog`、`brew`、`curl`。未实际运行 release 下载、Homebrew 安装和真实的 `gog` 二进制。
+
 ## [4.3.4] - 2026-11-02
 
 ### Features

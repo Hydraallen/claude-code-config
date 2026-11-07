@@ -111,7 +111,7 @@ Lark 的 `--` 不能省：`claude mcp add` 自己的 `-s` 表示 scope，会吞�
 <a id="script-only"></a>
 ## 仅脚本安装的条目（fork）
 
-catalog 中 Claude 列写着“脚本安装”的条目（search-agent、shell-wrapper、co-author、backend-glm / backend-or / backend-gpt / backend-ccr、image-gen）没有 agent 配方，由脚本安装器负责。用户选择后，在 checkout 根目录运行 catalog 中给出的命令，多个菜单 ID 用逗号分隔：
+catalog 中 Claude 列写着“脚本安装”的条目（search-agent、shell-wrapper、co-author、gog、backend-glm / backend-or / backend-gpt / backend-ccr、image-gen）没有 agent 配方，由脚本安装器负责。用户选择后，在 checkout 根目录运行 catalog 中给出的命令，多个菜单 ID 用逗号分隔：
 
 ```sh
 bash install.sh --only shell-wrapper,backend-glm
@@ -122,7 +122,8 @@ bash install.sh --only shell-wrapper,backend-glm
 - `--only` 是增量安装：不删除任何内容、不对账插件、不重建 `enabledPlugins`、不写版本戳，只追加 selection.json 中的 `script_installer.script_only` 记录。
 - 不要替用户运行不带参数的 `install.sh` / `install.ps1`：交互菜单提交时会删除所有未勾选的已安装条目（仅限脚本装上的内容，改动过的文件先备份）。
 - 每次运行都会安装 image-gen skill 及其包装器，并执行退役清理：卸载 `github@claude-plugins-official`、`claude-mem@thedotmack`、`pua@pua-skills` 及 thedotmack、pua-skills marketplace，移除指向 `api.githubcopilot.com/mcp/` 的旧 user scope `github` MCP。仍在使用 claude-mem 的用户须先确认，见[迁移说明](../../docs/migration.md#removed-integrations)。
-- shell-wrapper、co-author 与各后端只支持 macOS / Linux；`install.ps1 -Only <ids>` 不提供这些菜单项。
+- shell-wrapper、co-author、gog 与各后端只支持 macOS / Linux；`install.ps1 -Only <ids>` 不提供这些菜单项。
+- gog 已安装时不重装也不升级；取消勾选或 `--uninstall` 都保留二进制与凭据，只打印一行说明。未安装时：macOS 有 Homebrew 用 `brew install openclaw/tap/gogcli`，否则下载固定版本并校验 checksum 到 `~/.local/bin`（来源见 [sources](../sources.md#gog)）。安装失败不会中断其他条目，在最后的汇总中显示为失败。安装器不启动 OAuth，登录步骤只在勾选 gog 且没有已授权账号时打印在运行末尾；`gog gmail send` 不要加入 Claude Code allow 规则，让每次发送都询问确认。
 - 后端需要用户自己填写凭据或登录，见 [BACKENDS](../../docs/BACKENDS.zh-CN.md)。
 
 `bash install.sh --list-ids` 列出全部菜单 ID、默认值与分组。
