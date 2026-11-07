@@ -1,5 +1,20 @@
 # Changelog
 
+## [4.5.1] - 2026-11-07
+
+### Fixes
+- **Status line: a usage cache with a future mtime no longer blocks refresh.** A negative cache age used to count as fresh, so a cache written while the clock was ahead stayed in use until the clock passed its mtime. On one machine this hid `glm 7d` and held `glm 5h` at an old value, with about 36 hours left before it would have cleared. The cache is now neither shown nor treated as fresh, and the next render starts a refresh. This applies to the Anthropic and GLM backends.
+- **Status line: a future-dated `.err` file no longer extends the failure backoff.** A negative age now allows a fetch.
+- **Status line: an expired GLM 5h window is dropped.** The 5h window now needs a reset time in the future, as the weekly window already did. If every window has expired, the fetch counts as failed and no cache is written.
+
+### Design Rationale
+- A future mtime gives no information about the age of the data, so the cache is hidden until a refresh replaces it. `usage_lock_acquire` already treats a negative lock age as stale.
+
+### Notes & Caveats
+- If GLM reports a past reset time for an idle 5h window, the 5h segment is now hidden until the response has a future reset time. This response has not been observed.
+- The cause of the clock jump on the affected machine is undetermined.
+- Re-run the installer to deploy the fix to `~/.claude/hooks/statusline.sh`.
+
 ## [4.5.0] - 2026-11-07
 
 ### Features

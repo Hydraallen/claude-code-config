@@ -339,8 +339,11 @@ fetch_glm_usage() {
         # clients, so they are used only together with a bound on the reset
         # time, which holds by construction:
         #
-        #   5h window:     resets within now+6h   (an hour of slack for skew)
+        #   5h window:     resets in (0, now+6h]   (an hour of slack for skew)
         #   weekly window: resets in (0, now+169h]
+        #
+        # A reset time in the past means the entry describes a finished window,
+        # or that the local clock is ahead; its percentage is not current.
         #
         # Selection, per window and independently of the other:
         #   1. If any entry carries the window's unit/number tag, only tagged
@@ -349,7 +352,7 @@ fetch_glm_usage() {
         #      the weekly reset, when both reset within 6h.
         #   2. If no entry carries the tag (the fields are missing or were
         #      renamed), fall back to the bound alone: the 5h window is the
-        #      only entry resetting within 6h (an entry tagged weekly is
+        #      only entry resetting in (0, 6h] (an entry tagged weekly is
         #      excluded), the weekly window is the only entry resetting in
         #      (6h, 169h].
         # Either way a window is emitted only when exactly one candidate is
@@ -381,8 +384,8 @@ fetch_glm_usage() {
                               and (.nextResetTime | type) == "number")
                        | . + {_d: ((.nextResetTime / 1000) - now)})) as $l
                 | ($l | if any(.[]; tag(3; 5))
-                        then map(select(tag(3; 5) and ._d <= 6 * 3600))
-                        else map(select(._d <= 6 * 3600 and (tag(6; 1) | not)))
+                        then map(select(tag(3; 5) and ._d > 0 and ._d <= 6 * 3600))
+                        else map(select(._d > 0 and ._d <= 6 * 3600 and (tag(6; 1) | not)))
                         end | pick) as $five
                 | ($l | if any(.[]; tag(6; 1))
                         then map(select(tag(6; 1) and ._d > 0 and ._d <= 169 * 3600))
@@ -420,7 +423,10 @@ if [ "$USAGE_BACKEND" != "other" ]; then
     if [ -f "$USAGE_CACHE" ]; then
         cache_mtime=$(stat -c %Y "$USAGE_CACHE" 2>/dev/null || stat -f %m "$USAGE_CACHE" 2>/dev/null || echo 0)
         cache_age=$(( now - cache_mtime ))
-        if [ "$cache_age" -lt "$CACHE_TTL" ]; then
+        # A negative age means the mtime is in the future: the clock was ahead
+        # when the file was written. Its age is unknown, so it is neither fresh
+        # nor displayable, and a refresh replaces it.
+        if [ "$cache_age" -ge 0 ] && [ "$cache_age" -lt "$CACHE_TTL" ]; then
             cache_is_fresh=true
         fi
         # Display from cache only if not too old.
@@ -432,7 +438,7 @@ if [ "$USAGE_BACKEND" != "other" ]; then
         # non-whitespace, so empty fields are preserved positionally. A window
         # that is not an object is treated as absent so it cannot take the
         # other window down with a jq error.
-        if [ "$cache_age" -lt "$CACHE_MAX_AGE" ]; then
+        if [ "$cache_age" -ge 0 ] && [ "$cache_age" -lt "$CACHE_MAX_AGE" ]; then
             _usage_row=$(jq -r '[.five_hour, .seven_day]
                 | map(if type == "object" then . else {} end
                       | (.utilization // ""), (.resets_at // ""), (.resets_epoch // ""))
@@ -461,7 +467,7 @@ if [ "$USAGE_BACKEND" != "other" ]; then
         if [ -f "$USAGE_CACHE.err" ]; then
             _err_mtime=$(stat -c %Y "$USAGE_CACHE.err" 2>/dev/null || stat -f %m "$USAGE_CACHE.err" 2>/dev/null || echo 0)
             _err_age=$(( now - _err_mtime ))
-            [ "$_err_age" -lt "$USAGE_ERR_BACKOFF" ] && _should_fetch=false
+            [ "$_err_age" -ge 0 ] && [ "$_err_age" -lt "$USAGE_ERR_BACKOFF" ] && _should_fetch=false
         fi
         if $_should_fetch; then
             bg_fetch_usage &>/dev/null &
