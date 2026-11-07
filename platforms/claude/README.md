@@ -123,6 +123,7 @@ bash install.sh --only shell-wrapper,backend-glm
 - 不要替用户运行不带参数的 `install.sh` / `install.ps1`：交互菜单提交时会删除所有未勾选的已安装条目（仅限脚本装上的内容，改动过的文件先备份）。
 - 每次运行都会安装 image-gen skill 及其包装器，并执行退役清理：卸载 `github@claude-plugins-official`、`claude-mem@thedotmack`、`pua@pua-skills` 及 thedotmack、pua-skills marketplace，移除指向 `api.githubcopilot.com/mcp/` 的旧 user scope `github` MCP。仍在使用 claude-mem 的用户须先确认，见[迁移说明](../../docs/migration.md#removed-integrations)。
 - shell-wrapper、co-author、gog 与各后端只支持 macOS / Linux；`install.ps1 -Only <ids>` 不提供这些菜单项。
+- gog 的 agent skills（`skills/gog`、`skills/gog-*`）随勾选状态变化：勾选时从固定 tag 安装，二进制已存在或安装失败时同样安装；未勾选时不安装。只有交互菜单取消勾选或 `--uninstall` 才移除，且只移除 `agent-config/script-owned.tsv` 记录、内容未改动的副本；同名的他人 skill 或改动过的副本只警告并保留。获取失败只产生警告，并显示在 gog 汇总行。
 - gog 已安装时不重装也不升级；取消勾选或 `--uninstall` 都保留二进制与凭据，只打印一行说明。未安装时：macOS 有 Homebrew 用 `brew install openclaw/tap/gogcli`，否则下载固定版本并校验 checksum 到 `~/.local/bin`（来源见 [sources](../sources.md#gog)）。安装失败不会中断其他条目，在最后的汇总中显示为失败。安装器不启动 OAuth，登录步骤只在勾选 gog 且没有已授权账号时打印在运行末尾；`gog gmail send` 不要加入 Claude Code allow 规则，让每次发送都询问确认。
 - 后端需要用户自己填写凭据或登录，见 [BACKENDS](../../docs/BACKENDS.zh-CN.md)。
 

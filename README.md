@@ -156,7 +156,7 @@ The tables retain the original categories and merge the Claude and Codex capabil
 | --- | --- | --- | --- | --- |
 | **context7** | [Upstash](https://github.com/upstash/context7) | Up-to-date library documentation lookup | Native plugin ★ | Plugin / MCP ★ |
 | **playwright** | [Microsoft](https://github.com/microsoft/playwright-mcp) | Browser automation, E2E testing and screenshots; Codex MCP pinned to 0.0.78; in WSL, install.sh drives the Windows Chrome ([details](mcp/README.md#wsl-windows-chrome)) | Native plugin ★ | MCP ★ |
-| **gog** *(fork)* | [openclaw/gogcli](https://github.com/openclaw/gogcli) | Gmail/Google CLI, macOS/Linux only. Off by default, ticked when already installed, never uninstalled. Login stays manual: the steps print at the end of a run that ticks it with no authorized account | Script installer | — |
+| **gog** *(fork)* | [openclaw/gogcli](https://github.com/openclaw/gogcli) | Gmail/Google CLI, macOS/Linux only. Off by default, ticked when already installed. The binary is never uninstalled; the upstream agent skills (`gog`, `gog-*`, pinned to the same tag) follow the tick, and only unmodified copies this installer wrote are removed. Login stays manual: the steps print at the end of a run that ticks it with no authorized account | Script installer | — |
 
 ### Design & Content
 

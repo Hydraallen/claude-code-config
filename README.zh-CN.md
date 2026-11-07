@@ -156,7 +156,7 @@ Codex 会先检查可用的 OpenAI 官方/curated 目录，再核实上游 Codex
 | --- | --- | --- | --- | --- |
 | **context7** | [Upstash](https://github.com/upstash/context7) | 查询最新库文档 | 原生插件 ★ | 插件 / MCP ★ |
 | **playwright** | [Microsoft](https://github.com/microsoft/playwright-mcp) | 浏览器自动化、E2E 与截图；Codex MCP 固定 0.0.78；WSL 中 install.sh 改为驱动 Windows 的 Chrome（[说明](mcp/README.md#wsl-windows-chrome)） | 原生插件 ★ | MCP ★ |
-| **gog** *（fork）* | [openclaw/gogcli](https://github.com/openclaw/gogcli) | Gmail / Google CLI，仅 macOS / Linux。默认关闭，已安装时自动勾选，从不卸载。登录由用户完成：勾选且没有已授权账号时，运行末尾打印步骤 | 脚本安装器 | — |
+| **gog** *（fork）* | [openclaw/gogcli](https://github.com/openclaw/gogcli) | Gmail / Google CLI，仅 macOS / Linux。默认关闭，已安装时自动勾选。二进制从不卸载；上游 agent skills（`gog`、`gog-*`，固定在同一 tag）随勾选状态变化，只移除本安装器写入且未改动的副本。登录由用户完成：勾选且没有已授权账号时，运行末尾打印步骤 | 脚本安装器 | — |
 
 ### Design & Content · 设计与内容
 

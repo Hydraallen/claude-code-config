@@ -2,6 +2,29 @@
 
 > **翻译落后**：2.18.0 ~ 2.18.3 尚未翻译，请看 [CHANGELOG.md](CHANGELOG.md)。
 
+## [4.5.0] - 2026-11-07
+
+### Features
+- **`gog` 条目现在安装上游 agent skills。** 勾选 gog 时，`install.sh` 从 openclaw/gogcli 的 tag `v0.48.0` 的 `.agents/skills/` 获取 31 个 `gog` 与 `gog-*` skills，并以平铺的同级目录装入 `~/.claude/skills/`。二进制已存在或安装失败时同样安装。`crabbox` 不属于 gog，不安装。
+- **skills 随勾选状态变化。** 未勾选 gog 时不安装 skills。交互菜单取消勾选或 `--uninstall` 会移除本安装器写入的 skills，二进制和凭据保留。`--only`、`--all` 和非交互默认运行不删除任何内容。
+- **检测。** 二进制不存在但有未改动的自有 skill 时，菜单同样勾选 gog，因此不做改动直接提交菜单不会删除任何内容。
+- **选择记录。** `script_installer.gog_skills` 记录固定 tag、自有路径、已安装的 commit 和本次运行结果。
+
+### Design Rationale
+- 第三方 skills 不内置，所以在安装时获取。只获取该 tag，且 tag 必须解析到记录的 `GOG_SKILLS_COMMIT`。tag 被移动时安装失败，不会装入不同内容。
+- 检出前先读取 `git ls-tree`，gog skill 中的符号链接、submodule 和不安全路径在写入磁盘之前就被拒绝。
+- 所有权使用 `agent-config/script-owned.tsv`。只有目录摘要与记录一致时才替换或移除。改动过的副本或同名的他人 skill 只警告并保留。与其他取消勾选的条目不同，改动过的 gog skill 不会被移到备份目录。
+- skill 失败与二进制失败相互独立。两者都以警告形式显示在 `gog:` 汇总行，都不会中断运行。所有 git 命令都通过 `with_timeout` 运行。
+- 运行末尾的登录步骤说明这些 skills 在重新授权时建议 `--services all-user`，因为这与步骤中推荐的较窄命令不同。
+
+### Notes & Caveats
+- 所有 skills 都在固定 commit 且未改动时不再获取。部分安装之后，每次勾选运行都会重新获取并重复警告，直到冲突解决。
+- 即使已安装的二进制是其他版本，skills 仍来自固定版本，运行时用一行说明。Homebrew 安装 tap 提供的版本，所以全新安装时也可能出现这种情况。
+- `gog/SKILL.md` 描述了一个可选流程：agent 操作已登录的浏览器完成 OAuth 同意，包括未验证应用警告；它还建议重新授权时使用较宽的权限范围。安装器不修改上游内容，见 platforms/sources.md。
+- 之后的固定版本不再包含的 skill 会留在磁盘上，直到取消勾选或卸载 gog。
+- 升级 `GOG_VERSION` 时现在也要更新 `GOG_SKILLS_COMMIT`。
+- `install.ps1` 仍不提供 gog，条目数量不变。
+
 ## [4.4.1] - 2026-11-07
 
 ### Fixes

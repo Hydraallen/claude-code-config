@@ -175,7 +175,13 @@ Client 不支持插件或固定版本条件不满足时，解释后按右列路�
 <a id="gog"></a>
 ## gog（Claude，脚本安装）
 
-上游 https://github.com/openclaw/gogcli （原 steipete/gogcli），许可 MIT。install.sh 的 `GOG_VERSION` 固定为 0.48.0（tag `v0.48.0`），升级时只改这个变量并核实资产名。macOS 有 Homebrew 时用 `brew install openclaw/tap/gogcli`（由 tap 决定版本）；其余情况下载 `gogcli_<version>_<darwin|linux>_<amd64|arm64>.tar.gz`，按同一 release 的 `checksums.txt` 校验后，把压缩包内的 `./gog` 放入 `~/.local/bin`。上游的预编译 macOS 二进制要求 macOS 15 或更高版本。身份判断依据 `gog --help` 中的 `Google CLI for Gmail`；`gog --version` 只输出版本号。授权检查使用 `gog auth list --json --no-input`。本仓库不内置该二进制。
+上游 https://github.com/openclaw/gogcli （原 steipete/gogcli），许可 MIT。install.sh 的 `GOG_VERSION` 固定为 0.48.0（tag `v0.48.0`），升级时改这个变量和 `GOG_SKILLS_COMMIT`，并核实资产名。macOS 有 Homebrew 时用 `brew install openclaw/tap/gogcli`（由 tap 决定版本）；其余情况下载 `gogcli_<version>_<darwin|linux>_<amd64|arm64>.tar.gz`，按同一 release 的 `checksums.txt` 校验后，把压缩包内的 `./gog` 放入 `~/.local/bin`。上游的预编译 macOS 二进制要求 macOS 15 或更高版本。身份判断依据 `gog --help` 中的 `Google CLI for Gmail`；`gog --version` 只输出版本号。授权检查使用 `gog auth list --json --no-input`。本仓库不内置该二进制。
+
+Agent skills 来自同一 tag 的 `.agents/skills/`，运行时获取，不内置：`GOG_SKILLS_COMMIT` 固定为 `f939ed37151af5b789ac08b98339fe8ddf880b09`，即 `v0.48.0`（annotated tag，对象 `a27b26b0c93f5a362005cdfe3eaf45642903ee20`）解析到的 commit。升级 `GOG_VERSION` 时同时更新这个变量，并重新阅读 skills。成员是该目录下所有名为 `gog` 或 `gog-*` 的目录（`v0.48.0` 共 31 个）：gog、gog-admin、gog-adsense、gog-analytics、gog-appscript、gog-calendar、gog-chat、gog-classroom、gog-contacts、gog-contacts-cleanup、gog-docs、gog-drive、gog-drive-audit、gog-forms、gog-gmail、gog-groups、gog-inbox-triage、gog-keep、gog-maps、gog-meet、gog-meeting-prep、gog-people、gog-photos、gog-save-attachments、gog-searchconsole、gog-sheets、gog-sites、gog-slides、gog-tasks、gog-weekly-digest、gog-youtube。`crabbox` 不属于 gog，不安装。
+
+验证方式：只获取 `refs/tags/v<version>`，`<tag>^{commit}` 必须等于 `GOG_SKILLS_COMMIT`；检出前按 `git ls-tree` 拒绝符号链接、submodule 与不安全路径（`..`、`.git`、控制字符），staging 后再次拒绝符号链接。每个 skill 保留全部文件并平铺为同级目录（它们用 `../gog/SKILL.md` 互相引用），并复制上游根目录的 MIT LICENSE。所有权记录在 `agent-config/script-owned.tsv`（`skills/<name>` 的目录摘要与 `gog-skills-commit`）。
+
+`v0.48.0` 的 skills 目录只含 `SKILL.md` 与 `agents/openai.yaml`，没有脚本。阅读结果：`gog/SKILL.md` 建议重新授权时默认使用 `--services all-user`，只在用户明确要求时收窄；它的 Browser-Driven Reauth 一节描述 agent 操作已登录的浏览器完成 OAuth 同意，包括点过未验证应用警告和粘贴 keyring 口令。安装器不修改上游内容；登录步骤提示了较宽的权限范围。升级时重新核对这两处。
 
 <a id="lieflat"></a>
 ## lieflat-charts（Claude）

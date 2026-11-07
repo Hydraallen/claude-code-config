@@ -1,5 +1,28 @@
 # Changelog
 
+## [4.5.0] - 2026-11-07
+
+### Features
+- **The `gog` item now installs the upstream agent skills.** When gog is ticked, `install.sh` fetches the 31 `gog` and `gog-*` skills from `.agents/skills/` at tag `v0.48.0` of openclaw/gogcli and installs them as flat sibling directories in `~/.claude/skills/`. They install even when the binary is already present or its install failed. `crabbox` is excluded because it is not part of gog.
+- **The skills follow the tick.** An unticked gog installs no skills. An interactive untick or `--uninstall` removes the skills this installer wrote, while the binary and its credentials stay. `--only`, `--all` and the non-interactive default remove nothing.
+- **Detection.** The menu also ticks gog when an unmodified owned skill is present and the binary is gone, so submitting the selector unchanged removes nothing.
+- **Selection record.** `script_installer.gog_skills` holds the pinned tag, the owned paths, the installed commit and this run's outcome.
+
+### Design Rationale
+- Third-party skills are not vendored, so they are fetched at install time. The fetch asks only for the tag, and the tag must resolve to the recorded `GOG_SKILLS_COMMIT`. A moved tag therefore fails instead of installing different content.
+- `git ls-tree` is read before checkout, so symbolic links, submodules and unsafe paths in a gog skill are refused before anything reaches the disk.
+- Ownership uses `agent-config/script-owned.tsv`. A skill is replaced or removed only when its directory digest matches the recorded one. A modified or foreign same-named skill produces a warning and stays. Unlike other deselected items, a modified gog skill is not moved to a backup.
+- A skill failure and a binary failure are independent. Either one appears in the `gog:` summary line as a warning, and neither stops the run. Every git command runs through `with_timeout`.
+- The end-of-run login steps mention that the skills suggest `--services all-user` when re-authorizing, because that differs from the narrower command these steps recommend.
+
+### Notes & Caveats
+- A run with all skills unmodified at the pinned commit does not fetch. After a partial install, every ticked run fetches again and repeats the warning until the conflict is resolved.
+- The skills come from the pin even when the installed binary reports another version, and the run says so in one line. Homebrew installs the version the tap ships, so this can happen on a fresh install.
+- `gog/SKILL.md` describes an optional flow in which an agent drives a signed-in browser through OAuth consent, including the unverified-app warning. It also prefers broad scopes on re-authorization. The installer does not change upstream content; see platforms/sources.md.
+- A skill dropped by a later pin stays on disk until gog is unticked or uninstalled.
+- Upgrading `GOG_VERSION` now also requires updating `GOG_SKILLS_COMMIT`.
+- `install.ps1` still does not offer gog. Item counts are unchanged.
+
 ## [4.4.1] - 2026-11-07
 
 ### Fixes

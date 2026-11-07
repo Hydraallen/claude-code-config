@@ -24,7 +24,7 @@ SCRIPT_ONLY_MENU_IDS=(
     agents          # Jeff read-only search agent
     shell-wrapper   # cl/cl_auto launcher + system prompt
     co-author       # includeCoAuthoredBy
-    gog             # openclaw/gogcli binary
+    gog             # openclaw/gogcli binary and agent skills
     backend-glm backend-or backend-gpt backend-ccr   # model backend profiles / proxies
 )
 

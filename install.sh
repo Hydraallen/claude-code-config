@@ -514,6 +514,8 @@ every run removes retired items (github plugin + GitHub MCP, claude-mem, PUA)
 and their leftovers (plugin caches/data, ~/.claude-mem, ~/.claude.json usage
 records; set ACCC_KEEP_CLAUDE_MEM_DATA=1 to keep ~/.claude-mem).
 --all installs every item except the opt-in storage-analyzer skill and gog.
+The gog item also installs its agent skills. Unticking it removes those skills
+but never the gog binary or its credentials.
 Lark/Feishu MCP (mcp-lark) runs as one shared service on 127.0.0.1:3100
 (LARK_MCP_PORT=<port> picks another port) and falls back to per-session stdio.
 
@@ -603,6 +605,10 @@ GOG_VERSION="0.48.0"
 GOG_RELEASE_BASE_URL="https://github.com/openclaw/gogcli/releases/download/v${GOG_VERSION}"
 GOG_BREW_FORMULA="openclaw/tap/gogcli"
 GOG_MIN_MACOS_MAJOR=15
+# Agent skills under .agents/skills at tag v$GOG_VERSION. The commit is what that
+# tag must resolve to: change both together when GOG_VERSION changes.
+GOG_SKILLS_REPO="https://github.com/openclaw/gogcli.git"
+GOG_SKILLS_COMMIT="f939ed37151af5b789ac08b98339fe8ddf880b09"
 GOG_USER_BIN_DIR="$HOME/.local/bin"
 GOG_PROBE_TIMEOUT="${GOG_PROBE_TIMEOUT:-15}"
 GOG_BREW_TIMEOUT="${GOG_BREW_TIMEOUT:-600}"
@@ -612,6 +618,9 @@ GOG_BIN=""
 GOG_FAIL_REASON=""
 GOG_MANUAL_COMMANDS=()
 GOG_COMMANDS=()
+# Outcome of install_gog_skills: installed | current | partial | failed | dry-run.
+GOG_SKILLS_RESULT=""
+GOG_SKILLS_NOTE=""
 # --only: install just the listed menu IDs, additively (no removals, no plugin
 # reconciliation). ONLY_IDS holds the raw, not yet validated list.
 ONLY_MODE=false
@@ -1172,7 +1181,7 @@ neat-freak|Knowledge, docs & workspace closeout (KKKKhazix/khazix-skills, pinned
     MENU_GROUP_HINTS+=("external tools & services")
     MENU_GROUP_ITEMS+=("context7|Real-time library documentation|1|plug-context7
 playwright|Browser automation & E2E testing|1|plug-playwright
-gog|Gmail/Google CLI (openclaw/gogcli); ticked when already installed, never removed; login is manual|0|gog")
+gog|Gmail/Google CLI (openclaw/gogcli) and its agent skills; ticked when already installed; the binary is never removed; login is manual|0|gog")
 
     # Group 5: Design & Content
     MENU_GROUP_LABELS+=("Design & Content")
@@ -6786,6 +6795,7 @@ write_selection_record() {
     tmp="$(mktemp "$dest_dir/.selection.json.XXXXXX")" || { warn "Could not write $dest"; return 0; }
     if jq --argjson items "$items" --argjson known "$known" --argjson scriptOnly "$script_only" \
           --argjson selIds "$sel_ids" --argjson deselected "$deselected" \
+          --argjson gogSkills "$(_gog_skills_selection_json)" \
           --arg mode "$mode" --arg url "$SOURCE_REPO_URL" --arg rev "$SOURCE_REVISION" \
           --argjson update "${SOURCE_UPDATE_JSON:-null}" \
           --arg version "$(get_source_version)" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
@@ -6813,7 +6823,7 @@ write_selection_record() {
             },
             selected: ($merged | keys),
             items: $merged,
-            script_installer: {
+            script_installer: ({
                 name: "install.sh",
                 version: $version,
                 mode: $mode,
@@ -6823,7 +6833,7 @@ write_selection_record() {
                               else $scriptOnly end),
                 deselected: (if $mode == "interactive" then $deselected
                              else (($old.script_installer.deselected // []) - $selIds) end)
-            }
+            } + (if $gogSkills == null then {} else {gog_skills: $gogSkills} end))
           }' <<< "$existing" > "$tmp" && jq empty "$tmp" 2>/dev/null; then
         chmod 600 "$tmp" 2>/dev/null || true
         mv -f "$tmp" "$dest"
@@ -6871,8 +6881,9 @@ clear_script_selection_records() {
 #   statusline            settings.json statusLine runs ~/.claude/hooks/statusline.sh
 #   lessons               settings.json SessionStart carries the lessons hook
 #   co-author             settings.json includeCoAuthoredBy == true
-#   gog                   a working gogcli binary (ticked on every run while
-#                         present, even after an earlier untick)
+#   gog                   a working gogcli binary, or an unmodified gog skill
+#                         recorded in agent-config/script-owned.tsv (ticked on
+#                         every run while present, even after an earlier untick)
 #   CLAUDE.md, settings,  file present (these are kept when unchecked, so a
 #   model backends        previous "unchecked" record wins over the file)
 # Items not detected fall back to their menu default, except those the previous
@@ -7109,7 +7120,7 @@ detect_menu_item_state() {
             return 1 ;;
         shell-wrapper)       [[ -f "$CLAUDE_DIR/claude.zsh" ]] ;;
         co-author)           co_author_enabled ;;
-        gog)                 gog_find >/dev/null ;;
+        gog)                 gog_find >/dev/null || gog_skills_present ;;
         backend-*)           [[ -f "$CLAUDE_DIR/profiles/${id#backend-}.json" ]] ;;
         rules-python)        [[ -d "$CLAUDE_DIR/rules/python" ]] ;;
         rules-ts)            [[ -d "$CLAUDE_DIR/rules/typescript" ]] ;;
@@ -7380,7 +7391,10 @@ reconcile_deselected() {
     $INSTALL_STATUSLINE || remove_deselected_statusline
     $INSTALL_LESSONS || remove_deselected_lessons_hook
     $CO_AUTHOR || remove_deselected_co_author
-    $INSTALL_GOG || gog_note_kept
+    if ! $INSTALL_GOG; then
+        remove_gog_skills
+        gog_note_kept
+    fi
     if $INSTALL_SHELL_WRAPPER; then
         warn_default_profile_deselected
     else
@@ -7406,6 +7420,7 @@ uninstall() {
     echo "  - $CLAUDE_DIR/scripts/image-gen-openrouter.py (image-gen wrapper)"
     echo "  - $CLAUDE_DIR/.image-gen-sinedied (image-gen ownership manifest)"
     echo "  - $CLAUDE_DIR/skills/deepxiv-* (DeepXiv skills)"
+    echo "  - $CLAUDE_DIR/skills/gog and gog-* (installer-owned and unmodified only)"
     echo "  - $CLAUDE_DIR/lessons.md"
     echo "  - $CLAUDE_DIR/hooks/ (installer-managed only)"
     echo "  - Installed plugins (requires claude CLI)"
@@ -7418,6 +7433,7 @@ uninstall() {
     gog_note_kept
 
     if $DRY_RUN; then
+        remove_gog_skills
         warn "DRY RUN -- nothing will be removed"
         return
     fi
@@ -7492,6 +7508,8 @@ uninstall() {
         rm -rf "$deepxiv_skill" && ok "Removed DeepXiv skill: $(basename "$deepxiv_skill")"
     done
 
+    remove_gog_skills
+
     # --all: uninstall purges every manifest-owned mattpocock skill, including
     # the curated keep list that a normal install run preserves.
     cleanup_retired_skills --all
@@ -7560,12 +7578,15 @@ uninstall() {
 }
 
 # ============================================================
-# gog (openclaw/gogcli): optional third-party Google CLI.
+# gog (openclaw/gogcli): optional third-party Google CLI and its agent skills.
 #
 # The installer only ever adds the binary. It never upgrades or removes an
 # existing copy, never touches its credentials and never starts the OAuth flow.
-# Every external command in this path runs through with_timeout, which closes
-# stdin, so nothing here can prompt or hang.
+# The skills follow the tick state: they are installed when gog is ticked and
+# removed on a full-selection deselect or --uninstall, and only copies recorded
+# in agent-config/script-owned.tsv that still match their digest are replaced or
+# removed. Every external command in this path runs through with_timeout, which
+# closes stdin, so nothing here can prompt or hang.
 # ============================================================
 
 # 0 when $1 is gogcli. `gog --version` prints only "v0.48.0 (commit date)", so
@@ -7812,13 +7833,361 @@ gog_note_kept() {
     info "gog kept: $found and its credentials stay in place"
 }
 
+# --- gog agent skills --------------------------------------------------------
+
+GOG_SKILLS_COMMIT_KEY="gog-skills-commit"
+
+_gog_skill_name_ok() {
+    [[ "${1-}" =~ ^gog(-[a-z0-9]+)*$ ]]
+}
+
+# Names of the gog skills recorded in the ownership manifest, one per line.
+_gog_owned_skill_names() {
+    local m="$CLAUDE_DIR/$OWNED_MANIFEST_REL" rel _digest
+    [[ -f "$m" && ! -L "$m" ]] || return 0
+    while IFS=$'\t' read -r rel _digest || [[ -n "$rel" ]]; do
+        [[ "$rel" == skills/* ]] || continue
+        if _gog_skill_name_ok "${rel#skills/}"; then
+            printf '%s\n' "${rel#skills/}"
+        fi
+    done < "$m"
+    return 0
+}
+
+# 0 when skills/$1 is a plain directory matching its recorded digest.
+_gog_skill_is_intact() {
+    local target="$CLAUDE_DIR/skills/$1" rec cur
+    [[ -d "$target" && ! -L "$target" ]] || return 1
+    rec="$(owned_recorded_digest "skills/$1")"
+    [[ -n "$rec" ]] || return 1
+    cur="$(tree_digest "$target" 2>/dev/null)" || return 1
+    [[ "$cur" == "$rec" ]]
+}
+
+# 0 when at least one recorded gog skill is still intact.
+gog_skills_present() {
+    local name
+    while IFS= read -r name; do
+        if _gog_skill_is_intact "$name"; then return 0; fi
+    done < <(_gog_owned_skill_names)
+    return 1
+}
+
+# 0 when the pinned commit is fully installed, so the fetch can be skipped. The
+# commit row is written only after a run that left no skill behind.
+_gog_skills_current() {
+    local name found=false
+    [[ "$(owned_recorded_digest "$GOG_SKILLS_COMMIT_KEY")" == "$GOG_SKILLS_COMMIT" ]] || return 1
+    while IFS= read -r name; do
+        _gog_skill_is_intact "$name" || return 1
+        found=true
+    done < <(_gog_owned_skill_names)
+    $found
+}
+
+_gog_skills_fail() {
+    GOG_SKILLS_RESULT="failed"
+    GOG_SKILLS_NOTE="$1"
+    warn "gog skills not installed: $1"
+    (( INSTALL_WARNINGS++ )) || true
+    return 1
+}
+
+# git in repository $1 (the remaining arguments are the git command).
+_gog_skills_git() {
+    local repo="$1"
+    shift
+    with_timeout "$NET_TIMEOUT" git -c core.hooksPath=/dev/null -c core.symlinks=false -C "$repo" "$@"
+}
+
+_gog_skills_git_quiet() {
+    _gog_skills_git "$@" >/dev/null 2>&1
+}
+
+# Refuse symbolic links, submodules and unsafe paths in the gog skills of tree
+# $2, read from the object store before anything reaches the disk.
+_gog_skills_validate_tree() {
+    local repo="$1" commit="$2" list="$3" entry meta mode path rel name sub
+    local prefix=".agents/skills/"
+    _gog_skills_git "$repo" ls-tree -r -z --full-tree "$commit" -- ".agents/skills" > "$list" 2>/dev/null \
+        || { _gog_skills_fail "could not read the skill list at v$GOG_VERSION"; return 1; }
+    while IFS= read -r -d '' entry; do
+        meta="${entry%%$'\t'*}"
+        path="${entry#*$'\t'}"
+        mode="${meta%% *}"
+        rel="${path#"$prefix"}"
+        name="${rel%%/*}"
+        _gog_skill_name_ok "$name" || continue
+        case "$mode" in
+            100644|100755) ;;
+            *) _gog_skills_fail "$path has mode $mode; symbolic links and submodules are refused"; return 1 ;;
+        esac
+        sub="${rel#"$name"}/"
+        case "$sub" in
+            *//*|*/../*|*/./*|*/.git/*|*\\*|*[[:cntrl:]]*)
+                _gog_skills_fail "unsafe path in upstream skills: $path"; return 1 ;;
+        esac
+        [[ "$rel" == */* ]] || { _gog_skills_fail "$path is not a skill directory"; return 1; }
+    done < "$list"
+}
+
+# Fetch tag v$GOG_VERSION into new repository $1 and check out its skills. The
+# tag must resolve to GOG_SKILLS_COMMIT; the default branch is never fetched.
+_gog_skills_fetch() {
+    local repo="$1" list="$2" tag="refs/tags/v$GOG_VERSION" commit
+    if ! with_timeout "$NET_TIMEOUT" git init --quiet --template= "$repo" >/dev/null 2>&1 \
+        || ! _gog_skills_git_quiet "$repo" remote add origin "$GOG_SKILLS_REPO"; then
+        _gog_skills_fail "could not prepare a temporary git repository"
+        return 1
+    fi
+    if ! retry 2 3 "Fetch gog skills" _gog_skills_git_quiet "$repo" \
+        fetch --quiet --depth=1 --filter=blob:none --no-tags origin "+$tag:$tag"; then
+        _gog_skills_fail "could not fetch tag v$GOG_VERSION from $GOG_SKILLS_REPO"
+        return 1
+    fi
+    commit="$(_gog_skills_git "$repo" rev-parse --verify "$tag^{commit}" 2>/dev/null)" || commit=""
+    if [[ "$commit" != "$GOG_SKILLS_COMMIT" ]]; then
+        _gog_skills_fail "tag v$GOG_VERSION resolves to ${commit:-nothing}, expected $GOG_SKILLS_COMMIT"
+        return 1
+    fi
+    _gog_skills_validate_tree "$repo" "$commit" "$list" || return 1
+    _gog_skills_git_quiet "$repo" sparse-checkout set --cone ".agents/skills" || true
+    if ! _gog_skills_git_quiet "$repo" checkout --quiet --detach "$commit"; then
+        _gog_skills_fail "could not check out v$GOG_VERSION"
+        return 1
+    fi
+}
+
+# Copy the gog skills from checkout $1 into new directory $2. Each skill keeps
+# all its files and gets the upstream LICENSE when it has none.
+_gog_skills_stage() {
+    local checkout="$1" stage="$2" dir name found=false
+    mkdir -p "$stage" || { _gog_skills_fail "could not create a staging directory"; return 1; }
+    for dir in "$checkout/.agents/skills/gog" "$checkout/.agents/skills"/gog-*; do
+        [[ -d "$dir" ]] || continue
+        name="${dir##*/}"
+        _gog_skill_name_ok "$name" || continue
+        if [[ ! -f "$dir/SKILL.md" ]]; then
+            _gog_skills_fail "$name has no SKILL.md at v$GOG_VERSION"
+            return 1
+        fi
+        cp -R "$dir" "$stage/$name" || { _gog_skills_fail "could not stage $name"; return 1; }
+        if [[ ! -e "$stage/$name/LICENSE" && -f "$checkout/LICENSE" ]]; then
+            cp "$checkout/LICENSE" "$stage/$name/LICENSE" || { _gog_skills_fail "could not stage $name"; return 1; }
+        fi
+        found=true
+    done
+    if ! $found || [[ ! -d "$stage/gog" ]]; then
+        _gog_skills_fail "no gog skill found at v$GOG_VERSION"
+        return 1
+    fi
+    if [[ -n "$(find "$stage" -type l 2>/dev/null | head -n 1)" ]]; then
+        _gog_skills_fail "upstream skills contain symbolic links; refusing to install"
+        return 1
+    fi
+}
+
+# Move staged directory $1 to $2. A copy being replaced is restored on failure.
+_gog_skill_place() {
+    local src="$1" target="$2" hold
+    mkdir -p "$CLAUDE_DIR/skills" "$CLAUDE_DIR/agent-config" || return 1
+    hold="$(mktemp -d "$CLAUDE_DIR/agent-config/.gog-skill.XXXXXX")" || return 1
+    if ! cp -R "$src" "$hold/new"; then
+        rm -rf -- "$hold"
+        return 1
+    fi
+    if [[ -e "$target" ]] && ! mv -- "$target" "$hold/old"; then
+        rm -rf -- "$hold"
+        return 1
+    fi
+    if ! mv -- "$hold/new" "$target"; then
+        if [[ -e "$hold/old" ]]; then mv -- "$hold/old" "$target" || true; fi
+        rm -rf -- "$hold"
+        return 1
+    fi
+    rm -rf -- "$hold"
+}
+
+# Install staged skill $2 as skills/$1 when the destination allows it. Returns 1
+# when an existing copy was left in place.
+_gog_skill_publish() {
+    local name="$1" staged="$2" rel="skills/$1" target="$CLAUDE_DIR/skills/$1" want cur rec
+    if is_agent_managed_elsewhere "$rel"; then
+        info "gog skill '$name' is managed by edit-config (agent-config/files.json); left in place"
+        return 1
+    fi
+    if [[ -L "$target" || ( -e "$target" && ! -d "$target" ) ]]; then
+        warn "gog skill '$name': $target is not a plain directory; left in place"
+        return 1
+    fi
+    want="$(tree_digest "$staged" 2>/dev/null)" || want=""
+    if [[ -z "$want" ]]; then
+        warn "gog skill '$name': could not compute a digest (needs shasum or sha256sum); not installed"
+        return 1
+    fi
+    if [[ -d "$target" ]]; then
+        cur="$(tree_digest "$target" 2>/dev/null)" || cur=""
+        rec="$(owned_recorded_digest "$rel")"
+        if [[ -z "$rec" ]]; then
+            if [[ "$cur" == "$want" ]]; then
+                info "gog skill '$name': identical copy already present (not taken over)"
+                return 0
+            fi
+            warn "gog skill '$name': $target was not installed by this installer; left in place"
+            return 1
+        fi
+        if [[ "$cur" == "$want" ]]; then
+            if [[ "$rec" != "$want" ]]; then _owned_manifest_put "$rel" "$want"; fi
+            return 0
+        fi
+        if [[ "$cur" != "$rec" ]]; then
+            warn "gog skill '$name': $target differs from the copy this installer wrote; left in place"
+            return 1
+        fi
+    fi
+    if ! _gog_skill_place "$staged" "$target"; then
+        warn "gog skill '$name': could not write $target"
+        return 1
+    fi
+    _owned_manifest_put "$rel" "$want"
+}
+
+_gog_skills_install_in() {
+    local work="$1" dir name total=0 done_count=0 tag="v$GOG_VERSION"
+    local -a left=()
+    _gog_skills_fetch "$work/src" "$work/tree" || return 1
+    _gog_skills_stage "$work/src" "$work/stage" || return 1
+    for dir in "$work/stage"/*; do
+        name="${dir##*/}"
+        total=$((total + 1))
+        if _gog_skill_publish "$name" "$dir"; then
+            done_count=$((done_count + 1))
+        else
+            left+=("$name")
+        fi
+    done
+    if [[ ${#left[@]} -gt 0 ]]; then
+        GOG_SKILLS_RESULT="partial"
+        GOG_SKILLS_NOTE="$done_count of $total from $tag; left in place: ${left[*]}"
+        forget_owned_path "$GOG_SKILLS_COMMIT_KEY"
+        warn "gog skills: $GOG_SKILLS_NOTE. Move them aside and re-run to install the pinned copies."
+        (( INSTALL_WARNINGS++ )) || true
+        return 0
+    fi
+    _owned_manifest_put "$GOG_SKILLS_COMMIT_KEY" "$GOG_SKILLS_COMMIT"
+    GOG_SKILLS_RESULT="installed"
+    GOG_SKILLS_NOTE="$total from $tag"
+    ok "gog skills installed: $total from $tag (commit ${GOG_SKILLS_COMMIT:0:12}) in $CLAUDE_DIR/skills/"
+}
+
+# Install the skills when gog is ticked, whatever happened to the binary. The
+# caller ignores the return status: a failure is reported through
+# GOG_SKILLS_RESULT and the run continues.
+install_gog_skills() {
+    local work status=0 ver name count=0
+    GOG_SKILLS_RESULT=""
+    GOG_SKILLS_NOTE=""
+    if [[ -n "$GOG_BIN" ]]; then
+        ver="$(_gog_version "$GOG_BIN")"
+        case "$ver" in
+            "v$GOG_VERSION"|"v$GOG_VERSION "*) ;;
+            *) info "gog skills come from the pinned v$GOG_VERSION; the installed binary reports: ${ver:-unknown}" ;;
+        esac
+    fi
+    if _gog_skills_current; then
+        while IFS= read -r name; do count=$((count + 1)); done < <(_gog_owned_skill_names)
+        GOG_SKILLS_RESULT="current"
+        GOG_SKILLS_NOTE="$count from v$GOG_VERSION"
+        ok "gog skills already at v$GOG_VERSION (unmodified); nothing to fetch"
+        return 0
+    fi
+    if $DRY_RUN; then
+        GOG_SKILLS_RESULT="dry-run"
+        GOG_SKILLS_NOTE="would fetch v$GOG_VERSION"
+        info "Would fetch the gog and gog-* skills from $GOG_SKILLS_REPO at v$GOG_VERSION (commit ${GOG_SKILLS_COMMIT:0:12}) into $CLAUDE_DIR/skills/; existing copies this installer does not own stay"
+        return 0
+    fi
+    if ! command -v git &>/dev/null; then
+        _gog_skills_fail "git not found"
+        return 1
+    fi
+    work="$(mktemp -d "${TMPDIR:-/tmp}/accc-gog-skills.XXXXXX")" || { _gog_skills_fail "cannot create a temporary directory"; return 1; }
+    _gog_skills_install_in "$work" || status=$?
+    rm -rf -- "$work"
+    return $status
+}
+
+# Remove the recorded gog skills that still match their digest. Runs only on a
+# full-selection deselect or --uninstall. Anything else stays, with a warning.
+remove_gog_skills() {
+    local name target removed=0
+    local -a names=()
+    while IFS= read -r name; do names+=("$name"); done < <(_gog_owned_skill_names)
+    for name in ${names[@]+"${names[@]}"}; do
+        target="$CLAUDE_DIR/skills/$name"
+        if is_agent_managed_elsewhere "skills/$name"; then
+            info "gog skill '$name' is managed by edit-config (agent-config/files.json); left in place"
+        elif [[ ! -e "$target" && ! -L "$target" ]]; then
+            forget_owned_path "skills/$name"
+        elif ! _gog_skill_is_intact "$name"; then
+            warn "gog skill '$name': $target differs from the copy this installer wrote; left in place"
+        elif $DRY_RUN; then
+            info "Would remove gog skill: $name"
+        elif rm -rf -- "$target"; then
+            forget_owned_path "skills/$name"
+            removed=$((removed + 1))
+        else
+            warn "Could not remove $target"
+            (( INSTALL_WARNINGS++ )) || true
+        fi
+    done
+    if [[ -n "$(owned_recorded_digest "$GOG_SKILLS_COMMIT_KEY")" ]]; then
+        forget_owned_path "$GOG_SKILLS_COMMIT_KEY"
+    fi
+    if (( removed > 0 )); then ok "Removed $removed gog skills (installer-owned, unmodified)"; fi
+    return 0
+}
+
+# script_installer.gog_skills for the selection record: what the ownership
+# manifest holds now, plus this run's outcome when gog was ticked. Prints null
+# when there is nothing to report.
+_gog_skills_selection_json() {
+    local name
+    local -a paths=()
+    while IFS= read -r name; do paths+=("skills/$name"); done < <(_gog_owned_skill_names)
+    if [[ ${#paths[@]} -eq 0 && -z "$GOG_SKILLS_RESULT" ]]; then
+        echo null
+        return 0
+    fi
+    printf '%s\n' ${paths[@]+"${paths[@]}"} | jq -R 'select(length > 0)' | jq -cs \
+        --arg tag "v$GOG_VERSION" --arg commit "$(owned_recorded_digest "$GOG_SKILLS_COMMIT_KEY")" --arg result "$GOG_SKILLS_RESULT" \
+        '{pinned_tag: $tag, paths: .}
+         + (if $commit != "" then {installed_commit: $commit} else {} end)
+         + (if $result != "" then {last_result: $result} else {} end)'
+}
+
 gog_summary_line() {
     $INSTALL_GOG || return 0
-    case "$GOG_RESULT" in
-        installed) ok "gog: installed ($GOG_BIN)" ;;
-        present)   ok "gog: already installed, left as is ($GOG_BIN)" ;;
-        failed)    error "gog: FAILED - $GOG_FAIL_REASON" ;;
+    local skills="" line="" problem=false
+    case "$GOG_SKILLS_RESULT" in
+        installed|current|dry-run) skills="skills: $GOG_SKILLS_NOTE" ;;
+        partial) skills="skills: PARTIAL - $GOG_SKILLS_NOTE"; problem=true ;;
+        failed)  skills="skills: FAILED - $GOG_SKILLS_NOTE"; problem=true ;;
     esac
+    case "$GOG_RESULT" in
+        installed) line="gog: installed ($GOG_BIN)" ;;
+        present)   line="gog: already installed, left as is ($GOG_BIN)" ;;
+        dry-run)   line="gog: would be installed" ;;
+        failed)
+            error "gog: FAILED - $GOG_FAIL_REASON${skills:+; $skills}"
+            return 0 ;;
+        *) line="gog" ;;
+    esac
+    if $problem; then
+        warn "$line; $skills"
+    else
+        ok "$line${skills:+; $skills}"
+    fi
 }
 
 # Printed last in the run, only when gog was ticked in it.
@@ -7850,6 +8219,12 @@ print_gog_guidance() {
             echo "     This grants reading and sending. 'gog gmail send' returned a 403 error with"
             echo "     --gmail-scope send alone. Archiving, labels, trash and settings need"
             echo "     --gmail-scope full. Without a browser, add --manual."
+            case "$GOG_SKILLS_RESULT" in
+                installed|current|partial)
+                    echo "  The gog skills in $CLAUDE_DIR/skills suggest '--services all-user' when re-authorizing."
+                    echo "  Keep the narrower command above unless you want that access."
+                    ;;
+            esac
             echo "  On macOS, run these in a local terminal: the keychain is often locked over SSH."
             echo "  Keep 'gog gmail send' out of Claude Code allow rules so each send asks for confirmation."
             echo ""
@@ -8753,7 +9128,10 @@ main() {
     ensure_plugin_dependencies
     $INSTALL_SHELL_WRAPPER && install_shell_wrapper
     $INSTALL_DEEPXIV && install_deepxiv
-    if $INSTALL_GOG; then install_gog || true; fi
+    if $INSTALL_GOG; then
+        install_gog || true
+        install_gog_skills || true
+    fi
     # Interactive runs only: remove what is installed but was left unchecked.
     reconcile_deselected
     write_selection_record || warn "Could not update agent-config/selection.json"
